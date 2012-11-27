@@ -27,20 +27,82 @@ class RosDistro:
             return self.distro_file.packages[name].get_rosinstall(version)
 
 
-    def get_depends_one(self, name):
+    def get_depends_on1(self, name):
+        tree = self._build_full_dependency_tree()
+        res = {'build': [], 'test': [], 'run': []}
+        for key in res:
+            for pkg, depends in tree[key].iteritems():
+                if name in depends and not pkg in res[key]:
+                    res[key].append(pkg)
+        return res
+
+
+
+    def get_depends_on(self, name):
+        res = {'build': [], 'test': [], 'run': []}
+        for dep_type, dep_list in res.iteritems():
+            self._get_depends_on_recursive(name, dep_type, dep_list)
+        return res
+
+
+    def _get_depends_on_recursive(self, name, dep_type, res):
+        # get dependencies_on of name
+        deps_on = self.get_depends_on1(name)
+
+        # merge and recurse
+        for d in deps_on[dep_type]:
+            if not d in res:
+                res.append(d)
+                self._get_depends_recursive(d, dep_type, res)
+
+
+    def _build_full_dependency_tree(self):
+        tree = {'build': {}, 'test': {}, 'run': {}}
+        for p in self.get_packages():
+            try:
+                deps1 = self.get_depends1(p)
+                for key, deps_list in deps1.iteritems():
+                    tree[key][p] = deps_list
+            except:
+                print "Could not find dependencies of package %s"%p
+        return tree
+
+
+
+    def get_depends1(self, name):
         pkgs = []
         if self.distro_file.repositories.has_key(name):
             pkgs = self.distro_file.repositories[name].packages
         elif self.distro_file.packages.has_key(name):
             pkgs = [self.distro_file.packages[name]]
 
-        deps = {'build': [], 'test': [], 'run': []}
+        res = {'build': [], 'test': [], 'run': []}
         for p in pkgs:
             d = self.depends_file.get_dependencies(p.repository, p.name)
-            for t in deps.keys():
+            for t in res:
                 for dep in d[t]:
-                    deps[t].append(dep)
-        return deps
+                    res[t].append(dep)
+        return res
+
+
+    def get_depends(self, name):
+        res = {'build': [], 'test': [], 'run': []}
+        for dep_type, dep_list in res.iteritems():
+            self._get_depends_recursive(name, dep_type, dep_list)
+        return res
+
+
+
+    def _get_depends_recursive(self, name, dep_type, res):
+        # get dependencies of name
+        deps1 = self.get_depends1(name)
+
+        # merge and recurse
+        for d in deps1[dep_type]:
+            if not d in res:
+                res.append(d)
+                self._get_depends_recursive(d, dep_type, res)
+
 
 
 class RosDistroFile:
@@ -134,7 +196,7 @@ class RosDependencies:
 
 
         # retrieve dependencies
-        deps = retrieve_dependencies(repo)
+        deps = retrieve_dependencies(repo, package)
         self.dependencies[key] = deps
         self._write_local_cache()
         return deps
@@ -142,19 +204,17 @@ class RosDependencies:
 
 
     def _read_server_cache(self):
+        return {}
         try:
-            print "Reading dependency cache on server..."
             self.cache = 'server'
             return yaml.load(urllib2.urlopen(self.server_url).read())
         except:
-            print "   No dependency cache found on server."
             return {}
 
 
 
     def _read_local_cache(self):
         try:
-            print "Reading local dependency cache..."
             self.cache = 'local'
             with open(self.local_url)  as f:
                 deps = yaml.safe_load(f.read())
@@ -162,18 +222,15 @@ class RosDependencies:
                     raise
                 return deps
         except:
-            print "   No local dependency cache found."
             return {}
 
 
     def _write_local_cache(self):
         try:
-            print "Writing local dependency cache..."
             with open(self.local_url, 'w')  as f:
                 yaml.dump(self.dependencies, f)
-                print "   Wrote local dependency cache"
         except:
-            print "   Failed to write local dependency cache"
+            print "Failed to write local dependency cache"
 
 
 
@@ -181,24 +238,18 @@ class RosDependencies:
 
 
 
-def retrieve_dependencies(repo):
-    print "Retrieve dependencies of package %s"%repo.name
+def retrieve_dependencies(repo, package):
     if 'github' in repo.url:
-        for p in repo.packages:
-            url = repo.url
-            url = url.replace('.git', '/release/%s/%s/package.xml'%(p.name, repo.version.split('-')[0]))
-            url = url.replace('git://', 'https://')
-            url = url.replace('https://', 'https://raw.')
-            print url
-            package_xml = urllib2.urlopen(url).read()
-            return get_package_dependencies(package_xml)
+        url = repo.url
+        url = url.replace('.git', '/release/%s/%s/package.xml'%(package, repo.version.split('-')[0]))
+        url = url.replace('git://', 'https://')
+        url = url.replace('https://', 'https://raw.')
+        package_xml = urllib2.urlopen(url).read()
+        return get_package_dependencies(package_xml)
 
 
 
 def get_package_dependencies(package_xml):
-    print "Parse package.xml"
-
-
     pkg = catkin_pkg.parse_package_string(package_xml)
     depends1 = {'build': [d.name for d in pkg.build_depends],
                 'test':  [d.name for d in pkg.test_depends],
@@ -212,12 +263,18 @@ def get_package_dependencies(package_xml):
 # command line tools
 def main():
     distro  = RosDistro('groovy')
+    print "Depends1 tf"
+    print distro.get_depends1('tf')
+    print "Depends tf"
+    print distro.get_depends('tf')
+    print "Depends on 1 tf"
+    print distro.get_depends_on1('tf')
+    print "Depends on tf"
+    print distro.get_depends_on('tf')
 
     for p in distro.get_packages():
-        try:
-            distro.get_depends_one(p)
-        except:
-            print "Fail on %s"%p
+        print "Dependencies of %s:"%p
+        print distro.get_depends_on(p)
 
 
 
