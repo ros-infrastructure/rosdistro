@@ -15,44 +15,100 @@ class RosDistro:
     def get_repositories(self):
         return self.distro_file.repositories
 
+    def get_repository(self, repo):
+        return self.get_repositories()[repo]
+
     def get_packages(self):
         return self.distro_file.packages
 
+    def get_package(self, pkg):
+        return self.get_packages()[pkg]
 
-    def get_rosinstall(self, name, version=None):
-        if self.distro_file.repositories.has_key(name):
-            return self.distro_file.repositories[name].get_rosinstall(version)
-        elif self.distro_file.packages.has_key(name):
-            return self.distro_file.packages[name].get_rosinstall(version)
+    def get_rosinstall(self, items, version=None, source='vcs'):
+        rosinstall = ""
+        for p in self._convert_to_pkg_list(items):
+            rosinstall += p.get_rosinstall(version, source)
+        return rosinstall
 
 
-    def get_depends_on1(self, name):
+    def get_depends_on1(self, items):
         tree = self._build_full_dependency_tree()
         res = {'build': [], 'test': [], 'run': []}
         for key in res:
             for pkg, depends in tree[key].iteritems():
-                if name in depends and not pkg in res[key]:
-                    res[key].append(pkg)
+                for p in self._convert_to_pkg_list(items):
+                    if p.name in depends and not pkg in res[key]:
+                        res[key].append(pkg)
         return res
 
 
 
-    def get_depends_on(self, name):
+    def get_depends_on(self, items):
         res = {'build': [], 'test': [], 'run': []}
         for dep_type, dep_list in res.iteritems():
-            self._get_depends_on_recursive(name, dep_type, dep_list)
+            for p in self._convert_to_pkg_list(items):
+                self._get_depends_on_recursive(p.name, dep_type, dep_list)
         return res
 
 
-    def _get_depends_on_recursive(self, name, dep_type, res):
-        # get dependencies_on of name
-        deps_on = self.get_depends_on1(name)
+    def get_depends1(self, items):
+        res = {'build': [], 'test': [], 'run': []}
+        for p in self._convert_to_pkg_list(items):
+            d = self.depends_file.get_dependencies(p.repository, p.name)
+            for t in res:
+                for dep in d[t]:
+                    res[t].append(dep)
+        return res
+
+
+    def get_depends(self, items):
+        res = {'build': [], 'test': [], 'run': []}
+        for dep_type, dep_list in res.iteritems():
+            for p in self._convert_to_pkg_list(items):
+                self._get_depends_recursive(p.name, dep_type, dep_list)
+        return res
+
+
+
+    def _get_depends_recursive(self, pkg, dep_type, res):
+        # get dependencies of pkg
+        deps1 = self.get_depends1(pkg)
+
+        # merge and recurse
+        for d in deps1[dep_type]:
+            if not d in res:
+                res.append(d)
+                self._get_depends_recursive(d, dep_type, res)
+
+
+
+    def _get_depends_on_recursive(self, pkg, dep_type, res):
+        # get dependencies_on of pgk
+        deps_on = self.get_depends_on1(pkg)
 
         # merge and recurse
         for d in deps_on[dep_type]:
             if not d in res:
                 res.append(d)
                 self._get_depends_recursive(d, dep_type, res)
+
+
+
+
+    def _convert_to_pkg_list(self, items):
+        if type(items) != list:
+            items = [items]
+        pkgs = []
+        for i in items:
+            if self.distro_file.repositories.has_key(i):
+                for p in self.distro_file.repositories[i].packages:
+                    if not p in pkgs:
+                        pkgs.append(p)
+            elif self.distro_file.packages.has_key(i):
+                if not self.distro_file.packages[i] in pkgs:
+                    pkgs.append(self.distro_file.packages[i])
+        return pkgs
+
 
 
     def _build_full_dependency_tree(self):
@@ -66,41 +122,6 @@ class RosDistro:
                 print "Could not find dependencies of package %s"%p
         return tree
 
-
-
-    def get_depends1(self, name):
-        pkgs = []
-        if self.distro_file.repositories.has_key(name):
-            pkgs = self.distro_file.repositories[name].packages
-        elif self.distro_file.packages.has_key(name):
-            pkgs = [self.distro_file.packages[name]]
-
-        res = {'build': [], 'test': [], 'run': []}
-        for p in pkgs:
-            d = self.depends_file.get_dependencies(p.repository, p.name)
-            for t in res:
-                for dep in d[t]:
-                    res[t].append(dep)
-        return res
-
-
-    def get_depends(self, name):
-        res = {'build': [], 'test': [], 'run': []}
-        for dep_type, dep_list in res.iteritems():
-            self._get_depends_recursive(name, dep_type, dep_list)
-        return res
-
-
-
-    def _get_depends_recursive(self, name, dep_type, res):
-        # get dependencies of name
-        deps1 = self.get_depends1(name)
-
-        # merge and recurse
-        for d in deps1[dep_type]:
-            if not d in res:
-                res.append(d)
-                self._get_depends_recursive(d, dep_type, res)
 
 
 
@@ -136,8 +157,8 @@ class RosRepository:
         self.url = url
         self.packages = []
 
-    def get_rosinstall(self, version=None):
-        return "\n".join([p.get_rosinstall(version) for p in self.packages])
+    def get_rosinstall(self, version, source):
+        return "\n".join([p.get_rosinstall(version, source) for p in self.packages])
 
 
 
@@ -146,9 +167,10 @@ class RosPackage:
         self.name = name
         self.repository = repository
 
-    def get_rosinstall(self, version=None):
+    def get_rosinstall(self, version, source):
+        # set default version
         if not version:
-            version = self.repository.version
+            version = self.repository.version.split('-')[0]
 
         if version == 'master':
             return yaml.dump([{'git': {'local-name': self.name,
@@ -157,10 +179,19 @@ class RosPackage:
                              default_style=False)
 
         else:
-            return yaml.safe_dump([{'git': {'local-name': self.name,
-                                            'uri': self.repository.url,
-                                            'version': '/'.join(['release', self.name, self.repository.version])}}],
-                                  default_style=False)
+            if source == 'vcs':
+                return yaml.safe_dump([{'git': {'local-name': self.name,
+                                                'uri': self.repository.url,
+                                                'version': '/'.join(['release', self.name, version])}}],
+                                      default_style=False)
+            elif source == 'tar':
+                return yaml.safe_dump([{'tar': {'local-name': self.name,
+                                                'uri': self.repository.url.replace('git://', 'https://').replace('.git', '/archive/release/%s/%s.tar.gz'%(self.name, version)),
+                                                'version': '%s-release-%s'%(self.name, version)}}],
+                                      default_style=False)
+            else:
+                print "Invalid source type %s"%source
+                raise
 
 
 
@@ -266,18 +297,20 @@ def get_package_dependencies(package_xml):
 def main():
     distro  = RosDistro('groovy')
     print "Depends1 tf"
-    print distro.get_depends1('tf')
+    print distro.get_depends1(['tf', 'geometry'])
     print "Depends tf"
-    print distro.get_depends('tf')
+    print distro.get_depends(['tf', 'geometry'])
     print "Depends on 1 tf"
-    print distro.get_depends_on1('tf')
+    print distro.get_depends_on1(['tf', 'geometry'])
     print "Depends on tf"
-    print distro.get_depends_on('tf')
+    print distro.get_depends_on(['tf', 'geometry'])
 
     for p in distro.get_packages():
         print "Dependencies of %s:"%p
         print distro.get_depends_on(p)
 
+    print distro.get_rosinstall('catkin', source='tar')
+    print distro.get_rosinstall(['tf', 'geometry'])
 
 if __name__ == "__main__":
     main()
