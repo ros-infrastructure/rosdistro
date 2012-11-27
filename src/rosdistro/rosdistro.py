@@ -4,8 +4,7 @@ import yaml
 import urllib2
 import os
 import sys
-from catkin_pkg import package as catkin_pkg
-
+from rospkg import environment
 
 class RosDistro:
     def __init__(self, name):
@@ -168,7 +167,7 @@ class RosPackage:
 class RosDependencies:
     def __init__(self, name):
         # url's
-        self.local_url = '/home/wim/.ros/%s-dependencies.yaml'%name
+        self.local_url = os.path.join(environment.get_ros_home(), '%s-dependencies.yaml'%name)
         self.server_url = 'https://raw.github.com/ros/rosdistro/master/releases/%s-dependencies.yaml'%name
         self.dependencies = {}
 
@@ -204,7 +203,6 @@ class RosDependencies:
 
 
     def _read_server_cache(self):
-        return {}
         try:
             self.cache = 'server'
             return yaml.load(urllib2.urlopen(self.server_url).read())
@@ -250,6 +248,10 @@ def retrieve_dependencies(repo, package):
 
 
 def get_package_dependencies(package_xml):
+    if not os.path.abspath("/usr/lib/pymodules/python2.7") in sys.path:
+        sys.path.append("/usr/lib/pymodules/python2.7")
+    from catkin_pkg import package as catkin_pkg
+
     pkg = catkin_pkg.parse_package_string(package_xml)
     depends1 = {'build': [d.name for d in pkg.build_depends],
                 'test':  [d.name for d in pkg.test_depends],
@@ -260,7 +262,7 @@ def get_package_dependencies(package_xml):
 
 
 
-# command line tools
+# tests
 def main():
     distro  = RosDistro('groovy')
     print "Depends1 tf"
@@ -275,10 +277,6 @@ def main():
     for p in distro.get_packages():
         print "Dependencies of %s:"%p
         print distro.get_depends_on(p)
-
-
-
-
 
 
 if __name__ == "__main__":
