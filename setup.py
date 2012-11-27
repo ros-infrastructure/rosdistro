@@ -7,7 +7,7 @@ setup(
     version='0.0.1',
     packages=['rosdistro'],
     package_dir = {'rosdistro':'src/rosdistro'},
-    scripts = ['scripts/xxxx'],
+    scripts = [],
     install_requires=['empy', 'PyYAML', 'argparse', 'rosdep', 'rospkg', 'catkin-pkg', 'distribute'],
     package_data = {'rosdistro': ['resources/templates/*']},
     author='Wim Meeussen',
