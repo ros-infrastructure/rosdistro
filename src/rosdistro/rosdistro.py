@@ -187,7 +187,7 @@ class RosPackage:
             elif source == 'tar':
                 return yaml.safe_dump([{'tar': {'local-name': self.name,
                                                 'uri': self.repository.url.replace('git://', 'https://').replace('.git', '/archive/release/%s/%s.tar.gz'%(self.name, version)),
-                                                'version': '%s-release-%s'%(self.name, version)}}],
+                                                'version': '%s-release-release-%s-%s'%(self.repository.name, self.name, version)}}],
                                       default_style=False)
             else:
                 print "Invalid source type %s"%source

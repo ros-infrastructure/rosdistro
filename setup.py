@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='rosdistro',
-    version='0.0.3',
+    version='0.0.4',
     packages=['rosdistro'],
     package_dir = {'rosdistro':'src/rosdistro'},
     scripts = [],
