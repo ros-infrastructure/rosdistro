@@ -24,7 +24,7 @@ class RosDistro:
     def get_package(self, pkg):
         return self.get_packages()[pkg]
 
-    def get_rosinstall(self, items, version=None, source='vcs'):
+    def get_rosinstall(self, items, version='last_release', source='vcs'):
         rosinstall = ""
         for p in self._convert_to_pkg_list(items):
             rosinstall += p.get_rosinstall(version, source)
@@ -136,17 +136,16 @@ class RosDistroFile:
 
         # loop over all repo's
         for repo_name, data in distro.iteritems():
-            if data['version']:
-                repo = RosRepository(repo_name, data['version'], data['url'])
-                self.repositories[repo_name] = repo
-                if not data.has_key('packages'):   # support unary disto's
-                    data['packages'] = {repo_name: ''}
+            repo = RosRepository(repo_name, data['version'], data['url'])
+            self.repositories[repo_name] = repo
+            if not data.has_key('packages'):   # support unary disto's
+                data['packages'] = {repo_name: ''}
 
-                # loop over all packages
-                for pkg_name in data['packages'].keys():
-                    pkg = RosPackage(pkg_name, repo)
-                    repo.packages.append(pkg)
-                    self.packages[pkg_name] = pkg
+            # loop over all packages
+            for pkg_name in data['packages'].keys():
+                pkg = RosPackage(pkg_name, repo)
+                repo.packages.append(pkg)
+                self.packages[pkg_name] = pkg
 
 
 
@@ -168,10 +167,16 @@ class RosPackage:
         self.repository = repository
 
     def get_rosinstall(self, version, source):
-        # set default version
-        if not version:
+        # can't get last release of unreleased repository
+        if version == 'last_release' and not self.repository.version:
+            print "Can't get the last release of unreleased repository %s"%self.repository.name
+            raise
+
+        # set specific version of last release of needed
+        if version == 'last_release':
             version = self.repository.version.split('-')[0]
 
+        # generate the rosinstall file
         if version == 'master':
             return yaml.dump([{'git': {'local-name': self.name,
                                        'uri': self.repository.url,
@@ -209,6 +214,10 @@ class RosDependencies:
 
 
     def get_dependencies(self, repo, package):
+        # support unreleased stacks
+        if not repo.version:
+            return {'build': [], 'test': [], 'run': []}
+
         key = '%s?%s?%s'%(repo.name, repo.version, package)
 
         # check in memory first
@@ -311,6 +320,17 @@ def main():
 
     print distro.get_rosinstall('catkin', source='tar')
     print distro.get_rosinstall(['tf', 'geometry'])
+
+    for name, d in distro.get_repositories().iteritems():
+        if not d.version:
+            print "Unreleased %s"%name
+            print "Depends_on"
+            print distro.get_depends_on(name)
+            print "Depends"
+            print distro.get_depends(name)
+            print "Rosinstall"
+            print distro.get_rosinstall(name, 'master')
+            print distro.get_rosinstall(name)
 
 if __name__ == "__main__":
     main()
