@@ -4,11 +4,11 @@ from setuptools import setup, find_packages
 
 setup(
     name='rosdistro',
-    version='0.0.6',
+    version='0.0.7',
     packages=['rosdistro'],
     package_dir = {'rosdistro':'src/rosdistro'},
     scripts = [],
-    install_requires=['empy', 'PyYAML', 'argparse', 'rosdep', 'rospkg', 'catkin-pkg', 'distribute'],
+    install_requires=['empy', 'PyYAML', 'argparse', 'rospkg', 'distribute'],
     package_data = {'rosdistro': ['resources/templates/*']},
     author='Wim Meeussen',
     author_email='wim@hidof.com',

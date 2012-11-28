@@ -304,33 +304,15 @@ def get_package_dependencies(package_xml):
 
 # tests
 def main():
-    distro  = RosDistro('groovy')
-    print "Depends1 tf"
-    print distro.get_depends1(['tf', 'geometry'])
-    print "Depends tf"
-    print distro.get_depends(['tf', 'geometry'])
-    print "Depends on 1 tf"
-    print distro.get_depends_on1(['tf', 'geometry'])
-    print "Depends on tf"
-    print distro.get_depends_on(['tf', 'geometry'])
+    if len(sys.argv) != 2:
+        print "Usage: %s ros_distro"%sys.argv[0]
+        return
 
-    for p in distro.get_packages():
-        print "Dependencies of %s:"%p
-        print distro.get_depends_on(p)
+    # touch everything to create the new cache
+    distro  = RosDistro(sys.argv[1])
+    distro._build_full_dependency_tree()
 
-    print distro.get_rosinstall('catkin', source='tar')
-    print distro.get_rosinstall(['tf', 'geometry'])
-
-    for name, d in distro.get_repositories().iteritems():
-        if not d.version:
-            print "Unreleased %s"%name
-            print "Depends_on"
-            print distro.get_depends_on(name)
-            print "Depends"
-            print distro.get_depends(name)
-            print "Rosinstall"
-            print distro.get_rosinstall(name, 'master')
-            print distro.get_rosinstall(name)
+    print "Cache written to %s"%(os.path.join(environment.get_ros_home(), '%s-dependencies.yaml'%sys.argv[1]))
 
 if __name__ == "__main__":
     main()
