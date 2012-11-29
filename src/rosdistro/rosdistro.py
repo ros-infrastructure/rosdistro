@@ -207,7 +207,7 @@ class RosDependencies:
             self.local_url = os.path.join(cache_location, '%s-dependencies.yaml'%name)
         else:
             self.local_url = os.path.join(environment.get_ros_home(), '%s-dependencies.yaml'%name)
-        self.server_url = 'https://raw.github.com/ros/rosdistro/master/releases/%s-dependencies.yaml'%name
+        self.server_url = 'http://www.ros.org/rosdistro/%s-dependencies.yaml'%name
         self.dependencies = {}
 
         # initialize with the local cache
