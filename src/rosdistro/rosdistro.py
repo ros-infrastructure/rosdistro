@@ -4,7 +4,6 @@ import yaml
 import urllib2
 import os
 import sys
-import optparse
 from rospkg import environment
 
 class RosDistro:
@@ -304,23 +303,3 @@ def get_package_dependencies(package_xml):
 
 
 
-
-
-# tests
-def main():
-    parser = optparse.OptionParser()
-    parser.add_option("--cache", action="store", default=None)
-    (options, args) = parser.parse_args()
-
-    if len(args) != 1:
-        print "Usage: %s ros_distro"%sys.argv[0]
-        return
-
-    # touch everything to create the new cache
-    distro  = RosDistro(sys.argv[1], options.cache)
-    distro._build_full_dependency_tree()
-
-    print "Cache written to %s"%(os.path.join(environment.get_ros_home(), '%s-dependencies.yaml'%sys.argv[1]))
-
-if __name__ == "__main__":
-    main()

@@ -4,10 +4,10 @@ from setuptools import setup, find_packages
 
 setup(
     name='rosdistro',
-    version='0.0.8',
+    version='0.0.9',
     packages=['rosdistro'],
     package_dir = {'rosdistro':'src/rosdistro'},
-    scripts = [],
+    scripts = ['scripts/rosdistro_generate_cache'],
     install_requires=['empy', 'PyYAML', 'argparse', 'rospkg', 'distribute'],
     package_data = {'rosdistro': ['resources/templates/*']},
     author='Wim Meeussen',
