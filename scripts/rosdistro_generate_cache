@@ -15,7 +15,9 @@ def main():
 
     # touch everything to create the new cache
     distro  = rosdistro.RosDistro(sys.argv[1], options.cache)
-    distro._build_full_dependency_tree()
+    for r in distro.get_repositories():
+        print "Caching %s"%r
+        distro.get_depends1(r)
 
     print "Cache written to %s"%(distro.depends_file.local_url)
 
