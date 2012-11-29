@@ -37,7 +37,7 @@ def depends_on1(items):
 
 
 def help(cmd=None):
-    print "Usage: %s ros_version [command]"%sys.argv[0]
+    print "Usage: %s [command]"%sys.argv[0]
     print "   With [command] one of the following"
     if cmd and type(cmd) == list:
         cmd = cmd[0]
