@@ -1,0 +1,101 @@
+#!/usr/bin/env python
+
+import rosdistro
+import optparse
+import sys
+
+
+
+
+def depends(items):
+    distro = rosdistro.RosDistro(items[0])
+    deps = distro.get_depends(items[1:])
+    for t, dep in deps.iteritems():
+        print '%s depends:'%t
+        print ', '.join(dep)
+
+def depends1(items):
+    distro = rosdistro.RosDistro(items[0])
+    deps = distro.get_depends1(items[1:])
+    for t, dep in deps.iteritems():
+        print '%s depends1:'%t
+        print ', '.join(dep)
+
+def depends_on(items):
+    distro = rosdistro.RosDistro(items[0])
+    deps = distro.get_depends_on(items[1:])
+    for t, dep in deps.iteritems():
+        print '%s depends_on:'%t
+        print ', '.join(dep)
+
+def depends_on1(items):
+    distro = rosdistro.RosDistro(items[0])
+    deps = distro.get_depends_on1(items[1:])
+    for t, dep in deps.iteritems():
+        print '%s depends_on1:'%t
+        print ', '.join(dep)
+
+
+def help(cmd=None):
+    print "Usage: %s ros_version [command]"%sys.argv[0]
+    print "   With [command] one of the following"
+    if cmd and type(cmd) == list:
+        cmd = cmd[0]
+    if cmd and not cmds.has_key(cmd):
+        print "Unknown command %s"%cmd
+        cmd = None
+    if cmd and cmd == 'help':
+        cmd = None
+    for c, ops in cmds.iteritems():
+        res = "     '%s'"%c
+        res += (' ' * (30-len(res)))
+        res += "with arguments: '%s'"%(' '.join(ops['args']))
+        if not cmd or cmd == c:
+            print res
+
+
+cmds = {'help': {'args': ['command'], 'cmd': help},
+        'depends': {'args': ['ros_version', 'package_list'], 'cmd': depends},
+        'depends_on': {'args': ['ros_version', 'package_list'], 'cmd': depends_on},
+        'depends1': {'args': ['ros_version', 'package_list'], 'cmd': depends1},
+        'depends_on1': {'args': ['ros_version', 'package_list'], 'cmd': depends_on1}}
+
+
+
+def main():
+    parser = optparse.OptionParser()
+    parser.add_option("--cache", action="store", default=None)
+    (options, commands) = parser.parse_args()
+
+
+    # usage
+    if len(commands) == 0:
+        help()
+        return
+
+    # command specific usage
+    cmd = commands[0]
+    if cmd in cmds:
+        args = cmds[cmd]['args']
+        if  len(commands)-1 < len(args):
+            help(cmd)
+            return
+    else:
+        help(cmd)
+        return
+
+    # execute command
+    cmds[cmd]['cmd'](commands[1:])
+    return
+
+
+    distro  = rosdistro.RosDistro(args(0), options.cache)
+    for r in distro.get_repositories():
+        print "Caching %s"%r
+        distro.get_depends1(r)
+
+    print "Cache written to %s"%(distro.depends_file.local_url)
+
+if __name__ == "__main__":
+    main()
+
