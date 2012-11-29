@@ -4,12 +4,13 @@ import yaml
 import urllib2
 import os
 import sys
+import optparse
 from rospkg import environment
 
 class RosDistro:
-    def __init__(self, name):
+    def __init__(self, name, cache_location=None):
         self.distro_file = RosDistroFile(name)
-        self.depends_file = RosDependencies(name)
+        self.depends_file = RosDependencies(name, cache_location)
 
 
     def get_repositories(self):
@@ -201,9 +202,12 @@ class RosPackage:
 
 
 class RosDependencies:
-    def __init__(self, name):
+    def __init__(self, name, cache_location):
         # url's
-        self.local_url = os.path.join(environment.get_ros_home(), '%s-dependencies.yaml'%name)
+        if cache_location:
+            self.local_url = os.path.join(cache_location, '%s-dependencies.yaml'%name)
+        else:
+            self.local_url = os.path.join(environment.get_ros_home(), '%s-dependencies.yaml'%name)
         self.server_url = 'https://raw.github.com/ros/rosdistro/master/releases/%s-dependencies.yaml'%name
         self.dependencies = {}
 
@@ -304,12 +308,16 @@ def get_package_dependencies(package_xml):
 
 # tests
 def main():
-    if len(sys.argv) != 2:
+    parser = optparse.OptionParser()
+    parser.add_option("--cache", action="store", default=None)
+    (options, args) = parser.parse_args()
+
+    if len(args) != 1:
         print "Usage: %s ros_distro"%sys.argv[0]
         return
 
     # touch everything to create the new cache
-    distro  = RosDistro(sys.argv[1])
+    distro  = RosDistro(sys.argv[1], options.cache)
     distro._build_full_dependency_tree()
 
     print "Cache written to %s"%(os.path.join(environment.get_ros_home(), '%s-dependencies.yaml'%sys.argv[1]))
