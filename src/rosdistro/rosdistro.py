@@ -5,6 +5,11 @@ import urllib2
 import os
 import sys
 from rospkg import environment
+import copy
+
+RES_DICT = {'build': [], 'buildtool': [], 'test': [], 'run': []}
+RES_TREE = {'build': {}, 'buildtool': {}, 'test': {}, 'run': {}}
+CACHE_VERSION = 1
 
 class RosDistro:
     def __init__(self, name, cache_location=None):
@@ -33,7 +38,7 @@ class RosDistro:
 
     def get_depends_on1(self, items):
         tree = self._build_full_dependency_tree()
-        res = {'build': [], 'test': [], 'run': []}
+        res = copy.deepcopy(RES_DICT)
         for key in res:
             for pkg, depends in tree[key].iteritems():
                 for p in self._convert_to_pkg_list(items):
@@ -44,7 +49,7 @@ class RosDistro:
 
 
     def get_depends_on(self, items):
-        res = {'build': [], 'test': [], 'run': []}
+        res = copy.deepcopy(RES_DICT)
         for dep_type, dep_list in res.iteritems():
             for p in self._convert_to_pkg_list(items):
                 self._get_depends_on_recursive(p.name, dep_type, dep_list)
@@ -52,7 +57,7 @@ class RosDistro:
 
 
     def get_depends1(self, items):
-        res = {'build': [], 'test': [], 'run': []}
+        res = copy.deepcopy(RES_DICT)
         for p in self._convert_to_pkg_list(items):
             d = self.depends_file.get_dependencies(p.repository, p.name)
             for t in res:
@@ -62,7 +67,7 @@ class RosDistro:
 
 
     def get_depends(self, items):
-        res = {'build': [], 'test': [], 'run': []}
+        res = copy.deepcopy(RES_DICT)
         for dep_type, dep_list in res.iteritems():
             for p in self._convert_to_pkg_list(items):
                 self._get_depends_recursive(p.name, dep_type, dep_list)
@@ -112,7 +117,7 @@ class RosDistro:
 
 
     def _build_full_dependency_tree(self):
-        tree = {'build': {}, 'test': {}, 'run': {}}
+        tree = copy.deepcopy(RES_TREE)
         for p in self.get_packages():
             try:
                 deps1 = self.get_depends1(p)
@@ -219,7 +224,7 @@ class RosDependencies:
     def get_dependencies(self, repo, package):
         # support unreleased stacks
         if not repo.version:
-            return {'build': [], 'test': [], 'run': []}
+            return copy.deepcopy(RES_DICT)
 
         key = '%s?%s?%s'%(repo.name, repo.version, package)
 
@@ -248,7 +253,10 @@ class RosDependencies:
     def _read_server_cache(self):
         try:
             self.cache = 'server'
-            return yaml.load(urllib2.urlopen(self.server_url).read())
+            deps = yaml.load(urllib2.urlopen(self.server_url).read())
+            if not deps or not 'cache_version' in deps or deps['cache_version'] != CACHE_VERSION or not 'repositories' in deps:
+                raise
+            return deps['repositories']
         except:
             return {}
 
@@ -259,9 +267,9 @@ class RosDependencies:
             self.cache = 'local'
             with open(self.local_url)  as f:
                 deps = yaml.safe_load(f.read())
-                if not deps:
+                if not deps or not 'cache_version' in deps or deps['cache_version'] != CACHE_VERSION or not 'repositories' in deps:
                     raise
-                return deps
+                return deps['repositories']
         except:
             return {}
 
@@ -269,7 +277,9 @@ class RosDependencies:
     def _write_local_cache(self):
         try:
             with open(self.local_url, 'w')  as f:
-                yaml.dump(self.dependencies, f)
+                yaml.dump({'cache_version': CACHE_VERSION,
+                           'repositories': self.dependencies},
+                          f)
         except:
             print "Failed to write local dependency cache"
 
@@ -297,6 +307,7 @@ def get_package_dependencies(package_xml):
 
     pkg = catkin_pkg.parse_package_string(package_xml)
     depends1 = {'build': [d.name for d in pkg.build_depends],
+                'buildtool':  [d.name for d in pkg.buildtool_depends],
                 'test':  [d.name for d in pkg.test_depends],
                 'run':  [d.name for d in pkg.run_depends]}
     return depends1
