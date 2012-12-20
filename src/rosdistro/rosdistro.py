@@ -47,7 +47,6 @@ class RosDistro:
         return res
 
 
-
     def get_depends_on(self, items):
         res = copy.deepcopy(RES_DICT)
         for dep_type, dep_list in res.iteritems():
@@ -83,7 +82,8 @@ class RosDistro:
         for d in deps1[dep_type]:
             if not d in res:
                 res.append(d)
-                self._get_depends_recursive(d, dep_type, res)
+                if d in self.get_packages():  # recurse on packages only
+                    self._get_depends_recursive(d, dep_type, res)
 
 
 
@@ -95,7 +95,7 @@ class RosDistro:
         for d in deps_on[dep_type]:
             if not d in res:
                 res.append(d)
-                self._get_depends_recursive(d, dep_type, res)
+                self._get_depends_on_recursive(d, dep_type, res)
 
 
 
@@ -112,6 +112,9 @@ class RosDistro:
             elif self.distro_file.packages.has_key(i):
                 if not self.distro_file.packages[i] in pkgs:
                     pkgs.append(self.distro_file.packages[i])
+            else:
+                print "!!! %s is not a package name nor a repository name"%i
+                raise Exception()
         return pkgs
 
 

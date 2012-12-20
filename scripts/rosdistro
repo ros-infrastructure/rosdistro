@@ -85,7 +85,10 @@ def main():
         return
 
     # execute command
-    cmds[cmd]['cmd'](commands[1:])
+    try:
+        cmds[cmd]['cmd'](commands[1:])
+    except:
+        print "Failure"
     return
 
 
