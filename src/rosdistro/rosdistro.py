@@ -14,12 +14,13 @@ CACHE_VERSION = 1
 
 class RosDistro:
     def __init__(self, name, cache_location=None):
-         t1 = threading.Thread(target=self._construct_rosdistro_file, args=(name,))
-         t2 = threading.Thread(target=self._construct_rosdistro_dependencies, args=(name, cache_location,))
-         t1.start()
-         t2.start()
-         t1.join()
-         t2.join()
+        self.depends_on1_cache = copy.deepcopy(RES_TREE)
+        t1 = threading.Thread(target=self._construct_rosdistro_file, args=(name,))
+        t2 = threading.Thread(target=self._construct_rosdistro_dependencies, args=(name, cache_location,))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
     
     def _construct_rosdistro_file(self, name):
         self.distro_file = RosDistroFile(name)
@@ -46,69 +47,67 @@ class RosDistro:
         return rosinstall
 
 
-    def get_depends_on1(self, items):
+    def _get_depends_on1(self, package_name):
+        if self.distro_file.packages.has_key(package_name) and self.depends_on1_cache.has_key(package_name):
+            return self.depends_on1_cache[package_name]
         res = copy.deepcopy(RES_DICT)
-        item_list = self._convert_to_pkg_list(items)
         for pkg in self.get_packages():
-            for key, depends in self.get_depends1(pkg).iteritems():
-                for i in item_list:
-                    if i.name in depends:
-                        res[key].append(pkg)
+            for key, depends in self._get_depends1(pkg).iteritems():
+                if package_name in depends:
+                    res[key].append(pkg)
+        self.depends_on1_cache[package_name] = res
         return res
 
 
-    def get_depends_on(self, items):
+
+    def get_depends_on(self, items, depth=0):
         res = copy.deepcopy(RES_DICT)
         for dep_type, dep_list in res.iteritems():
             for p in self._convert_to_pkg_list(items):
-                self._get_depends_on_recursive(p.name, dep_type, dep_list)
+                self._get_depends_on_recursive(p.name, dep_type, dep_list, depth, 1)
         return res
 
 
-    def get_depends1(self, items):
-        if type(items) != list and self.distro_file.packages.has_key(items):
-            p = self.distro_file.packages[items]
-            return self.depends_file.get_dependencies(p.repository, p.name)
-        res = copy.deepcopy(RES_DICT)
-        for p in self._convert_to_pkg_list(items):
-            d = self.depends_file.get_dependencies(p.repository, p.name)
-            for t in res:
-                for dep in d[t]:
-                    res[t].append(dep)
-        return res
-
-
-    def get_depends(self, items):
-        res = copy.deepcopy(RES_DICT)
-        for dep_type, dep_list in res.iteritems():
-            for p in self._convert_to_pkg_list(items):
-                self._get_depends_recursive(p.name, dep_type, dep_list)
-        return res
-
-
-
-    def _get_depends_recursive(self, pkg, dep_type, res):
-        # get dependencies of pkg
-        deps1 = self.get_depends1(pkg)
-
-        # merge and recurse
-        for d in deps1[dep_type]:
-            if not d in res:
-                res.append(d)
-                if d in self.get_packages():  # recurse on packages only
-                    self._get_depends_recursive(d, dep_type, res)
-
-
-
-    def _get_depends_on_recursive(self, pkg, dep_type, res):
+    def _get_depends_on_recursive(self, package_name, dep_type, res, depth, curr_depth):
         # get dependencies_on of pgk
-        deps_on = self.get_depends_on1(pkg)
+        deps_on = self._get_depends_on1(package_name)
 
         # merge and recurse
         for d in deps_on[dep_type]:
             if not d in res:
                 res.append(d)
-                self._get_depends_on_recursive(d, dep_type, res)
+                if depth == 0 or curr_depth < depth:
+                    self._get_depends_on_recursive(d, dep_type, res, depth, curr_depth+1)
+
+
+
+
+    def _get_depends1(self, package_name):
+        p = self.distro_file.packages[package_name]
+        return self.depends_file.get_dependencies(p.repository, p.name)
+
+
+
+    def get_depends(self, items, depth=0):
+        res = copy.deepcopy(RES_DICT)
+        for dep_type, dep_list in res.iteritems():
+            for p in self._convert_to_pkg_list(items):
+                self._get_depends_recursive(p.name, dep_type, dep_list, depth, 1)
+        return res
+
+
+    def _get_depends_recursive(self, package_name, dep_type, res, depth, curr_depth):
+        # get dependencies of package_name
+        deps1 = self._get_depends1(package_name)
+
+        # merge and recurse
+        for d in deps1[dep_type]:
+            if not d in res:
+                res.append(d)
+                if depth == 0 or curr_depth < depth:
+                    if d in self.get_packages():  # recurse on packages only
+                        self._get_depends_recursive(d, dep_type, res, depth, curr_depth+1)
+
 
 
 

@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='rosdistro',
-    version='0.0.17',
+    version='0.1.0',
     packages=['rosdistro'],
     package_dir = {'rosdistro':'src/rosdistro'},
     scripts = ['scripts/rosdistro_generate_cache', 'scripts/rosdistro'],
