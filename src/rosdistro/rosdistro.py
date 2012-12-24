@@ -59,6 +59,9 @@ class RosDistro:
         return res
 
 
+    def get_depends_on1(self, items):
+        return self.get_depends_on(items, 1)
+
 
     def get_depends_on(self, items, depth=0):
         res = copy.deepcopy(RES_DICT)
@@ -87,6 +90,8 @@ class RosDistro:
         return self.depends_file.get_dependencies(p.repository, p.name)
 
 
+    def get_depends1(self, items):
+        return self.get_depends(items, 1)
 
     def get_depends(self, items, depth=0):
         res = copy.deepcopy(RES_DICT)
