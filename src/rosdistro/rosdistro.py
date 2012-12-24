@@ -6,6 +6,7 @@ import os
 import sys
 from rospkg import environment
 import copy
+import threading
 
 RES_DICT = {'build': [], 'buildtool': [], 'test': [], 'run': []}
 RES_TREE = {'build': {}, 'buildtool': {}, 'test': {}, 'run': {}}
@@ -13,9 +14,18 @@ CACHE_VERSION = 1
 
 class RosDistro:
     def __init__(self, name, cache_location=None):
+         t1 = threading.Thread(target=self._construct_rosdistro_file, args=(name,))
+         t2 = threading.Thread(target=self._construct_rosdistro_dependencies, args=(name, cache_location,))
+         t1.start()
+         t2.start()
+         t1.join()
+         t2.join()
+    
+    def _construct_rosdistro_file(self, name):
         self.distro_file = RosDistroFile(name)
-        self.depends_file = RosDependencies(name, cache_location)
 
+    def _construct_rosdistro_dependencies(self, name, cache_location):
+        self.depends_file = RosDependencies(name, cache_location)
 
     def get_repositories(self):
         return self.distro_file.repositories
@@ -37,12 +47,12 @@ class RosDistro:
 
 
     def get_depends_on1(self, items):
-        tree = self._build_full_dependency_tree()
         res = copy.deepcopy(RES_DICT)
-        for key in res:
-            for pkg, depends in tree[key].iteritems():
-                for p in self._convert_to_pkg_list(items):
-                    if p.name in depends and not pkg in res[key]:
+        item_list = self._convert_to_pkg_list(items)
+        for pkg in self.get_packages():
+            for key, depends in self.get_depends1(pkg).iteritems():
+                for i in item_list:
+                    if i.name in depends:
                         res[key].append(pkg)
         return res
 
@@ -56,6 +66,9 @@ class RosDistro:
 
 
     def get_depends1(self, items):
+        if type(items) != list and self.distro_file.packages.has_key(items):
+            p = self.distro_file.packages[items]
+            return self.depends_file.get_dependencies(p.repository, p.name)
         res = copy.deepcopy(RES_DICT)
         for p in self._convert_to_pkg_list(items):
             d = self.depends_file.get_dependencies(p.repository, p.name)
@@ -118,17 +131,6 @@ class RosDistro:
         return pkgs
 
 
-
-    def _build_full_dependency_tree(self):
-        tree = copy.deepcopy(RES_TREE)
-        for p in self.get_packages():
-            try:
-                deps1 = self.get_depends1(p)
-                for key, deps_list in deps1.iteritems():
-                    tree[key][p] = deps_list
-            except:
-                print "Could not find dependencies of package %s"%p
-        return tree
 
 
 
@@ -218,8 +220,10 @@ class RosDependencies:
         self.server_url = 'http://www.ros.org/rosdistro/%s-dependencies.yaml'%name
         self.dependencies = {}
 
-        # initialize with the local cache
+        # initialize with the local or server cache
         deps = self._read_local_cache()
+        if deps == {}:
+            deps = self._read_server_cache()            
         for key, value in deps.iteritems():
             self.dependencies[key] = value
 
