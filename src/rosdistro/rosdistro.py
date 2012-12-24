@@ -48,7 +48,7 @@ class RosDistro:
 
 
     def _get_depends_on1(self, package_name):
-        if self.distro_file.packages.has_key(package_name) and self.depends_on1_cache.has_key(package_name):
+        if self.depends_on1_cache.has_key(package_name):
             return self.depends_on1_cache[package_name]
         res = copy.deepcopy(RES_DICT)
         for pkg in self.get_packages():
@@ -65,14 +65,13 @@ class RosDistro:
 
     def get_depends_on(self, items, depth=0):
         res = copy.deepcopy(RES_DICT)
-        for dep_type, dep_list in res.iteritems():
-            for p in self._convert_to_pkg_list(items):
+        for p in self._convert_to_pkg_list(items):
+            for dep_type, dep_list in res.iteritems():
                 self._get_depends_on_recursive(p.name, dep_type, dep_list, depth, 1)
         return res
 
 
     def _get_depends_on_recursive(self, package_name, dep_type, res, depth, curr_depth):
-        # get dependencies_on of pgk
         deps_on = self._get_depends_on1(package_name)
 
         # merge and recurse
@@ -95,14 +94,13 @@ class RosDistro:
 
     def get_depends(self, items, depth=0):
         res = copy.deepcopy(RES_DICT)
-        for dep_type, dep_list in res.iteritems():
-            for p in self._convert_to_pkg_list(items):
+        for p in self._convert_to_pkg_list(items):
+            for dep_type, dep_list in res.iteritems():
                 self._get_depends_recursive(p.name, dep_type, dep_list, depth, 1)
         return res
 
 
     def _get_depends_recursive(self, package_name, dep_type, res, depth, curr_depth):
-        # get dependencies of package_name
         deps1 = self._get_depends1(package_name)
 
         # merge and recurse
@@ -230,7 +228,9 @@ class RosDependencies:
             deps = self._read_server_cache()            
         for key, value in deps.iteritems():
             self.dependencies[key] = value
-
+        if self.cache == 'server':
+            self._write_local_cache()
+            
 
     def get_dependencies(self, repo, package):
         # support unreleased stacks
@@ -308,6 +308,9 @@ def retrieve_dependencies(repo, package):
         url = url.replace('https://', 'https://raw.')
         package_xml = urllib2.urlopen(url).read()
         return get_package_dependencies(package_xml)
+    else:
+        print "Non-github repositories are net yet supported by the rosdistro tool"
+        raise Exception()
 
 
 
