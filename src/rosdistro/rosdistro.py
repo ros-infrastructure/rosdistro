@@ -2,11 +2,13 @@
 
 import yaml
 import urllib2
+import urllib
 import os
 import sys
 from rospkg import environment
 import copy
 import threading
+import tarfile
 
 RES_DICT = {'build': [], 'buildtool': [], 'test': [], 'run': []}
 RES_TREE = {'build': {}, 'buildtool': {}, 'test': {}, 'run': {}}
@@ -102,6 +104,7 @@ class RosDistro:
 
     def _get_depends_recursive(self, package_name, dep_type, res, depth, curr_depth):
         deps1 = self._get_depends1(package_name)
+        print "Dependencies of %s for type %s: %s"%(package_name, dep_type, str(deps1))
 
         # merge and recurse
         for d in deps1[dep_type]:
@@ -109,6 +112,7 @@ class RosDistro:
                 res.append(d)
                 if depth == 0 or curr_depth < depth:
                     if d in self.get_packages():  # recurse on packages only
+                        #print "Recursing on %s for type %s"%(d, dep_type)
                         self._get_depends_recursive(d, dep_type, res, depth, curr_depth+1)
 
 
@@ -215,11 +219,12 @@ class RosPackage:
 class RosDependencies:
     def __init__(self, name, cache_location):
         # url's
+        self.file_name = '%s-dependencies.yaml'%name
         if cache_location:
-            self.local_url = os.path.join(cache_location, '%s-dependencies.yaml'%name)
+            self.local_url = os.path.join(cache_location, self.file_name)
         else:
-            self.local_url = os.path.join(environment.get_ros_home(), '%s-dependencies.yaml'%name)
-        self.server_url = 'http://www.ros.org/rosdistro/%s-dependencies.yaml'%name
+            self.local_url = os.path.join(environment.get_ros_home(), self.file_name)
+        self.server_url = 'http://www.ros.org/rosdistro/%s-dependencies.tar.gz'%name
         self.dependencies = {}
 
         # initialize with the local or server cache
@@ -264,12 +269,16 @@ class RosDependencies:
     def _read_server_cache(self):
         try:
             self.cache = 'server'
-            deps = yaml.load(urllib2.urlopen(self.server_url).read())
-            if not deps or not 'cache_version' in deps or deps['cache_version'] != CACHE_VERSION or not 'repositories' in deps:
-                raise
-            return deps['repositories']
+            tar_file = urllib.urlretrieve(self.server_url)
         except:
+            print "Failed to read server cache"
             return {}
+        tar = tarfile.open(tar_file[0], 'r')
+        data = tar.extractfile(self.file_name)
+        deps = yaml.load(data.read())
+        if not deps or not 'cache_version' in deps or deps['cache_version'] != CACHE_VERSION or not 'repositories' in deps:
+            raise
+        return deps['repositories']
 
 
 
@@ -293,8 +302,6 @@ class RosDependencies:
                           f)
         except:
             print "Failed to write local dependency cache"
-
-
 
 
 
