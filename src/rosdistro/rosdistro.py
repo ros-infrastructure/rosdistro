@@ -14,6 +14,27 @@ RES_DICT = {'build': [], 'buildtool': [], 'test': [], 'run': []}
 RES_TREE = {'build': {}, 'buildtool': {}, 'test': {}, 'run': {}}
 CACHE_VERSION = 1
 
+walks = {
+    'FULL_WALK': {'build': ['build', 'run', 'buildtool', 'test'],
+                  'run': ['build', 'run', 'buildtool', 'test'],
+                  'buildtool': ['build', 'run', 'buildtool', 'test'],
+                  'test': ['build', 'run', 'buildtool', 'test']},
+    'SPIRAL_OF_DOOM': {'build': ['run'],
+                       'run': ['buildtool'],
+                       'buildtool': ['test'],
+                       'test': ['build']}
+
+}
+
+def invert_dict(d):
+    inverted = {}
+    for key,value in d.iteritems():
+        for v in value:
+            v_keys = inverted.setdefault(v, [])
+            if key not in v_keys:
+                v_keys.append(key)
+    return inverted
+
 class RosDistro:
     def __init__(self, name, cache_location=None):
         self.depends_on1_cache = copy.deepcopy(RES_TREE)
@@ -65,15 +86,15 @@ class RosDistro:
         return self.get_depends_on(items, 1)
 
 
-    def get_depends_on(self, items, depth=0):
+    def get_depends_on(self, items, depth=0, dep_dict=walks['FULL_WALK']):
         res = copy.deepcopy(RES_DICT)
         for p in self._convert_to_pkg_list(items):
             for dep_type, dep_list in res.iteritems():
-                self._get_depends_on_recursive(p.name, dep_type, dep_list, depth, 1)
+                self._get_depends_on_recursive(p.name, dep_type, invert_dict(dep_dict), dep_list, depth, 1)
         return res
 
 
-    def _get_depends_on_recursive(self, package_name, dep_type, res, depth, curr_depth):
+    def _get_depends_on_recursive(self, package_name, dep_type, dep_dict, res, depth, curr_depth):
         deps_on = self._get_depends_on1(package_name)
 
         # merge and recurse
@@ -81,7 +102,8 @@ class RosDistro:
             if not d in res:
                 res.append(d)
                 if depth == 0 or curr_depth < depth:
-                    self._get_depends_on_recursive(d, dep_type, res, depth, curr_depth+1)
+                    for next_dep_type in dep_dict[dep_type]:
+                        self._get_depends_on_recursive(d, next_dep_type, dep_dict, res, depth, curr_depth+1)
 
 
 
@@ -94,17 +116,15 @@ class RosDistro:
     def get_depends1(self, items):
         return self.get_depends(items, 1)
 
-    def get_depends(self, items, depth=0):
+    def get_depends(self, items, depth=0, dep_dict=walks['FULL_WALK']):
         res = copy.deepcopy(RES_DICT)
         for p in self._convert_to_pkg_list(items):
             for dep_type, dep_list in res.iteritems():
-                self._get_depends_recursive(p.name, dep_type, dep_list, depth, 1)
+                self._get_depends_recursive(p.name, dep_type, dep_dict, dep_list, depth, 1)
         return res
 
-
-    def _get_depends_recursive(self, package_name, dep_type, res, depth, curr_depth):
+    def _get_depends_recursive(self, package_name, dep_type, dep_dict, res, depth, curr_depth):
         deps1 = self._get_depends1(package_name)
-        print "Dependencies of %s for type %s: %s"%(package_name, dep_type, str(deps1))
 
         # merge and recurse
         for d in deps1[dep_type]:
@@ -112,12 +132,9 @@ class RosDistro:
                 res.append(d)
                 if depth == 0 or curr_depth < depth:
                     if d in self.get_packages():  # recurse on packages only
-                        #print "Recursing on %s for type %s"%(d, dep_type)
-                        self._get_depends_recursive(d, dep_type, res, depth, curr_depth+1)
-
-
-
-
+                        for next_dep_type in dep_dict[dep_type]:
+                            #print "Recursing on %s for type %s"%(d, dep_type)
+                            self._get_depends_recursive(d, next_dep_type, dep_dict, res, depth, curr_depth+1)
 
     def _convert_to_pkg_list(self, items):
         if type(items) != list:

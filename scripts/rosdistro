@@ -4,9 +4,6 @@ import rosdistro
 import optparse
 import sys
 
-
-
-
 def depends(args):
     distro = rosdistro.RosDistro(args[1])
     deps = distro.get_depends(args[2:], int(args[0]))
@@ -70,7 +67,8 @@ def main():
     # execute command
     try:
         cmds[cmd]['cmd'](commands[1:])
-    except:
+    except Exception, e:
+        print e
         print "Failure"
     return
 
