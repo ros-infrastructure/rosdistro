@@ -4,6 +4,18 @@ import rosdistro
 import optparse
 import sys
 
+
+def gen_cache(options, args):
+    # touch everything to create the new cache
+    distro  = rosdistro.RosDistro(args[0], options.cache)
+    for r in distro.get_repositories():
+        print "Caching %s"%r
+        distro.get_depends1(r)
+
+    print "Cache written to %s"%(distro.depends_file.local_url)
+
+
+
 def main():
     parser = optparse.OptionParser()
     parser.add_option("--cache", action="store", default=None)
@@ -13,13 +25,14 @@ def main():
         print "Usage: %s ros_distro"%sys.argv[0]
         return
 
-    # touch everything to create the new cache
-    distro  = rosdistro.RosDistro(sys.argv[1], options.cache)
-    for r in distro.get_repositories():
-        print "Caching %s"%r
-        distro.get_depends1(r)
+    try:
+        gen_cache(options, args)
+    except Exception, e:
+        print e
+        print "Failure"
+    return
 
-    print "Cache written to %s"%(distro.depends_file.local_url)
+
 
 if __name__ == "__main__":
     main()

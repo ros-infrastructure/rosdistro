@@ -44,7 +44,7 @@ class RosDistro:
         t2.start()
         t1.join()
         t2.join()
-    
+
     def _construct_rosdistro_file(self, name):
         self.distro_file = RosDistroFile(name)
 
@@ -247,12 +247,12 @@ class RosDependencies:
         # initialize with the local or server cache
         deps = self._read_local_cache()
         if deps == {}:
-            deps = self._read_server_cache()            
+            deps = self._read_server_cache()
         for key, value in deps.iteritems():
             self.dependencies[key] = value
         if self.cache == 'server':
             self._write_local_cache()
-            
+
 
     def get_dependencies(self, repo, package):
         # support unreleased stacks
@@ -287,7 +287,7 @@ class RosDependencies:
         try:
             self.cache = 'server'
             tar_file = urllib.urlretrieve(self.server_url)
-        except:
+        except Exception, e:
             print "Failed to read server cache"
             return {}
         tar = tarfile.open(tar_file[0], 'r')
@@ -307,7 +307,7 @@ class RosDependencies:
                 if not deps or not 'cache_version' in deps or deps['cache_version'] != CACHE_VERSION or not 'repositories' in deps:
                     raise
                 return deps['repositories']
-        except:
+        except Exception, e:
             return {}
 
 
@@ -317,7 +317,7 @@ class RosDependencies:
                 yaml.dump({'cache_version': CACHE_VERSION,
                            'repositories': self.dependencies},
                           f)
-        except:
+        except Exception, e:
             print "Failed to write local dependency cache"
 
 
@@ -330,7 +330,11 @@ def retrieve_dependencies(repo, package):
         url = url.replace('.git', '/release/%s/%s/package.xml'%(package, repo.version.split('-')[0]))
         url = url.replace('git://', 'https://')
         url = url.replace('https://', 'https://raw.')
-        package_xml = urllib2.urlopen(url).read()
+        try:
+            package_xml = urllib2.urlopen(url).read()
+        except Exception, e:
+            print "Failed to read package.xml file from url %s"%url
+            raise Exception()
         return get_package_dependencies(package_xml)
     else:
         print "Non-github repositories are net yet supported by the rosdistro tool"
