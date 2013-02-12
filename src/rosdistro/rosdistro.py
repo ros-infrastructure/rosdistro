@@ -13,6 +13,7 @@ import tarfile
 RES_DICT = {'build': [], 'buildtool': [], 'test': [], 'run': []}
 RES_TREE = {'build': {}, 'buildtool': {}, 'test': {}, 'run': {}}
 CACHE_VERSION = 1
+MAIN_ROSDIST = 'http://raw.github.com/ros/rosdistro/master'
 
 walks = {
     'FULL_WALK': {'build': ['build', 'run', 'buildtool', 'test'],
@@ -36,20 +37,21 @@ def invert_dict(d):
     return inverted
 
 class RosDistro:
-    def __init__(self, name, cache_location=None):
+    def __init__(self, name, cache_location=None, rosdist_rep=MAIN_ROSDIST):
         self.depends_on1_cache = copy.deepcopy(RES_TREE)
-        t1 = threading.Thread(target=self._construct_rosdistro_file, args=(name,))
-        t2 = threading.Thread(target=self._construct_rosdistro_dependencies, args=(name, cache_location,))
+        mf = MasterFile(rosdist_rep=rosdist_rep)
+        t1 = threading.Thread(target=self._construct_rosdistro_file, args=(name,mf,))
+        t2 = threading.Thread(target=self._construct_rosdistro_dependencies, args=(name, cache_location, mf,))
         t1.start()
         t2.start()
         t1.join()
         t2.join()
 
-    def _construct_rosdistro_file(self, name):
-        self.distro_file = RosDistroFile(name)
+    def _construct_rosdistro_file(self, name, master_file):
+        self.distro_file = RosDistroFile(name, master_file=master_file)
 
-    def _construct_rosdistro_dependencies(self, name, cache_location):
-        self.depends_file = RosDependencies(name, cache_location)
+    def _construct_rosdistro_dependencies(self, name, cache_location, master_file):
+        self.depends_file = RosDependencies(name, cache_location, master_file=master_file)
 
     def get_repositories(self):
         return self.distro_file.repositories
@@ -62,6 +64,15 @@ class RosDistro:
 
     def get_package(self, pkg):
         return self.get_packages()[pkg]
+
+    def get_targets(self):
+        return [t for t in self.distro_file.targets]
+
+    def get_arches(self, target=None):
+        if target is None:
+            return self.distro_file.targets
+        else:
+            return self.distro_file.targets[target]
 
     def get_rosinstall(self, items, version='last_release', source='vcs'):
         rosinstall = ""
@@ -156,16 +167,56 @@ class RosDistro:
 
 
 
+class MasterFile:
+    def __init__(self, rosdist_rep=MAIN_ROSDIST):
+        self._rosdist_rep = rosdist_rep
+        try:
+            self._distros = yaml.load(urllib2.urlopen("%s/rosdistros.yaml"%rosdist_rep))
+        except urllib2.URLError as e:
+            print("Could not load rosdistros file: %s"%str(e))
+            raise
+
+    def get_distro_url(self, dist, kind='release'):
+        return "%s/%s" % (self._rosdist_rep, self._distros[dist][kind])
+
+    def get_distro(self, dist, kind='release'):
+        url = self.get_distro_url(dist, kind)
+        try:
+            dist_file = yaml.load(urllib2.urlopen(url))
+        except urllib2.URLError as e:
+            print("Could not load distro file: %s"%str(e))
+            raise
+        return dist_file
+
+    def get_deps_server_cache_url(self, dist):
+        if 'deps_cache' not in self._distros[dist]:
+            return None
+        return self._distros[dist]['deps_cache']
+
+    def get_distros(self):
+        return self._distros.keys()
+
+    def get_targets(self):
+        tgts = {}
+        for d in self.get_distros():
+            tgts[d] = self.get_distro(d)['targets'].keys()
+        return tgts
+
+
 
 
 class RosDistroFile:
-    def __init__(self, name):
+    def __init__(self, name, master_file=None):
         self.packages = {}
         self.repositories = {}
 
-        # parse ros distro file
-        distro_url = urllib2.urlopen('https://raw.github.com/ros/rosdistro/master/releases/%s.yaml'%name)
-        distro = yaml.load(distro_url.read())['repositories']
+        if master_file is None:
+            mf = MasterFile()
+        else:
+            mf = master_file
+        dist = mf.get_distro(name)
+        distro = dist['repositories']
+        self.targets = dist['targets']
 
         # loop over all repo's
         for repo_name, data in distro.iteritems():
@@ -234,14 +285,18 @@ class RosPackage:
 
 
 class RosDependencies:
-    def __init__(self, name, cache_location):
+    def __init__(self, name, cache_location, master_file=None):
         # url's
+        if master_file is None:
+            mf = MasterFile()
+        else:
+            mf = master_file
         self.file_name = '%s-dependencies.yaml'%name
         if cache_location:
             self.local_url = os.path.join(cache_location, self.file_name)
         else:
             self.local_url = os.path.join(environment.get_ros_home(), self.file_name)
-        self.server_url = 'http://www.ros.org/rosdistro/%s-dependencies.tar.gz'%name
+        self.server_url = mf.get_deps_server_cache_url(name)
         self.dependencies = {}
 
         # initialize with the local or server cache
