@@ -171,10 +171,12 @@ class MasterFile:
     def __init__(self, rosdist_rep=MAIN_ROSDIST):
         self._rosdist_rep = rosdist_rep
         try:
-            self._distros = yaml.load(urllib2.urlopen("%s/rosdistros.yaml"%rosdist_rep))
+            mf_cts = yaml.load(urllib2.urlopen("%s/rosdistros.yaml"%rosdist_rep))
         except urllib2.URLError as e:
             print("Could not load rosdistros file: %s"%str(e))
             raise
+        self._version = mf_cts.pop('version')
+        self._distros = mf_cts
 
     def get_distro_url(self, dist, kind='release'):
         return "%s/%s" % (self._rosdist_rep, self._distros[dist][kind])
