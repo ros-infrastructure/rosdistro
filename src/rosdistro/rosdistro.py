@@ -37,15 +37,19 @@ def invert_dict(d):
     return inverted
 
 class RosDistro:
-    def __init__(self, name, cache_location=None, rosdist_rep=MAIN_ROSDIST):
+    def __init__(self, name, cache_location=None, rosdist_rep=MAIN_ROSDIST, dont_load_deps=False):
         self.depends_on1_cache = copy.deepcopy(RES_TREE)
+        self.name = name
         mf = MasterFile(rosdist_rep=rosdist_rep)
-        t1 = threading.Thread(target=self._construct_rosdistro_file, args=(name,mf,))
-        t2 = threading.Thread(target=self._construct_rosdistro_dependencies, args=(name, cache_location, mf,))
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
+        if dont_load_deps:
+            self._construct_rosdistro_file(name, mf)
+        else:
+            t1 = threading.Thread(target=self._construct_rosdistro_file, args=(name,mf,))
+            t2 = threading.Thread(target=self._construct_rosdistro_dependencies, args=(name, cache_location, mf,))
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
 
     def _construct_rosdistro_file(self, name, master_file):
         self.distro_file = RosDistroFile(name, master_file=master_file)
@@ -64,6 +68,9 @@ class RosDistro:
 
     def get_package(self, pkg):
         return self.get_packages()[pkg]
+
+    def get_version(self, pkg):
+        return self.get_package(pkg).repository.version
 
     def get_targets(self):
         return [t for t in self.distro_file.targets]
@@ -117,7 +124,8 @@ class RosDistro:
                         self._get_depends_on_recursive(d, next_dep_type, dep_dict, res, depth, curr_depth+1)
 
 
-
+    def get_maintainers(self, package_name):
+        return self._get_depends1(package_name)['maintainers']
 
     def _get_depends1(self, package_name):
         p = self.distro_file.packages[package_name]
@@ -175,8 +183,8 @@ class MasterFile:
         except urllib2.URLError as e:
             print("Could not load rosdistros file: %s"%str(e))
             raise
-        self._version = mf_cts.pop('version')
-        self._distros = mf_cts
+        self._version = mf_cts['version']
+        self._distros = mf_cts['distros']
 
     def get_distro_url(self, dist, kind='release'):
         return "%s/%s" % (self._rosdist_rep, self._distros[dist][kind])
@@ -391,7 +399,14 @@ def retrieve_dependencies(repo, package):
             package_xml = urllib2.urlopen(url).read()
         except Exception, e:
             print "Failed to read package.xml file from url %s"%url
-            raise Exception()
+            import time
+            print "Trying again in a split second..."
+            time.sleep(.5)
+            try:
+                package_xml = urllib2.urlopen(url).read()
+            except Exception, e:
+                print("Nope. Github y u no let me fetch? %s" % str(e))
+                raise Exception()
         return get_package_dependencies(package_xml)
     else:
         print "Non-github repositories are net yet supported by the rosdistro tool"
@@ -408,7 +423,8 @@ def get_package_dependencies(package_xml):
     depends1 = {'build': [d.name for d in pkg.build_depends],
                 'buildtool':  [d.name for d in pkg.buildtool_depends],
                 'test':  [d.name for d in pkg.test_depends],
-                'run':  [d.name for d in pkg.run_depends]}
+                'run':  [d.name for d in pkg.run_depends],
+                'maintainers': [{'name': m.name, 'email': m.email} for m in pkg.maintainers]}
     return depends1
 
 
