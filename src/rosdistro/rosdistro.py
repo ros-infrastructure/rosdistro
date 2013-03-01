@@ -110,7 +110,7 @@ class RosDistro:
 
     def _get_depends1(self, package_name):
         p = self.distro_file.packages[package_name]
-        return self.depends_file.get_dependencies(p.repository, p.name)
+        return self.depends_file.get_dependencies(p.repository, p.name, self.distro_file.name)
 
 
     def get_depends1(self, items):
@@ -162,6 +162,7 @@ class RosDistroFile:
     def __init__(self, name):
         self.packages = {}
         self.repositories = {}
+        self.name = name
 
         # parse ros distro file
         distro_url = urllib2.urlopen('https://raw.github.com/ros/rosdistro/master/releases/%s.yaml'%name)
@@ -254,7 +255,7 @@ class RosDependencies:
             self._write_local_cache()
 
 
-    def get_dependencies(self, repo, package):
+    def get_dependencies(self, repo, package, rosdistro):
         # support unreleased stacks
         if not repo.version:
             return copy.deepcopy(RES_DICT)
@@ -276,7 +277,7 @@ class RosDependencies:
 
 
         # retrieve dependencies
-        deps = retrieve_dependencies(repo, package)
+        deps = retrieve_dependencies(repo, package, rosdistro)
         self.dependencies[key] = deps
         self._write_local_cache()
         return deps
@@ -324,18 +325,31 @@ class RosDependencies:
 
 
 
-def retrieve_dependencies(repo, package):
+def retrieve_dependencies(repo, package, rosdistro='groovy'):
     if 'github' in repo.url:
         url = repo.url
         url = url.replace('.git', '/release/%s/%s/package.xml'%(package, repo.version.split('-')[0]))
         url = url.replace('git://', 'https://')
         url = url.replace('https://', 'https://raw.')
         try:
-            package_xml = urllib2.urlopen(url).read()
-        except Exception, e:
-            print "Failed to read package.xml file from url %s"%url
+            try:
+                package_xml = urllib2.urlopen(url).read()
+            except Exception:
+                print "Failed to read package.xml file from url %s" % url
+                url = repo.url
+                url = url.replace('.git', '/release/%s/%s/%s/package.xml' % (rosdistro, package, repo.version))
+                url = url.replace('git://', 'https://')
+                url = url.replace('https://', 'https://raw.')
+                print "Trying to read from url '%s' instead" % url
+                package_xml = urllib2.urlopen(url).read()
+        except Exception:
+            print "Failed to read package.xml file from url %s" % url
             raise Exception()
-        return get_package_dependencies(package_xml)
+        try:
+            return get_package_dependencies(package_xml)
+        except Exception:
+            print "Failed to get dependencies from package_xml at url: '%s'" % url
+            raise
     else:
         print "Non-github repositories are net yet supported by the rosdistro tool"
         raise Exception()
