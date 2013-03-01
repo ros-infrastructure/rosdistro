@@ -9,9 +9,9 @@ import yaml
 
 from rospkg import environment
 
-from rosdistro.common import info
-from rosdistro.common import warning
-from rosdistro.common import error
+from .common import info
+from .common import warning
+from .common import error
 
 RES_DICT = {'build': [], 'buildtool': [], 'test': [], 'run': []}
 RES_TREE = {'build': {}, 'buildtool': {}, 'test': {}, 'run': {}}
@@ -71,7 +71,7 @@ class RosDistro:
     def get_rosinstall(self, items, version='last_release', source='vcs'):
         rosinstall = ""
         for p in self._convert_to_pkg_list(items):
-            rosinstall += p.get_rosinstall(version, source)
+            rosinstall += p.get_rosinstall(version, source, self.distro_file.name)
         return rosinstall
 
     def _get_depends_on1(self, package_name):
@@ -108,7 +108,7 @@ class RosDistro:
 
     def _get_depends1(self, package_name):
         p = self.distro_file.packages[package_name]
-        return self.depends_file.get_dependencies(p.repository, p.name, self.distro_file.name)
+        return self.depends_file.get_dependencies(p, self.distro_file.name)
 
     def get_depends1(self, items):
         return self.get_depends(items, 1)
@@ -188,8 +188,50 @@ class RosPackage:
     def __init__(self, name, repository):
         self.name = name
         self.repository = repository
+        self._package_xmls = {}
+        self._release_tags = {}
 
-    def get_rosinstall(self, version, source):
+    def _fetch_package_xml(self, rosdistro):
+        repo = self.repository
+        if 'github.com' in repo.url:
+            url = repo.url
+            upstream_version = repo.version.split('-')[0]
+            release_tag = 'release/{0}/{1}'.format(self.name, upstream_version)
+            url = url.replace('.git', '/{0}/package.xml'.format(release_tag))
+            url = url.replace('git://', 'https://')
+            url = url.replace('https://', 'https://raw.')
+            try:
+                try:
+                    package_xml = urllib2.urlopen(url).read()
+                except Exception:
+                    warning("Failed to read package.xml file from url '{0}'".format(url))
+                    url = repo.url
+                    release_tag = 'release/{0}/{1}/{2}'.format(rosdistro, self.name, repo.version)
+                    tail = '/{0}/package.xml'.format(release_tag)
+                    url = url.replace('.git', tail)
+                    url = url.replace('git://', 'https://')
+                    url = url.replace('https://', 'https://raw.')
+                    info("Trying to read from url '{0}' instead".format(url))
+                    package_xml = urllib2.urlopen(url).read()
+            except Exception:
+                raise RuntimeError("Failed to read package.xml file from url '{0}'".format(url))
+            self._package_xmls[rosdistro] = package_xml
+            self._release_tags[rosdistro] = release_tag
+            return package_xml, release_tag
+        else:
+            raise Exception("Non-github repositories are net yet supported by the rosdistro tool")
+
+    def get_package_xml(self, rosdistro):
+        if rosdistro not in self._package_xmls:
+            self._fetch_package_xml(rosdistro)
+        return self._package_xmls[rosdistro]
+
+    def get_release_tag(self, rosdistro):
+        if rosdistro not in self._release_tags:
+            self._fetch_package_xml(rosdistro)
+        return self._release_tags[rosdistro]
+
+    def get_rosinstall(self, version, source, rosdistro):
         # can't get last release of unreleased repository
         if version == 'last_release' and not self.repository.version:
             raise RuntimeError("Can't get the last release of unreleased repository {0}".format(self.repository.name))
@@ -204,7 +246,6 @@ class RosPackage:
                                        'uri': self.repository.url,
                                        'version': '/'.join(['release', self.name])}}],
                              default_style=False)
-
         else:
             if source == 'vcs':
                 return yaml.safe_dump([{'git': {'local-name': self.name,
@@ -212,14 +253,16 @@ class RosPackage:
                                                 'version': '/'.join(['release', self.name, version])}}],
                                       default_style=False)
             elif source == 'tar':
+                release_tag = self.get_release_tag(rosdistro)
                 uri = self.repository.url
                 uri = uri.replace('git://', 'https://')
-                uri = uri.replace('.git', '/archive/release/%s/%s.tar.gz' % (self.name, version))
+                uri = uri.replace('.git', '/archive/{0}.tar.gz'.format(release_tag))
                 return yaml.safe_dump([{
                     'tar': {
                         'local-name': self.name,
                         'uri': uri,
-                        'version': '%s-release-release-%s-%s' % (self.repository.name, self.name, version)}}],
+                        'version': '{0}-release-{1}'.format(self.repository.name, release_tag.replace('/', '-'))
+                    }}],
                     default_style=False)
             else:
                 raise RuntimeError("Invalid source type {0}".format(source))
@@ -245,12 +288,13 @@ class RosDependencies:
         if self.cache == 'server':
             self._write_local_cache()
 
-    def get_dependencies(self, repo, package, rosdistro):
+    def get_dependencies(self, package, rosdistro):
+        repo = package.repository
         # support unreleased stacks
         if not repo.version:
             return copy.deepcopy(RES_DICT)
 
-        key = '%s?%s?%s' % (repo.name, repo.version, package)
+        key = '%s?%s?%s' % (repo.name, repo.version, package.name)
 
         # check in memory first
         if key in self.dependencies:
@@ -266,7 +310,7 @@ class RosDependencies:
                 return self.dependencies[key]
 
         # retrieve dependencies
-        deps = retrieve_dependencies(repo, package, rosdistro)
+        deps = retrieve_dependencies(package.get_package_xml(rosdistro))
         self.dependencies[key] = deps
         self._write_local_cache()
         return deps
@@ -312,31 +356,11 @@ class RosDependencies:
             error("Failed to write local dependency cache")
 
 
-def retrieve_dependencies(repo, package, rosdistro='groovy'):
-    if 'github' in repo.url:
-        url = repo.url
-        url = url.replace('.git', '/release/%s/%s/package.xml' % (package, repo.version.split('-')[0]))
-        url = url.replace('git://', 'https://')
-        url = url.replace('https://', 'https://raw.')
-        try:
-            try:
-                package_xml = urllib2.urlopen(url).read()
-            except Exception:
-                warning("Failed to read package.xml file from url '{0}'".format(url))
-                url = repo.url
-                url = url.replace('.git', '/release/%s/%s/%s/package.xml' % (rosdistro, package, repo.version))
-                url = url.replace('git://', 'https://')
-                url = url.replace('https://', 'https://raw.')
-                info("Trying to read from url '{0}' instead".format(url))
-                package_xml = urllib2.urlopen(url).read()
-        except Exception:
-            raise RuntimeError("Failed to read package.xml file from url '{0}'".format(url))
-        try:
-            return get_package_dependencies(package_xml)
-        except Exception:
-            raise RuntimeError("Failed to get dependencies from package_xml at url: '{0}'".format(url))
-    else:
-        raise Exception("Non-github repositories are net yet supported by the rosdistro tool")
+def retrieve_dependencies(package_xml):
+    try:
+        return get_package_dependencies(package_xml)
+    except Exception:
+        raise RuntimeError("Failed to get dependencies from package_xml:\n```\n{0}\n```".format(package_xml))
 
 
 def get_package_dependencies(package_xml):
