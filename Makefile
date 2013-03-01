@@ -7,11 +7,7 @@ CHANGENAME=rosdistro
 
 OUTPUT_DIR=deb_dist
 
-USERNAME := $(shell whoami)
-# If william, use my WG login wwoodall
-ifeq ($(USERNAME),william)
-	USERNAME := wwoodall
-endif
+USERNAME ?= $(shell whoami)
 
 UNAME := $(shell uname)
 
