@@ -335,20 +335,20 @@ def retrieve_dependencies(repo, package, rosdistro='groovy'):
             try:
                 package_xml = urllib2.urlopen(url).read()
             except Exception:
-                print "Failed to read package.xml file from url %s" % url
+                # print "Failed to read package.xml file from url %s" % url
                 url = repo.url
                 url = url.replace('.git', '/release/%s/%s/%s/package.xml' % (rosdistro, package, repo.version))
                 url = url.replace('git://', 'https://')
                 url = url.replace('https://', 'https://raw.')
-                print "Trying to read from url '%s' instead" % url
+                # print "Trying to read from url '%s' instead" % url
                 package_xml = urllib2.urlopen(url).read()
         except Exception:
-            print "Failed to read package.xml file from url %s" % url
-            raise Exception()
+            # print "Failed to read package.xml file from url %s" % url
+            raise
         try:
             return get_package_dependencies(package_xml)
         except Exception:
-            print "Failed to get dependencies from package_xml at url: '%s'" % url
+            # print "Failed to get dependencies from package_xml at url: '%s'" % url
             raise
     else:
         print "Non-github repositories are net yet supported by the rosdistro tool"
