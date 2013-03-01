@@ -241,19 +241,25 @@ class RosPackage:
             version = self.repository.version.split('-')[0]
 
         # generate the rosinstall file
+        release_tag = self.get_release_tag(rosdistro)
         if version == 'master':
-            return yaml.dump([{'git': {'local-name': self.name,
-                                       'uri': self.repository.url,
-                                       'version': '/'.join(['release', self.name])}}],
-                             default_style=False)
+            return yaml.dump([{
+                'git': {
+                    'local-name': self.name,
+                    'uri': self.repository.url,
+                    'version': '/'.join(release_tag.split('/')[:-1])
+                }}],
+                default_style=False)
         else:
             if source == 'vcs':
-                return yaml.safe_dump([{'git': {'local-name': self.name,
-                                                'uri': self.repository.url,
-                                                'version': '/'.join(['release', self.name, version])}}],
-                                      default_style=False)
+                return yaml.safe_dump([{
+                    'git': {
+                        'local-name': self.name,
+                        'uri': self.repository.url,
+                        'version': release_tag
+                    }}],
+                    default_style=False)
             elif source == 'tar':
-                release_tag = self.get_release_tag(rosdistro)
                 uri = self.repository.url
                 uri = uri.replace('git://', 'https://')
                 uri = uri.replace('.git', '/archive/{0}.tar.gz'.format(release_tag))
