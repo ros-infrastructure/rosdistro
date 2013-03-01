@@ -1,14 +1,17 @@
-#!/usr/bin/env python
-
-import yaml
-import urllib2
-import urllib
+import copy
 import os
 import sys
-from rospkg import environment
-import copy
-import threading
 import tarfile
+import threading
+import urllib
+import urllib2
+import yaml
+
+from rospkg import environment
+
+from rosdistro.common import info
+from rosdistro.common import warning
+from rosdistro.common import error
 
 RES_DICT = {'build': [], 'buildtool': [], 'test': [], 'run': []}
 RES_TREE = {'build': {}, 'buildtool': {}, 'test': {}, 'run': {}}
@@ -26,14 +29,16 @@ walks = {
 
 }
 
+
 def invert_dict(d):
     inverted = {}
-    for key,value in d.iteritems():
+    for key, value in d.iteritems():
         for v in value:
             v_keys = inverted.setdefault(v, [])
             if key not in v_keys:
                 v_keys.append(key)
     return inverted
+
 
 class RosDistro:
     def __init__(self, name, cache_location=None):
@@ -69,9 +74,8 @@ class RosDistro:
             rosinstall += p.get_rosinstall(version, source)
         return rosinstall
 
-
     def _get_depends_on1(self, package_name):
-        if self.depends_on1_cache.has_key(package_name):
+        if package_name in self.depends_on1_cache:
             return self.depends_on1_cache[package_name]
         res = copy.deepcopy(RES_DICT)
         for pkg in self.get_packages():
@@ -81,10 +85,8 @@ class RosDistro:
         self.depends_on1_cache[package_name] = res
         return res
 
-
     def get_depends_on1(self, items):
         return self.get_depends_on(items, 1)
-
 
     def get_depends_on(self, items, depth=0, dep_dict=walks['FULL_WALK']):
         res = copy.deepcopy(RES_DICT)
@@ -92,7 +94,6 @@ class RosDistro:
             for dep_type, dep_list in res.iteritems():
                 self._get_depends_on_recursive(p.name, dep_type, invert_dict(dep_dict), dep_list, depth, 1)
         return res
-
 
     def _get_depends_on_recursive(self, package_name, dep_type, dep_dict, res, depth, curr_depth):
         deps_on = self._get_depends_on1(package_name)
@@ -105,13 +106,9 @@ class RosDistro:
                     for next_dep_type in dep_dict[dep_type]:
                         self._get_depends_on_recursive(d, next_dep_type, dep_dict, res, depth, curr_depth+1)
 
-
-
-
     def _get_depends1(self, package_name):
         p = self.distro_file.packages[package_name]
         return self.depends_file.get_dependencies(p.repository, p.name, self.distro_file.name)
-
 
     def get_depends1(self, items):
         return self.get_depends(items, 1)
@@ -133,7 +130,6 @@ class RosDistro:
                 if depth == 0 or curr_depth < depth:
                     if d in self.get_packages():  # recurse on packages only
                         for next_dep_type in dep_dict[dep_type]:
-                            #print "Recursing on %s for type %s"%(d, dep_type)
                             self._get_depends_recursive(d, next_dep_type, dep_dict, res, depth, curr_depth+1)
 
     def _convert_to_pkg_list(self, items):
@@ -141,21 +137,16 @@ class RosDistro:
             items = [items]
         pkgs = []
         for i in items:
-            if self.distro_file.repositories.has_key(i):
+            if i in self.distro_file.repositories:
                 for p in self.distro_file.repositories[i].packages:
                     if not p in pkgs:
                         pkgs.append(p)
-            elif self.distro_file.packages.has_key(i):
+            elif i in self.distro_file.packages:
                 if not self.distro_file.packages[i] in pkgs:
                     pkgs.append(self.distro_file.packages[i])
             else:
-                print "!!! %s is not a package name nor a repository name"%i
-                raise Exception()
+                raise RuntimeError("!!! {0} is not a package name nor a repository name".format(i))
         return pkgs
-
-
-
-
 
 
 class RosDistroFile:
@@ -165,14 +156,14 @@ class RosDistroFile:
         self.name = name
 
         # parse ros distro file
-        distro_url = urllib2.urlopen('https://raw.github.com/ros/rosdistro/master/releases/%s.yaml'%name)
+        distro_url = urllib2.urlopen('https://raw.github.com/ros/rosdistro/master/releases/%s.yaml' % name)
         distro = yaml.load(distro_url.read())['repositories']
 
         # loop over all repo's
         for repo_name, data in distro.iteritems():
             repo = RosRepository(repo_name, data['version'], data['url'])
             self.repositories[repo_name] = repo
-            if not data.has_key('packages'):   # support unary disto's
+            if 'packages' not in data:  # support unary disto's
                 data['packages'] = {repo_name: ''}
 
             # loop over all packages
@@ -180,7 +171,6 @@ class RosDistroFile:
                 pkg = RosPackage(pkg_name, repo)
                 repo.packages.append(pkg)
                 self.packages[pkg_name] = pkg
-
 
 
 class RosRepository:
@@ -194,7 +184,6 @@ class RosRepository:
         return "\n".join([p.get_rosinstall(version, source) for p in self.packages])
 
 
-
 class RosPackage:
     def __init__(self, name, repository):
         self.name = name
@@ -203,8 +192,7 @@ class RosPackage:
     def get_rosinstall(self, version, source):
         # can't get last release of unreleased repository
         if version == 'last_release' and not self.repository.version:
-            print "Can't get the last release of unreleased repository %s"%self.repository.name
-            raise
+            raise RuntimeError("Can't get the last release of unreleased repository {0}".format(self.repository.name))
 
         # set specific version of last release of needed
         if version == 'last_release':
@@ -224,25 +212,28 @@ class RosPackage:
                                                 'version': '/'.join(['release', self.name, version])}}],
                                       default_style=False)
             elif source == 'tar':
-                return yaml.safe_dump([{'tar': {'local-name': self.name,
-                                                'uri': self.repository.url.replace('git://', 'https://').replace('.git', '/archive/release/%s/%s.tar.gz'%(self.name, version)),
-                                                'version': '%s-release-release-%s-%s'%(self.repository.name, self.name, version)}}],
-                                      default_style=False)
+                uri = self.repository.url
+                uri = uri.replace('git://', 'https://')
+                uri = uri.replace('.git', '/archive/release/%s/%s.tar.gz' % (self.name, version))
+                return yaml.safe_dump([{
+                    'tar': {
+                        'local-name': self.name,
+                        'uri': uri,
+                        'version': '%s-release-release-%s-%s' % (self.repository.name, self.name, version)}}],
+                    default_style=False)
             else:
-                print "Invalid source type %s"%source
-                raise
-
+                raise RuntimeError("Invalid source type {0}".format(source))
 
 
 class RosDependencies:
     def __init__(self, name, cache_location):
         # url's
-        self.file_name = '%s-dependencies.yaml'%name
+        self.file_name = '%s-dependencies.yaml' % name
         if cache_location:
             self.local_url = os.path.join(cache_location, self.file_name)
         else:
             self.local_url = os.path.join(environment.get_ros_home(), self.file_name)
-        self.server_url = 'http://www.ros.org/rosdistro/%s-dependencies.tar.gz'%name
+        self.server_url = 'http://www.ros.org/rosdistro/%s-dependencies.tar.gz' % name
         self.dependencies = {}
 
         # initialize with the local or server cache
@@ -254,16 +245,15 @@ class RosDependencies:
         if self.cache == 'server':
             self._write_local_cache()
 
-
     def get_dependencies(self, repo, package, rosdistro):
         # support unreleased stacks
         if not repo.version:
             return copy.deepcopy(RES_DICT)
 
-        key = '%s?%s?%s'%(repo.name, repo.version, package)
+        key = '%s?%s?%s' % (repo.name, repo.version, package)
 
         # check in memory first
-        if self.dependencies.has_key(key):
+        if key in self.dependencies:
             return self.dependencies[key]
 
         # read server cache if needed
@@ -272,9 +262,8 @@ class RosDependencies:
             for key, value in deps.iteritems():
                 self.dependencies[key] = value
             self._write_local_cache()
-            if self.dependencies.has_key(key):
+            if key in self.dependencies:
                 return self.dependencies[key]
-
 
         # retrieve dependencies
         deps = retrieve_dependencies(repo, package, rosdistro)
@@ -282,78 +271,72 @@ class RosDependencies:
         self._write_local_cache()
         return deps
 
-
-
     def _read_server_cache(self):
         try:
             self.cache = 'server'
             tar_file = urllib.urlretrieve(self.server_url)
-        except Exception, e:
-            print "Failed to read server cache"
+        except Exception:
+            warning("Failed to read server cache")
             return {}
         tar = tarfile.open(tar_file[0], 'r')
         data = tar.extractfile(self.file_name)
         deps = yaml.load(data.read())
-        if not deps or not 'cache_version' in deps or deps['cache_version'] != CACHE_VERSION or not 'repositories' in deps:
+        if not deps \
+           or not 'cache_version' in deps \
+           or deps['cache_version'] != CACHE_VERSION \
+           or not 'repositories' in deps:
             raise
         return deps['repositories']
-
-
 
     def _read_local_cache(self):
         try:
             self.cache = 'local'
-            with open(self.local_url)  as f:
+            with open(self.local_url) as f:
                 deps = yaml.safe_load(f.read())
-                if not deps or not 'cache_version' in deps or deps['cache_version'] != CACHE_VERSION or not 'repositories' in deps:
+                if not deps \
+                   or not 'cache_version' in deps \
+                   or deps['cache_version'] != CACHE_VERSION \
+                   or not 'repositories' in deps:
                     raise
                 return deps['repositories']
-        except Exception, e:
+        except Exception:
             return {}
-
 
     def _write_local_cache(self):
         try:
-            with open(self.local_url, 'w')  as f:
+            with open(self.local_url, 'w') as f:
                 yaml.dump({'cache_version': CACHE_VERSION,
                            'repositories': self.dependencies},
                           f)
-        except Exception, e:
-            print "Failed to write local dependency cache"
-
-
-
+        except Exception:
+            error("Failed to write local dependency cache")
 
 
 def retrieve_dependencies(repo, package, rosdistro='groovy'):
     if 'github' in repo.url:
         url = repo.url
-        url = url.replace('.git', '/release/%s/%s/package.xml'%(package, repo.version.split('-')[0]))
+        url = url.replace('.git', '/release/%s/%s/package.xml' % (package, repo.version.split('-')[0]))
         url = url.replace('git://', 'https://')
         url = url.replace('https://', 'https://raw.')
         try:
             try:
                 package_xml = urllib2.urlopen(url).read()
             except Exception:
-                # print "Failed to read package.xml file from url %s" % url
+                warning("Failed to read package.xml file from url '{0}'".format(url))
                 url = repo.url
                 url = url.replace('.git', '/release/%s/%s/%s/package.xml' % (rosdistro, package, repo.version))
                 url = url.replace('git://', 'https://')
                 url = url.replace('https://', 'https://raw.')
-                # print "Trying to read from url '%s' instead" % url
+                info("Trying to read from url '{0}' instead".format(url))
                 package_xml = urllib2.urlopen(url).read()
         except Exception:
-            # print "Failed to read package.xml file from url %s" % url
-            raise
+            raise RuntimeError("Failed to read package.xml file from url '{0}'".format(url))
         try:
             return get_package_dependencies(package_xml)
         except Exception:
-            # print "Failed to get dependencies from package_xml at url: '%s'" % url
-            raise
+            raise RuntimeError("Failed to get dependencies from package_xml at url: '{0}'".format(url))
     else:
-        print "Non-github repositories are net yet supported by the rosdistro tool"
-        raise Exception()
-
+        raise Exception("Non-github repositories are net yet supported by the rosdistro tool")
 
 
 def get_package_dependencies(package_xml):
@@ -367,6 +350,3 @@ def get_package_dependencies(package_xml):
                 'test':  [d.name for d in pkg.test_depends],
                 'run':  [d.name for d in pkg.run_depends]}
     return depends1
-
-
-

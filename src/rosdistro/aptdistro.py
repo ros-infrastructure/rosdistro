@@ -1,14 +1,14 @@
-#!/usr/bin/env python
-
 import urllib2
 
 
 class AptDistro:
     def __init__(self, ubuntudistro, arch, shadow=True):
         if shadow:
-            url = urllib2.urlopen('http://packages.ros.org/ros-shadow-fixed/ubuntu/dists/%s/main/binary-%s/Packages'%(ubuntudistro, arch))
+            url = 'http://packages.ros.org/ros-shadow-fixed/ubuntu/dists{0}/main/binary-{1}/Packages'
+            url = urllib2.urlopen(url.format(ubuntudistro, arch))
         else:
-            url = urllib2.urlopen('http://packages.ros.org/ros/ubuntu/dists/%s/main/binary-%s/Packages'%(ubuntudistro, arch))
+            url = 'http://packages.ros.org/ros/ubuntu/dists/{0}/main/binary-{1}/Packages'
+            url = urllib2.urlopen(url.format(ubuntudistro, arch))
         self.dep = {}
         package = None
         for l in url.read().split('\n'):
@@ -16,8 +16,7 @@ class AptDistro:
                 package = l.split('Package: ')[1]
             if 'Depends: ' in l:
                 if not package:
-                    print "Found 'depends' but not 'package' while parsing the apt repository index file"
-                    raise
+                    raise RuntimeError("Found 'depends' but not 'package' while parsing the apt repository index file")
                 self.dep[package] = [d.split(' ')[0] for d in (l.split('Depends: ')[1].split(', '))]
                 package = None
 
@@ -47,4 +46,3 @@ class AptDistro:
                 if not one:
                     self.depends_on(p, res, one)
         return res
-

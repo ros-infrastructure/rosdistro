@@ -1,0 +1,4 @@
+build
+dist
+*.pyc
+rosdistro.egg-info
