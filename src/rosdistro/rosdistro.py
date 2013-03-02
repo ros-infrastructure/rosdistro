@@ -203,8 +203,9 @@ class RosPackage:
             try:
                 try:
                     package_xml = urllib2.urlopen(url).read()
-                except Exception:
-                    warning("Failed to read package.xml file from url '{0}'".format(url))
+                except Exception as e:
+                    msg = "Failed to read package.xml file from url '{0}': {1}".format(url, e)
+                    warning(msg)
                     url = repo.url
                     release_tag = 'release/{0}/{1}/{2}'.format(rosdistro, self.name, repo.version)
                     tail = '/{0}/package.xml'.format(release_tag)
@@ -213,8 +214,10 @@ class RosPackage:
                     url = url.replace('https://', 'https://raw.')
                     info("Trying to read from url '{0}' instead".format(url))
                     package_xml = urllib2.urlopen(url).read()
-            except Exception:
-                raise RuntimeError("Failed to read package.xml file from url '{0}'".format(url))
+            except Exception as e:
+                msg += '\nAND\n'
+                msg += "Failed to read package.xml file from url '{0}': {1}".format(url, e)
+                raise RuntimeError(msg)
             self._package_xmls[rosdistro] = package_xml
             self._release_tags[rosdistro] = release_tag
             return package_xml, release_tag
