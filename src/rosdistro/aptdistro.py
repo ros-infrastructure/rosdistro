@@ -4,7 +4,7 @@ import urllib2
 class AptDistro:
     def __init__(self, ubuntudistro, arch, shadow=True):
         if shadow:
-            url = 'http://packages.ros.org/ros-shadow-fixed/ubuntu/dists{0}/main/binary-{1}/Packages'
+            url = 'http://packages.ros.org/ros-shadow-fixed/ubuntu/dists/{0}/main/binary-{1}/Packages'
             url = urllib2.urlopen(url.format(ubuntudistro, arch))
         else:
             url = 'http://packages.ros.org/ros/ubuntu/dists/{0}/main/binary-{1}/Packages'
