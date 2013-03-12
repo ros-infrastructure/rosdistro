@@ -329,7 +329,7 @@ class RosDependencies:
         self.cache = 'server'
         try:
             resp = urllib2.urlopen(self.server_url)
-        except urllib2.HTTPError, ex:
+        except urllib2.HTTPError as ex:
             warning("Failed to read server cache: %s" % ex)
             return {}
         with tempfile.NamedTemporaryFile('w') as fh:
