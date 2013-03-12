@@ -2,6 +2,7 @@ import copy
 import os
 import sys
 import tarfile
+import tempfile
 import threading
 import urllib
 import urllib2
@@ -325,13 +326,17 @@ class RosDependencies:
         return deps
 
     def _read_server_cache(self):
+        self.cache = 'server'
         try:
-            self.cache = 'server'
-            tar_file = urllib.urlretrieve(self.server_url)
-        except Exception:
-            warning("Failed to read server cache")
+            resp = urllib2.urlopen(self.server_url)
+        except urllib2.HTTPError, ex:
+            warning("Failed to read server cache: %s" % ex)
             return {}
-        tar = tarfile.open(tar_file[0], 'r')
+        with tempfile.NamedTemporaryFile('w') as fh:
+            fh.write(resp.read())
+            fh.flush()
+
+            tar = tarfile.open(fh.name, 'r')
         data = tar.extractfile(self.file_name)
         deps = yaml.load(data.read())
         if not deps \
