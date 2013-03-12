@@ -362,6 +362,10 @@ class RosDependencies:
 
     def _write_local_cache(self):
         try:
+            try:
+                os.makedirs(os.path.dirname(self.local_url))
+            except:
+                pass
             with open(self.local_url, 'w') as f:
                 yaml.dump({'cache_version': CACHE_VERSION,
                            'repositories': self.dependencies},
