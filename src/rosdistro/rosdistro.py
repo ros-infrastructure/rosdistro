@@ -366,8 +366,8 @@ class RosDependencies:
                 yaml.dump({'cache_version': CACHE_VERSION,
                            'repositories': self.dependencies},
                           f)
-        except Exception:
-            error("Failed to write local dependency cache")
+        except Exception, ex:
+            error("Failed to write local dependency cache to %s: %s" % (self.local_url, ex))
 
 
 def retrieve_dependencies(package_xml):
