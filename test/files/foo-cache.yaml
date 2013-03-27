@@ -1,0 +1,101 @@
+release_file:
+  gbp-repos: {? You must update to a newer rosdep version by calling..sudo apt-get
+      update && sudo apt-get install python-rosdep (make sure to uninstall the pip
+      version on Ubuntu) : null}
+  platforms: [precise, quantal, raring]
+  repositories:
+    catkin: 
+      tags:
+        release: release/foo/{package}/{version}
+      url: 'https://github.com/ros-gbp/catkin-release.git'
+      version: 0.5.63-0
+    common_msgs:
+      packages: {actionlib_msgs: null, common_msgs: null, diagnostic_msgs: null}
+      tags:
+        release: release/foo/{package}/{version}
+      url: https://github.com/ros-gbp/common_msgs-release.git
+      version: 1.9.14-0
+    control_msgs:
+      packages:
+        control: {subfolder: compatibility/control}
+        control_msgs: null
+      tags:
+        release: release/foo/{package}/{version}
+      url: https://github.com/ros-gbp/control_msgs-release.git
+      version: 1.1.6-0
+  type: release
+  version: 1
+name: foo
+package_xmls: {actionlib_msgs: "<package>\n  <name>actionlib_msgs</name>\n  <version>1.9.14</version>\n\
+    \  <description>\n     actionlib_msgs defines the common messages to interact\
+    \ with an\n     action server and an action client.  For full documentation of\n\
+    \     the actionlib API see\n     the <a href=\"http://www.ros.org/wiki/actionlib\"\
+    >actionlib</a>\n     package.\n  </description>\n  <maintainer email=\"tfoote@willowgarage.com\"\
+    >Tully Foote</maintainer>\n  <license>BSD</license>\n\n  <url>http://ros.org/wiki/actionlib_msgs</url>\n\
+    \  <author>Vijay Pradeep</author>\n\n  <buildtool_depend>catkin</buildtool_depend>\n\
+    \n  <build_depend>message_generation</build_depend>\n  <build_depend>std_msgs</build_depend>\n\
+    \n  <run_depend>message_generation</run_depend> <!-- provide message generation\
+    \ to downstream packages -->\n  <run_depend>message_runtime</run_depend>\n  <run_depend>std_msgs</run_depend>\n\
+    </package>\n", catkin: "<?xml version=\"1.0\"?>\n<package>\n  <name>catkin</name>\n\
+    \  <version>0.5.63</version>\n  <description>Low-level build system macros and\
+    \ infrastructure for ROS.</description>\n  <maintainer email=\"dthomas@willowgarage.com\"\
+    >Dirk Thomas</maintainer>\n  <license>BSD</license>\n\n  <url type=\"website\"\
+    >http://www.ros.org/wiki/catkin</url>\n  <url type=\"bugtracker\">https://github.com/ros/catkin/issues</url>\n\
+    \  <url type=\"repository\">https://github.com/ros/catkin</url>\n\n  <author>Troy\
+    \ Straszheim</author>\n  <author>Morten Kjaergaard</author>\n  <author>Brian Gerkey</author>\n\
+    \  <author>Dirk Thomas</author>\n\n  <build_depend>gtest</build_depend>\n  <build_depend>python-argparse</build_depend>\n\
+    \  <build_depend>python-catkin-pkg</build_depend>\n  <build_depend>python-empy</build_depend>\n\
+    \  <build_depend>python-nose</build_depend>\n\n  <buildtool_depend>cmake</buildtool_depend>\n\
+    \n  <run_depend>cmake</run_depend>\n  <run_depend>gtest</run_depend>\n  <run_depend>python-argparse</run_depend>\n\
+    \  <run_depend>python-catkin-pkg</run_depend>\n  <run_depend>python-empy</run_depend>\n\
+    \  <run_depend>python-nose</run_depend>\n\n  <export>\n    <rosdoc config=\"rosdoc.yaml\"\
+    />\n  </export>\n</package>\n", common_msgs: "<package>\n  <name>common_msgs</name>\n\
+    \  <version>1.9.14</version>\n  <description>\n    common_msgs contains messages\
+    \ that are widely used by other ROS packages.\n    These includes messages for\n\
+    \    actions (<a href=\"http://ros.org/wiki/actionlib_msgs\">actionlib_msgs</a>),\n\
+    \    diagnostics (<a href=\"http://ros.org/wiki/diagnostic_msgs\">diagnostic_msgs</a>),\n\
+    \    geometric primitives (<a href=\"http://ros.org/wiki/geometry_msgs\">geometry_msgs</a>),\n\
+    \    robot navigation (<a href=\"http://ros.org/wiki/nav_msgs\">nav_msgs</a>),\n\
+    \    and common sensors (<a href=\"http://ros.org/wiki/sensor_msgs\">sensor_msgs</a>),\
+    \ such as laser range finders, cameras, point clouds.\n  </description>\n  <maintainer\
+    \ email=\"tfoote@willowgarage.com\">Tully Foote</maintainer>\n  <license>BSD</license>\n\
+    \n  <url>http://www.ros.org/wiki/common_msgs</url>\n\n  <run_depend>actionlib_msgs</run_depend>\n\
+    \  <run_depend>diagnostic_msgs</run_depend>\n  <run_depend>geometry_msgs</run_depend>\n\
+    \  <run_depend>nav_msgs</run_depend>\n  <run_depend>sensor_msgs</run_depend>\n\
+    \  <run_depend>shape_msgs</run_depend>\n  <run_depend>stereo_msgs</run_depend>\n\
+    \  <run_depend>trajectory_msgs</run_depend>\n  <run_depend>visualization_msgs</run_depend>\n\
+    \n  <export>\n    <metapackage/>\n  </export>\n</package>\n", control: "<package>\n\
+    \  <name>control</name>\n  <version>1.1.6</version>\n  <description>\n    This\
+    \ package is essentially an alias for control_msgs, for backward compatibility.\
+    \ Do not depend on this package.\n  </description>\n  <author email=\"sglaser@willowgarage.com\"\
+    >Stuart Glaser</author>\n  <maintainer email=\"control_msgs@willowgarage.com\"\
+    >Willow Garage</maintainer>\n\n  <license>BSD</license>\n\n  <url>http://ros.org/wiki/control_msgs</url>\n\
+    \n  <build_depend>control_msgs</build_depend>\n\n  <run_depend>control_msgs</run_depend>\n\
+    \n  <export>\n    <metapackage/>\n  </export>\n\n</package>\n", control_msgs: "<package>\n\
+    \  <name>control_msgs</name>\n  <version>1.1.6</version>\n  <description>\n  \
+    \  control_msgs contains base messages and actions useful for\n    controlling\
+    \ robots.  It provides representations for controller\n    setpoints and joint\
+    \ and cartesian trajectories.\n  </description>\n  <author email=\"sglaser@willowgarage.com\"\
+    >Stuart Glaser</author>\n  <maintainer email=\"control_msgs@willowgarage.com\"\
+    >Willow Garage</maintainer>\n\n  <license>BSD</license>\n\n  <url>http://ros.org/wiki/control_msgs</url>\n\
+    \n  <buildtool_depend>catkin</buildtool_depend>\n\n  <build_depend>message_generation</build_depend>\n\
+    \  <build_depend>std_msgs</build_depend>\n  <build_depend>trajectory_msgs</build_depend>\n\
+    \  <build_depend>geometry_msgs</build_depend>\n  <build_depend>actionlib_msgs</build_depend>\n\
+    \n\n  <run_depend>message_runtime</run_depend>\n  <run_depend>std_msgs</run_depend>\n\
+    \  <run_depend>trajectory_msgs</run_depend>\n  <run_depend>geometry_msgs</run_depend>\n\
+    \  <run_depend>actionlib_msgs</run_depend>\n\n</package>\n", diagnostic_msgs: "<package>\n\
+    \  <name>diagnostic_msgs</name>\n  <version>1.9.14</version>\n  <description>\n\
+    \    This package holds the diagnostic messages which provide the\n    standardized\
+    \ interface for the diagnostic and runtime monitoring\n    systems in ROS. These\
+    \ messages are currently used by\n    the <a href=\"http://ros.org/wiki/diagnostics\"\
+    >diagnostics</a>\n    Stack, which provides libraries for simple ways to set and\
+    \ access\n    the messages, as well as automated ways to process the diagnostic\n\
+    \    data.\n\n    These messages are used for long term logging and will not be\n\
+    \    changed unless there is a very important reason.\n  </description>\n  <maintainer\
+    \ email=\"tfoote@willowgarage.com\">Tully Foote</maintainer>\n  <license>BSD</license>\n\
+    \n  <url>http://ros.org/wiki/diagnostic_msgs</url>\n  <author email=\"tfoote@willowgarage.com\"\
+    >Tully Foote</author>\n\n  <buildtool_depend>catkin</buildtool_depend>\n\n  <build_depend>message_generation</build_depend>\n\
+    \  <build_depend>std_msgs</build_depend>\n\n  <run_depend>message_runtime</run_depend>\n\
+    \  <run_depend>std_msgs</run_depend>\n</package>\n"}
+type: cache
+version: '1'

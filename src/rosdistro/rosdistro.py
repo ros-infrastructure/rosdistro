@@ -8,8 +8,6 @@ import urllib
 import urllib2
 import yaml
 
-from rospkg import environment
-
 from .common import info
 from .common import warning
 from .common import error
@@ -285,6 +283,7 @@ class RosDependencies:
         if cache_location:
             self.local_url = os.path.join(cache_location, self.file_name)
         else:
+            from rospkg import environment
             self.local_url = os.path.join(environment.get_ros_home(), self.file_name)
         self.server_url = 'http://www.ros.org/rosdistro/%s-dependencies.tar.gz' % name
         self.dependencies = {}

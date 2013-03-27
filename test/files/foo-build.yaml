@@ -1,0 +1,17 @@
+%YAML 1.1
+# ROS build file
+# see REP 137: http://ros.org/reps/rep-0137.html
+---
+type: build
+version: 1
+targets:
+  precise: [amd64, i386]
+  quantal: [amd64, i386]
+  raring: [amd64, i386]
+notifications:
+  emails: [admin@example.com]
+jenkins_url: http://farm.example.com:8080
+apt_target_repository: http://repo.example.com/
+sync:
+  package_count: 123
+

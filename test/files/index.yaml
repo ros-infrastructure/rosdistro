@@ -1,0 +1,15 @@
+%YAML 1.1
+# ROS index file
+# see REP 137: http://ros.org/reps/rep-0137.html
+---
+type: index
+version: 1
+distributions:
+  foo:
+    release: foo.yaml
+    release_build: [foo-build.yaml]
+    release_cache: foo-cache.yaml
+    test: foo-devel.yaml
+    test_build: [foo-devel-build.yaml]
+    doc_folder: doc/
+
