@@ -44,15 +44,15 @@ import yaml
 
 logger = logging.getLogger('rosdistro')
 
-from .build import Build
-from .build_file import BuildFile
-from .index import Index
-from .loader import load_url
-from .manifest_provider.cache import CachedManifestProvider
-from .release import Release
-from .release_cache import ReleaseCache
-from .release_file import ReleaseFile
-from .test_file import TestFile
+from build import Build
+from build_file import BuildFile
+from index import Index
+from loader import load_url
+from manifest_provider.cache import CachedManifestProvider
+from release import Release
+from release_cache import ReleaseCache
+from release_file import ReleaseFile
+from test_file import TestFile
 
 
 def get_index(url):
