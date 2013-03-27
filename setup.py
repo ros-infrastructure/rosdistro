@@ -6,7 +6,10 @@ setup(
     name='rosdistro',
     version='0.1.13',
     packages=['rosdistro'],
-    package_dir = {'rosdistro':'src/rosdistro'},
+    package_dir = {
+        'rosdistro': 'src/rosdistro',
+        'rosdistro.manifest_provider': 'src/rosdistro/manifest_provider'
+    },
     scripts = [
         'scripts/rosdistro',
         'scripts/rosdistro_build_cache',
