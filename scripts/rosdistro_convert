@@ -111,18 +111,20 @@ def _get_tag_template(dist_name, repo, pkg_name, last_repo=None):
     assert 'github.com' in repo['url']
     release_tag = 'release/{0}/{1}/{2}'.format(dist_name, pkg_name, repo['version'])
     url = _github_raw_url(repo['url'], release_tag)
+    print('- ' + pkg_name + ': ' + url)
     try:
         try:
-            urllib2.urlopen(url).read()
+            load_url(url)
             return 'release/%s/{package}/{version}' % dist_name
-        except Exception:  # TODO: catch the correct Exception here, let others raise
+        except urllib2.HTTPError:
             # try alternative tag
             upstream_version = repo['version'].split('-')[0]
             release_tag = 'release/{0}/{1}'.format(pkg_name, upstream_version)
             url = _github_raw_url(repo['url'], release_tag)
-            urllib2.urlopen(url).read()
+            print('- ' + pkg_name + ': ' + url)
+            load_url(url)
             return 'release/{package}/{upstream_version}'
-    except Exception as e:  # TODO: catch the correct Exception here, let others raise
+    except urllib2.HTTPError as e:
         raise RuntimeError('Could not determine tag using %s, %s, %s: %s' % (dist_name, repo, pkg_name, e))
 
 
