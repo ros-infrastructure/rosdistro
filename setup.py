@@ -5,7 +5,10 @@ from setuptools import setup, find_packages
 setup(
     name='rosdistro',
     version='0.1.14',
-    packages=['rosdistro'],
+    packages=[
+        'rosdistro',
+        'rosdistro.manifest_provider'
+    ],
     package_dir = {
         'rosdistro': 'src/rosdistro',
         'rosdistro.manifest_provider': 'src/rosdistro/manifest_provider'
