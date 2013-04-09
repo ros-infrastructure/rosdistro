@@ -54,6 +54,14 @@ from release_cache import ReleaseCache
 from release_file import ReleaseFile
 from test_file import TestFile
 
+DEFAULT_INDEX_URL = 'https://raw.github.com/ros/rosdistro/rep137/releases/index.yaml'
+
+
+def get_index_url():
+    if 'ROSDISTRO_INDEX_URL' in os.environ:
+        return os.environ['ROSDISTRO_INDEX_URL']
+    return DEFAULT_INDEX_URL
+
 
 def get_index(url):
     logger.debug('Load index from "%s"' % url)
