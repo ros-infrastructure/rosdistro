@@ -18,4 +18,8 @@ def test_release_file():
 def test_get_release_file():
     url = 'file://' + FILES_DIR + '/index.yaml'
     i = get_index(url)
-    get_release_file(i, 'foo')
+    rel_file = get_release_file(i, 'foo')
+
+    assert('bar_repo' in rel_file.repositories)
+    repo = rel_file.repositories['bar_repo']
+    assert repo.package_names == ['bar_repo']

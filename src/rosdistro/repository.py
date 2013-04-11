@@ -57,8 +57,11 @@ class Repository(object):
         self.status_description = data.get('status_description', None)
 
         self.package_names = []
-        if 'packages' in data:
+        if 'packages' in data and data['packages']:
             self.package_names = sorted(data['packages'].keys())
+        else:
+            # no package means a single package
+            self.package_names = [self.name]
 
     def get_data(self):
         data = {}
