@@ -41,6 +41,8 @@ class ReleaseFile(TestFile):
 
         for repo in self.repositories.values():
             assert repo.type == 'git'
+            if repo.version is not None:
+                assert 'release' in repo.tags
 
         self.platforms = []
         if 'platforms' in data:

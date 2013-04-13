@@ -41,8 +41,6 @@ class Repository(object):
         self.type = data.get('type', 'git')
         self.url = data['url']
         self.version = data.get('version', None)
-        if self.version is not None:
-            assert 'tags' in data
 
         self.tags = {}
         if 'tags' in data:
