@@ -47,28 +47,29 @@ class Index(object):
         assert self.version == 1
 
         self.distributions = {}
-        for distro_name in sorted(data['distributions']):
-            self.distributions[distro_name] = {}
-            distro_data = data['distributions'][distro_name]
-            for key in distro_data:
-                if key in ['release', 'release_cache', 'test', 'doc_folder']:
-                    list_value = False
-                elif key in ['release_build', 'test_build']:
-                    list_value = True
-                else:
-                    assert False, 'unknown key "%s"' % key
+        if 'distributions' in data and data['distributions']:
+            for distro_name in sorted(data['distributions']):
+                self.distributions[distro_name] = {}
+                distro_data = data['distributions'][distro_name]
+                for key in distro_data:
+                    if key in ['release', 'release_cache', 'test', 'doc_folder']:
+                        list_value = False
+                    elif key in ['release_build', 'test_build']:
+                        list_value = True
+                    else:
+                        assert False, 'unknown key "%s"' % key
 
-                self.distributions[distro_name][key] = []
-                value = distro_data[key]
-                if list_value != isinstance(value, types.ListType):
-                    assert False, 'wrong type of key "%s"' % key
+                    self.distributions[distro_name][key] = []
+                    value = distro_data[key]
+                    if list_value != isinstance(value, types.ListType):
+                        assert False, 'wrong type of key "%s"' % key
 
-                if not list_value:
-                    value = [value]
-                for v in value:
-                    parts = urlparse(v)
-                    if not parts[0]:  # schema
-                        v = os.path.join(base_url, v)
-                    self.distributions[distro_name][key].append(v)
-                if not list_value:
-                    self.distributions[distro_name][key] = self.distributions[distro_name][key][0]
+                    if not list_value:
+                        value = [value]
+                    for v in value:
+                        parts = urlparse(v)
+                        if not parts[0]:  # schema
+                            v = os.path.join(base_url, v)
+                        self.distributions[distro_name][key].append(v)
+                    if not list_value:
+                        self.distributions[distro_name][key] = self.distributions[distro_name][key][0]
