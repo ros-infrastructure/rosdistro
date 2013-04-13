@@ -33,7 +33,13 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import print_function
+
 import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import urllib2
 import yaml
 
@@ -166,8 +172,70 @@ def convert_test(dist_name):
         f.write(yaml_str)
 
 
+def convert_doc(dist_name):
+    base = tempfile.mktemp()
+    rc = subprocess.call(['git', 'clone', 'git://github.com/ros/rosdistro.git', base])
+    if rc:
+        print('Failed to checkout rosdistro repo', file=sys.stderr)
+        shutil.rmtree(base)
+        return
+
+    doc_base = os.path.join(base, 'doc', dist_name)
+    rosinstalls = {}
+    rosinstall_depends = {}
+    for filename in os.listdir(doc_base):
+        if filename.endswith('.rosinstall'):
+            name = os.path.splitext(os.path.basename(filename))[0]
+            with open(os.path.join(doc_base, filename)) as f:
+                data = yaml.load(f)
+            if name.endswith('_depends'):
+                rosinstall_depends[name] = data
+            else:
+                rosinstalls[name] = data
+    shutil.rmtree(base)
+    # currently no doc has depends in groovy and hydro
+    assert not rosinstall_depends
+
+    output = {}
+    output['type'] = 'doc'
+    output['version'] = 1
+    output['repositories'] = {}
+
+    for repo_name in sorted(rosinstalls.keys()):
+        for input_repo in rosinstalls[repo_name]:
+            output_repo = {}
+            output_repo['type'] = input_repo.keys()[0]
+            input_data = input_repo[output_repo['type']]
+            output_repo['url'] = input_data['uri']
+            if 'version' in input_data:
+                output_repo['version'] = input_data['version']
+            local_name = input_data['local-name']
+            if local_name in output['repositories']:
+                if output_repo == output['repositories'][local_name]:
+                    print('- skip duplicate "%s"' % local_name)
+                    continue
+            key = local_name
+            i = 1
+            while key in output['repositories']:
+                i += 1
+                key = local_name + '_%d' % i
+                print('- duplicate: %s %s -> %s' % (repo_name, local_name, key))
+            if i > 1:
+                # ignore duplicates
+                print('  ignoring duplicate')
+                continue
+            output['repositories'][key] = output_repo
+
+    yaml_str = yaml.dump(output, default_flow_style=False)
+    yaml_str = yaml_str.replace(': null', ':')
+    with open(dist_name + '-doc.yaml', 'w') as f:
+        f.write(yaml_str)
+
+
 if __name__ == '__main__':
     targets = get_targets()
     for distro in ['groovy', 'hydro']:
+        print('\nConverting "%s"\n' % distro)
         convert_release(distro, targets)
         convert_test(distro)
+        convert_doc(distro)
