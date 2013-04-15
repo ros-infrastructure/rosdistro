@@ -46,6 +46,7 @@ logger = logging.getLogger('rosdistro')
 
 from build import Build
 from build_file import BuildFile
+from doc_file import DocFile
 from index import Index
 from loader import load_url
 from manifest_provider.cache import CachedManifestProvider
@@ -170,3 +171,8 @@ def get_release_file_data(index, dist_name, type_):
         for u in url:
             data.append(_load_yaml_data(u))
     return data
+
+
+def get_doc_file(index, dist_name):
+    data = get_release_file_data(index, dist_name, 'doc')
+    return DocFile(dist_name, data)

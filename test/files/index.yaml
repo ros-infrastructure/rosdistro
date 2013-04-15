@@ -11,5 +11,5 @@ distributions:
     release_cache: foo-cache.yaml
     test: foo-devel.yaml
     test_build: [foo-devel-build.yaml]
-    doc_folder: doc/
+    doc: foo-doc.yaml
 

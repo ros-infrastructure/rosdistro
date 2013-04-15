@@ -31,45 +31,39 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import os
-import types
-try:
-    from urllib.parse import urlparse
-except ImportError:
-    from urlparse import urlparse
+from .repository import Repository
 
 
-class Index(object):
+class DocFile(object):
 
-    def __init__(self, data, base_url):
-        assert data['type'] == 'index'
+    def __init__(self, name, data, expected_type=None):
+        expected_type = expected_type if expected_type is not None else 'doc'
+        assert data['type'] == str(expected_type)
+        self._type = str(expected_type)
         self.version = int(data['version'])
         assert self.version == 1
 
-        self.distributions = {}
-        if 'distributions' in data and data['distributions']:
-            for distro_name in sorted(data['distributions']):
-                self.distributions[distro_name] = {}
-                distro_data = data['distributions'][distro_name]
-                for key in distro_data:
-                    if key in ['release', 'release_cache', 'test', 'doc']:
-                        list_value = False
-                    elif key in ['release_build', 'test_build']:
-                        list_value = True
-                    else:
-                        assert False, 'unknown key "%s"' % key
+        self.name = name
 
-                    self.distributions[distro_name][key] = []
-                    value = distro_data[key]
-                    if list_value != isinstance(value, types.ListType):
-                        assert False, 'wrong type of key "%s"' % key
+        self.repositories = {}
+        if 'repositories' in data:
+            for repo_name in data['repositories']:
+                repo_data = data['repositories'][repo_name]
+                repo = Repository(repo_name, repo_data)
+                # TODO use smaller data structure
+                repo.tags = None
+                repo.status = None
+                repo.status_description = None
+                repo.package_names = None
 
-                    if not list_value:
-                        value = [value]
-                    for v in value:
-                        parts = urlparse(v)
-                        if not parts[0]:  # schema
-                            v = os.path.join(base_url, v)
-                        self.distributions[distro_name][key].append(v)
-                    if not list_value:
-                        self.distributions[distro_name][key] = self.distributions[distro_name][key][0]
+                self.repositories[repo_name] = repo
+
+    def get_data(self):
+        data = {}
+        data['type'] = self._type
+        data['version'] = 1
+        data['repositories'] = {}
+        for repo_name in sorted(self.repositories):
+            repo = self.repositories[repo_name]
+            data['repositories'][repo_name] = repo.get_data()
+        return data
