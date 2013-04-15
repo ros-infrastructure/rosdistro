@@ -43,4 +43,7 @@ def load_url(url, retry_on_503=3, retry_period=1):
             time.sleep(retry_period)
             return load_url(url, retry_on_503 - 1, retry_period)
         raise
+    except urllib2.URLError as e:
+        e.reason += ' (%s)' % url
+        raise
     return fh.read()
