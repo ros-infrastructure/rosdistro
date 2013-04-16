@@ -55,21 +55,27 @@ def git_manifest_provider(_dist_name, repo, pkg_name):
 
 def _get_package_xml(url, tag):
     base = tempfile.mkdtemp('rosdistro')
-    cmd = [_git_client_executable, 'clone', '--branch', tag, '--depth', '0', url, base]
-    result = _run_command(cmd, base)
     package_xml = None
-    if result['returncode'] == 0:
-        filename = os.path.join(base, 'package.xml')
-        if os.path.exists(filename):
-            with open(filename, 'r') as f:
-                package_xml = f.read()
-        else:
-            logger.debug('Could not find package.xml in repository "%s"' % url)
+    # git 1.7.9 does not support cloning a tag directly, so doing it in two steps
+    cmd = [_git_client_executable, 'clone', '--depth', '0', url, base]
+    result = _run_command(cmd, base)
+    if result['returncode'] != 0:
+        logger.debug('Could not shallow clone repository "%s"' % url)
     else:
-        logger.debug('Could not shallow clone tag "%s" of repository "%s"' % (tag, url))
+        cmd = [_git_client_executable, 'checkout', tag]
+        result = _run_command(cmd, base)
+        if result['returncode'] != 0:
+            logger.debug('Could not checkout tag "%s" of repository "%s"' % (tag, url))
+        else:
+            filename = os.path.join(base, 'package.xml')
+            if os.path.exists(filename):
+                with open(filename, 'r') as f:
+                    package_xml = f.read()
+            else:
+                logger.debug('Could not find package.xml in repository "%s"' % url)
     shutil.rmtree(base)
     if package_xml is None:
-        raise RuntimeError('unable to clone repository')
+        raise RuntimeError('unable to fetch package.xml')
     return package_xml
 
 
