@@ -35,15 +35,14 @@ import time
 import urllib2
 
 
-def load_url(url, retry_on_503=3, retry_period=1):
+def load_url(url, retry_on_503=2, retry_period=1, timeout=5):
     try:
-        fh = urllib2.urlopen(url)
+        fh = urllib2.urlopen(url, timeout=timeout)
     except urllib2.HTTPError as e:
-        if retry_on_503 and e.code == 503:
+        if e.code == 503 and retry_on_503:
             time.sleep(retry_period)
             return load_url(url, retry_on_503 - 1, retry_period)
         raise
     except urllib2.URLError as e:
-        e.reason += ' (%s)' % url
-        raise
+        raise urllib2.URLError(str(e) + ' (%s)' % url)
     return fh.read()
