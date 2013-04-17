@@ -5,22 +5,16 @@ from setuptools import setup, find_packages
 setup(
     name='rosdistro',
     version='0.1.18',
-    packages=[
-        'rosdistro',
-        'rosdistro.manifest_provider'
-    ],
-    package_dir = {
-        'rosdistro': 'src/rosdistro',
-        'rosdistro.manifest_provider': 'src/rosdistro/manifest_provider'
-    },
+    install_requires=['empy', 'PyYAML', 'argparse', 'rospkg', 'distribute'],
+    packages = find_packages('src'),
+    package_dir = {'': 'src'},
+    package_data = {'rosdistro': ['resources/templates/*']},
     scripts = [
         'scripts/rosdistro',
         'scripts/rosdistro_build_cache',
         'scripts/rosdistro_convert',
         'scripts/rosdistro_generate_cache'
     ],
-    install_requires=['empy', 'PyYAML', 'argparse', 'rospkg', 'distribute'],
-    package_data = {'rosdistro': ['resources/templates/*']},
     author='Wim Meeussen',
     author_email='wim@hidof.com',
     maintainer='Dirk Thomas',
