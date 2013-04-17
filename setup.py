@@ -5,7 +5,7 @@ from setuptools import setup, find_packages
 setup(
     name='rosdistro',
     version='0.1.18',
-    install_requires=['empy', 'PyYAML', 'argparse', 'rospkg', 'distribute'],
+    install_requires=['PyYAML', 'argparse', 'rospkg', 'distribute'],
     packages = find_packages('src'),
     package_dir = {'': 'src'},
     package_data = {'rosdistro': ['resources/templates/*']},

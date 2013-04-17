@@ -47,6 +47,7 @@ logger = logging.getLogger('rosdistro')
 from build import Build
 from build_file import BuildFile
 from doc_file import DocFile
+from external.appdirs import user_config_dir, site_config_dir
 from index import Index
 from loader import load_url
 from manifest_provider.cache import CachedManifestProvider
@@ -54,7 +55,6 @@ from release import Release
 from release_cache import ReleaseCache
 from release_file import ReleaseFile
 from test_file import TestFile
-from external.appdirs import user_config_dir, site_config_dir
 
 DEFAULT_INDEX_URL = 'https://raw.github.com/ros/rosdistro/rep137/releases/index.yaml'
 
@@ -74,14 +74,14 @@ def get_index_url():
     cfg_file = 'config.yaml'
 
     # first, look for the user configuration (usually ~/.config/rosdistro)
-    user_cfg = os.path.join(user_config_dir('rosdistro'), cfg_file)
-    index_url = read_cfg_index_url(user_cfg)
+    user_cfg_path = os.path.join(user_config_dir('rosdistro'), cfg_file)
+    index_url = read_cfg_index_url(user_cfg_path)
     if index_url is not None:
         return index_url
 
     # if not found, look for the global configuration *usually /etc/xdg/rosdistro)
-    site_cfg = os.path.join(site_config_dir('rosdistro', multipath=True), cfg_file).split(os.pathsep)
-    for scfg in site_cfg:
+    site_cfg_paths = os.path.join(site_config_dir('rosdistro', multipath=True), cfg_file).split(os.pathsep)
+    for scfg in site_cfg_paths:
         index_url = read_cfg_index_url(scfg)
         if index_url is not None:
             return index_url
