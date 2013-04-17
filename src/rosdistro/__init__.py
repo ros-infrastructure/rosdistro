@@ -54,13 +54,32 @@ from release import Release
 from release_cache import ReleaseCache
 from release_file import ReleaseFile
 from test_file import TestFile
+from .appdirs import user_config_dir, site_config_dir
 
 DEFAULT_INDEX_URL = 'https://raw.github.com/ros/rosdistro/rep137/releases/index.yaml'
 
 
 def get_index_url():
+    # environment variable has precedence over configuration files
     if 'ROSDISTRO_INDEX_URL' in os.environ:
         return os.environ['ROSDISTRO_INDEX_URL']
+
+    index_url_cfg_file = 'index_url'
+
+    # first, look for the user configuration (usually ~/.config/rosdistro)
+    user_cfg = os.path.join(user_config_dir('rosdistro'), index_url_cfg_file)
+    if os.path.exists(user_cfg):
+        with open(user_cfg) as f:
+            return f.read().strip()
+
+    # if not found, look for the global configuration *usually /etc/xdg/rosdistro)
+    site_cfg = os.path.join(site_config_dir('rosdistro', multipath=True), index_url_cfg_file).split(os.pathsep)
+    for scfg in site_cfg:
+        if os.path.exists(scfg):
+            with open(scfg) as f:
+                return f.read().strip()
+
+    # if nothing is found, use the default (provided by OSRF)
     return DEFAULT_INDEX_URL
 
 
