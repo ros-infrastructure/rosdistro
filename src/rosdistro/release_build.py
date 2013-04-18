@@ -31,43 +31,30 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .repository import Repository
 
+class ReleaseBuild(object):
 
-class DocFile(object):
+    def __init__(self, dist, release_build_file):
+        self._dist = dist
+        self._build_file = release_build_file
 
-    _type = 'doc'
+        self._verify_package_names(self._build_file.package_whitelist)
+        self._verify_package_names(self._build_file.package_blacklist)
 
-    def __init__(self, name, data):
-        assert 'type' in data and data['type'] == DocFile._type
-        assert 'version' in data and int(data['version']) == 1
-        self.version = data['version']
+        for platform in self._build_file.targets:
+            assert platform in self._dist.platforms
 
-        self.name = name
+        self._verify_package_names(self._build_file.sync_packages)
 
-        self.repositories = {}
-        self.repository_dependencies = {}
-        if 'repositories' in data:
-            for repo_name in data['repositories']:
-                repo_data = data['repositories'][repo_name]
-                repo = Repository(repo_name, repo_data)
-                self.repositories[repo_name] = repo
-                self.repository_dependencies[repo_name] = []
-                if 'depends' in repo_data:
-                    for dep in repo_data['depends']:
-                        self.repository_dependencies[repo_name].append(dep)
-        for repo_name in self.repositories:
-            for dep_name in self.repository_dependencies[repo_name]:
-                assert dep_name in self.repositories
+    def _verify_package_names(self, pkg_names):
+        if pkg_names:
+            for pkg_name in pkg_names:
+                assert pkg_name in self._dist.packages
 
-    def get_data(self):
-        data = {}
-        data['type'] = DocFile._type
-        data['version'] = 1
-        data['repositories'] = {}
-        for repo_name in sorted(self.repositories):
-            repo = self.repositories[repo_name]
-            data['repositories'][repo_name] = repo.get_data()
-            if self.repository_dependencies[repo_name]:
-                data['repositories'][repo_name]['depends'] = self.repository_dependencies[repo_name]
-        return data
+    def __getattr__(self, name):
+        return getattr(self._build_file, name)
+
+    def get_package_names(self):
+        if not self._build_file.package_whitelist and not self._build_file.package_blacklist:
+            return self._dist.get_package_names()
+        assert False

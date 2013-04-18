@@ -44,18 +44,24 @@ import yaml
 
 logger = logging.getLogger('rosdistro')
 
-from build import Build
-from build_file import BuildFile
+from doc_build_file import DocBuildFile
 from doc_file import DocFile
 from index import Index
 from loader import load_url
 from manifest_provider.cache import CachedManifestProvider
 from release import Release
+from release_build import ReleaseBuild
+from release_build_file import ReleaseBuildFile
 from release_cache import ReleaseCache
 from release_file import ReleaseFile
-from test_file import TestFile
+from source_build_file import SourceBuildFile
+from source_file import SourceFile
 
-DEFAULT_INDEX_URL = 'https://raw.github.com/ros/rosdistro/rep137/releases/index.yaml'
+### index information
+
+
+#DEFAULT_INDEX_URL = 'https://raw.github.com/ros/rosdistro/rep137/releases/index.yaml'
+DEFAULT_INDEX_URL = 'file:///home/dthomas/wg/github/ros/rosdistro/releases/index.yaml'
 
 
 def get_index_url():
@@ -72,6 +78,9 @@ def get_index(url):
     return Index(data, base_url)
 
 
+### release information
+
+
 def get_cached_release(index, dist_name, cache=None, allow_lazy_load=False):
     if cache is None:
         try:
@@ -80,7 +89,7 @@ def get_cached_release(index, dist_name, cache=None, allow_lazy_load=False):
             if not allow_lazy_load:
                 raise
             # create empty cache instance
-            rel_file_data = get_release_file_data(index, dist_name, 'release')
+            rel_file_data = _get_dist_file_data(index, dist_name, 'release')
             cache = ReleaseCache(dist_name, rel_file_data=rel_file_data)
     rel = Release(
         cache.release_file,
@@ -95,7 +104,7 @@ def get_release(index, dist_name):
 
 
 def get_release_file(index, dist_name):
-    data = get_release_file_data(index, dist_name, 'release')
+    data = _get_dist_file_data(index, dist_name, 'release')
     return ReleaseFile(dist_name, data)
 
 
@@ -113,45 +122,58 @@ def get_release_cache(index, dist_name):
     return ReleaseCache(dist_name, data)
 
 
-def get_test_file(index, dist_name):
-    data = get_release_file_data(index, dist_name, 'test')
-    return TestFile(dist_name, data)
-
-
-def get_release_build_files(index, dist_name):
-    return _get_build_files(index, dist_name, 'release_build')
-
-
-def get_test_build_files(index, dist_name):
-    return _get_build_files(index, dist_name, 'test_build')
-
-
-def _get_build_files(index, dist_name, type_):
-    data = get_release_file_data(index, dist_name, type_)
-    build_files = []
-    for d in data:
-        build_files.append(BuildFile(dist_name, d))
-    return build_files
-
-
-def get_release_builds(index, dist):
-    build_files = get_release_build_files(index, dist.name)
-    return _get_builds(dist, build_files)
-
-
-def get_test_builds(index, dist):
-    build_files = get_test_build_files(index, dist.name)
-    return _get_builds(dist, build_files)
-
-
-def _get_builds(dist, build_files):
+def get_release_builds(index, release_file):
+    build_files = get_release_build_files(index, release_file.name)
     builds = []
     for build_file in build_files:
-        builds.append(Build(dist, build_file))
+        builds.append(ReleaseBuild(release_file, build_file))
     return builds
 
 
-def get_release_file_data(index, dist_name, type_):
+def get_release_build_files(index, dist_name):
+    data = _get_dist_file_data(index, dist_name, 'release_builds')
+    build_files = []
+    for d in data:
+        build_files.append(ReleaseBuildFile(dist_name, d))
+    return build_files
+
+
+### source information
+
+
+def get_source_file(index, dist_name):
+    data = _get_dist_file_data(index, dist_name, 'source')
+    return SourceFile(dist_name, data)
+
+
+def get_source_build_files(index, dist_name):
+    data = _get_dist_file_data(index, dist_name, 'source_builds')
+    build_files = []
+    for d in data:
+        build_files.append(SourceBuildFile(dist_name, d))
+    return build_files
+
+
+### doc information
+
+
+def get_doc_file(index, dist_name):
+    data = _get_dist_file_data(index, dist_name, 'doc')
+    return DocFile(dist_name, data)
+
+
+def get_doc_build_files(index, dist_name):
+    data = _get_dist_file_data(index, dist_name, 'doc_builds')
+    build_files = []
+    for d in data:
+        build_files.append(DocBuildFile(dist_name, d))
+    return build_files
+
+
+### internal
+
+
+def _get_dist_file_data(index, dist_name, type_):
     if dist_name not in index.distributions.keys():
         raise RuntimeError("Unknown release: '{0}'".format(dist_name))
     dist = index.distributions[dist_name]
@@ -171,8 +193,3 @@ def get_release_file_data(index, dist_name, type_):
         for u in url:
             data.append(_load_yaml_data(u))
     return data
-
-
-def get_doc_file(index, dist_name):
-    data = get_release_file_data(index, dist_name, 'doc')
-    return DocFile(dist_name, data)

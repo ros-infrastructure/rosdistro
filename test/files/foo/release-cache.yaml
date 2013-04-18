@@ -1,7 +1,4 @@
 release_file:
-  gbp-repos: {? You must update to a newer rosdep version by calling..sudo apt-get
-      update && sudo apt-get install python-rosdep (make sure to uninstall the pip
-      version on Ubuntu) : null}
   platforms: [precise, quantal, raring]
   repositories:
     catkin: 

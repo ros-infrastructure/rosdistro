@@ -34,40 +34,55 @@
 import difflib
 import yaml
 
-from . import get_index, get_release_file, get_test_file
+from . import get_doc_file, get_index, get_release_file, get_source_file
 from .loader import load_url
 
 
 def verify_files_parsable(index_url):
     index = get_index(index_url)
     for dist_name in sorted(index.distributions):
-        if dist_name not in ['groovy']:
-            continue
         dist = index.distributions[dist_name]
         if 'release' in dist:
             url = dist['release']
             yaml_str = load_url(url)
-            dist_file = get_release_file(index, dist_name)
-            if yaml_str != _to_yaml(dist_file.get_data()):
+            rel_file = get_release_file(index, dist_name)
+            if yaml_str != _to_yaml(rel_file.get_data()):
                 diff = difflib.unified_diff(
-                    yaml_str.splitlines(), _to_yaml(dist_file.get_data()).splitlines(),
+                    _clean_yaml(yaml_str), _to_yaml(rel_file.get_data()).splitlines(),
                     'release.org', 'release.load-and-save',
                     n=0, lineterm='')
                 for line in diff:
                     print(line)
-                assert False
-        if 'test' in dist:
-            url = dist['test']
+                #assert False
+        elif 'source' in dist:
+            url = dist['source']
             yaml_str = load_url(url)
-            dist_file = get_test_file(index, dist_name)
-            if yaml_str != _to_yaml(dist_file.get_data()):
+            src_file = get_source_file(index, dist_name)
+            if yaml_str != _to_yaml(src_file.get_data()):
                 diff = difflib.unified_diff(
-                    yaml_str.splitlines(), _to_yaml(dist_file.get_data()).splitlines(),
-                    'test.org', 'test.load-and-save',
+                    _clean_yaml(yaml_str), _to_yaml(src_file.get_data()).splitlines(),
+                    'source.org', 'source.load-and-save',
                     n=0, lineterm='')
                 for line in diff:
                     print(line)
-                assert False
+                #assert False
+        elif 'doc' in dist:
+            url = dist['doc']
+            yaml_str = load_url(url)
+            doc_file = get_doc_file(index, dist_name)
+            if yaml_str != _to_yaml(doc_file.get_data()):
+                diff = difflib.unified_diff(
+                    _clean_yaml(yaml_str), _to_yaml(doc_file.get_data()).splitlines(),
+                    'source.org', 'source.load-and-save',
+                    n=0, lineterm='')
+                for line in diff:
+                    print(line)
+                #assert False
+
+
+def _clean_yaml(data):
+    lines = data.splitlines()
+    return [l for l in lines if l != '%YAML 1.1' and not l.startswith('#')]
 
 
 def _to_yaml(data):

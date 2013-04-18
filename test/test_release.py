@@ -9,17 +9,34 @@ FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), 'files'))
 
 
 def test_release_file():
-    url = 'file://' + FILES_DIR + '/foo.yaml'
+    url = 'file://' + FILES_DIR + '/foo/release.yaml'
     yaml_str = load_url(url)
     data = yaml.load(yaml_str)
-    ReleaseFile('foo', data)
+    rel_file = ReleaseFile('foo', data)
+    _validate_rel_file(rel_file)
 
 
 def test_get_release_file():
     url = 'file://' + FILES_DIR + '/index.yaml'
     i = get_index(url)
     rel_file = get_release_file(i, 'foo')
+    _validate_rel_file(rel_file)
 
+
+def _validate_rel_file(rel_file):
     assert('bar_repo' in rel_file.repositories)
     repo = rel_file.repositories['bar_repo']
     assert repo.package_names == ['bar_repo']
+    assert 'bar_repo' in rel_file.packages
+    pkg = rel_file.packages['bar_repo']
+    assert pkg.subfolder == '.'
+
+    assert'baz-repo' in rel_file.repositories
+    repo = rel_file.repositories['baz-repo']
+    assert set(repo.package_names) == set(['baz_pkg1', 'baz_pkg2'])
+    assert 'baz_pkg1' in rel_file.packages
+    pkg = rel_file.packages['baz_pkg1']
+    assert pkg.subfolder == 'baz_pkg1'
+    assert 'baz_pkg2' in rel_file.packages
+    pkg = rel_file.packages['baz_pkg2']
+    assert pkg.subfolder == 'here/is/pkg2'

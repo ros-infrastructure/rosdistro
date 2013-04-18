@@ -35,13 +35,13 @@ import subprocess
 import tempfile
 import shutil
 
+
 def test_tripwire():
     try:
         directory = tempfile.mkdtemp()
-        cmd = ("./scripts/rosdistro_generate_cache groovy --cache=%s"%directory)
+        cmd = ("./scripts/rosdistro_generate_cache groovy --cache=%s" % directory)
         print cmd
         assert subprocess.call(cmd.split()) == 0, "rosdistro_generate_cache returned false"
-        
 
     finally:
         shutil.rmtree(directory)

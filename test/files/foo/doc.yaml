@@ -1,0 +1,16 @@
+%YAML 1.1
+# ROS doc file
+# see REP 137: http://ros.org/reps/rep-0137.html
+---
+type: doc
+version: 1
+repositories:
+  bar_repo:
+    type: git
+    url: https://github.com/example-test/bar_repo.git
+    version: master
+  baz-repo:
+    type: hg
+    url: https://bitbucket.org/baz-test/baz-repo
+    version: default
+    depends: [bar_repo]

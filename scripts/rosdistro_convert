@@ -75,7 +75,6 @@ def convert_release(dist_name, targets):
             last_dist = ReleaseFile(dist_name, last_data)
 
     output = {}
-    output['gbp-repos'] = {'You must update to a newer rosdep version by calling..sudo apt-get update && sudo apt-get install python-rosdep (make sure to uninstall the pip version on Ubuntu': None}
     output['type'] = 'release'
     output['version'] = 1
     output['platforms'] = targets[dist_name]
@@ -141,7 +140,7 @@ def _github_raw_url(url, tag):
     return url
 
 
-def convert_test(dist_name):
+def convert_source(dist_name):
     url = BASE_SRC_URL + '/releases/%s-devel.yaml' % dist_name
     print('Load "%s"' % url)
     yaml_str = load_url(url)
@@ -237,5 +236,5 @@ if __name__ == '__main__':
     for distro in ['groovy', 'hydro']:
         print('\nConverting "%s"\n' % distro)
         convert_release(distro, targets)
-        convert_test(distro)
+        convert_source(distro)
         convert_doc(distro)

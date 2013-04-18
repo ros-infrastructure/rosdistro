@@ -31,30 +31,33 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from .repository import Repository
 
-class Build(object):
 
-    def __init__(self, dist, build_file):
-        self._dist = dist
-        self._build_file = build_file
+class SourceFile(object):
 
-        self._verify_package_names(self._build_file.package_whitelist)
-        self._verify_package_names(self._build_file.package_blacklist)
+    _type = 'source'
 
-        for platform in self._build_file.targets:
-            assert platform in self._dist.platforms
+    def __init__(self, name, data):
+        assert 'type' in data and data['type'] == SourceFile._type
+        assert 'version' in data and int(data['version']) == 1
+        self.version = data['version']
 
-        self._verify_package_names(self._build_file.sync_packages)
+        self.name = name
 
-    def _verify_package_names(self, pkg_names):
-        if pkg_names:
-            for pkg_name in pkg_names:
-                assert pkg_name in self._dist.packages
+        self.repositories = {}
+        if 'repositories' in data:
+            for repo_name in data['repositories']:
+                repo_data = data['repositories'][repo_name]
+                repo = Repository(repo_name, repo_data)
+                self.repositories[repo_name] = repo
 
-    def __getattr__(self, name):
-        return getattr(self._build_file, name)
-
-    def get_package_names(self):
-        if not self._build_file.package_whitelist and not self._build_file.package_blacklist:
-            return self._dist.get_package_names()
-        assert False
+    def get_data(self):
+        data = {}
+        data['type'] = SourceFile._type
+        data['version'] = self.version
+        data['repositories'] = {}
+        for repo_name in sorted(self.repositories):
+            repo = self.repositories[repo_name]
+            data['repositories'][repo_name] = repo.get_data()
+        return data

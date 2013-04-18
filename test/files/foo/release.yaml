@@ -1,0 +1,27 @@
+%YAML 1.1
+# ROS release file
+# see REP 137: http://ros.org/reps/rep-0137.html
+---
+platforms:
+- precise
+- quantal
+- raring
+repositories:
+  bar_repo:
+    tags:
+      release: release/foo/{package}/{version}
+    url: https://github.com/example-release/bar_repo.git
+    version: 0.1.2
+  baz-repo:
+    packages:
+      baz_pkg1:
+      baz_pkg2:
+        subfolder: here/is/pkg2
+    status: end-of-life
+    status_description: the repository has not been updated since 1995
+    tags:
+      release: release/foo/{package}/{version}
+    url: https://example.com/release/baz-repo.git
+    version: 7.7.7-7
+type: release
+version: 1

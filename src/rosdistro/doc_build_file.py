@@ -31,28 +31,32 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from .repository import Repository
 
-class BuildFile(object):
+
+class DocBuildFile(object):
+
+    _type = 'doc-build'
 
     def __init__(self, name, data):
-        assert data['type'] == 'build'
-        self.version = int(data['version'])
-        assert self.version == 1
+        assert 'type' in data and data['type'] == DocBuildFile._type
+        assert 'version' in data and int(data['version']) == 1
+        self.version = data['version']
 
         self.name = name
 
-        self.package_whitelist = []
-        if 'package_whitelist' in data:
-            self.package_whitelist = data['package_whitelist']
-            assert isinstance(self.package_whitelist, list)
-        self.package_blacklist = []
-        if 'package_blacklist' in data:
-            self.package_blacklist = data['package_blacklist']
-            assert isinstance(self.package_blacklist, list)
+        self.repository_whitelist = []
+        if 'repository_whitelist' in data:
+            self.repository_whitelist = data['repository_whitelist']
+            assert isinstance(self.repository_whitelist, list)
+        self.repository_blacklist = []
+        if 'repository_blacklist' in data:
+            self.repository_blacklist = data['repository_blacklist']
+            assert isinstance(self.repository_blacklist, list)
 
         self.notify_emails = []
-        self.notify_maintainers = False
-        self.notift_committers = False
+        self.notify_maintainers = None
+        self.notify_committers = None
         if 'notifications' in data:
             if 'emails' in data['notifications']:
                 self.notify_emails = data['notifications']['emails']
@@ -60,12 +64,11 @@ class BuildFile(object):
             if 'maintainers' in data['notifications'] and data['notifications']['maintainers']:
                 self.notify_maintainers = True
             if 'committers' in data['notifications'] and data['notifications']['committers']:
-                self.notift_committers = True
+                self.notify_committers = True
 
         assert 'targets' in data
-        assert data['targets']
         self.targets = {}
-        for platform_name in data['targets']:
+        for platform_name in data['targets'].keys():
             platform_name = str(platform_name)
             assert platform_name not in self.targets
             self.targets[platform_name] = []
@@ -74,57 +77,45 @@ class BuildFile(object):
 
         assert 'jenkins_url' in data
         self.jenkins_url = str(data['jenkins_url'])
-        self.apt_mirrors = []
-        if 'apt_mirrors' in data:
-            self.apt_mirrors = data['apt_mirrors']
-            assert isinstance(self.apt_mirrors, list)
-        self.apt_target_repository = None
-        if 'apt_target_repository' in data:
-            self.apt_target_repository = str(data['apt_target_repository'])
-            if not self.apt_mirrors:
-                self.apt_mirrors.append(self.apt_target_repository)
-        assert self.apt_mirrors
+        self.jenkins_job_timeout = None
+        if 'jenkins_job_timeout' in data:
+            self.jenkins_job_timeout = int(data['jenkins_job_timeout'])
 
-        self.sync_package_count = None
-        self.sync_packages = []
-        if 'sync' in data:
-            if 'package_count' in data['sync']:
-                self.sync_package_count = int(data['sync']['package_count'])
-            if 'packages' in data['sync']:
-                self.notify_maintainers = data['sync']['packages']
-                assert isinstance(self.sync_packages, list)
+        assert 'apt_mirrors' in data
+        self.apt_mirrors = data['apt_mirrors']
+        assert isinstance(self.apt_mirrors, list)
+
+        assert 'doc_tag_index_repository' in data
+        self.doc_tag_index_repository = Repository('doc_tag_index', data['doc_tag_index_repository'])
 
     def get_data(self):
         data = {}
-        data['type'] = 'build'
+        data['type'] = DocBuildFile._type
         data['version'] = 1
-        if self.package_whitelist:
-            assert isinstance(self.notify_emails, list)
-            data['package_whitelist'] = self.package_whitelist
-        data['package_blacklist'] = self.package_blacklist
+        if self.repository_whitelist:
+            data['repository_whitelist'] = self.repository_whitelist
+        if self.repository_blacklist:
+            data['repository_blacklist'] = self.repository_blacklist
 
-        if self.notify_emails or self.notify_maintainers or self.notift_committers:
+        if self.notify_emails or self.notify_maintainers or self.notify_committers:
             data['notifications'] = {}
             if self.notify_emails:
-                assert isinstance(self.notify_emails, list)
                 data['notifications']['emails'] = self.notify_emails
             if self.notify_maintainers is not None:
                 data['notifications']['maintainers'] = bool(self.notify_maintainers)
-            if self.notift_committers is not None:
-                data['notifications']['committers'] = bool(self.notift_committers)
+            if self.notify_committers is not None:
+                data['notifications']['committers'] = bool(self.notify_committers)
 
         data['targets'] = {}
         for platform_name in self.targets:
-            assert isinstance(self.targets[platform_name], list)
             data['targets'][platform_name] = self.targets[platform_name]
 
         data['jenkins_url'] = self.jenkins_url
-        if self.apt_mirrors:
-            data['apt_mirrors'] = []
-            if len(self.apt_mirrors) != 1 or self.apt_mirrors[0] != self.apt_target_repository:
-                for mirror in self.apt_mirrors:
-                    data['apt_mirrors'].append(mirror)
-        if self.apt_target_repository:
-            data['apt_target_repository'] = self.apt_target_repository
+        if self.jenkins_job_timeout:
+            data['jenkins_job_timeout'] = self.jenkins_job_timeout
+
+        data['apt_mirrors'] = self.apt_mirrors
+
+        data['doc_tag_index_repository'] = self.doc_tag_index_repository.get_data()
 
         return data

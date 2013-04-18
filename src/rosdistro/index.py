@@ -52,9 +52,9 @@ class Index(object):
                 self.distributions[distro_name] = {}
                 distro_data = data['distributions'][distro_name]
                 for key in distro_data:
-                    if key in ['release', 'release_cache', 'test', 'doc']:
+                    if key in ['release', 'release_cache', 'source', 'doc']:
                         list_value = False
-                    elif key in ['release_build', 'test_build']:
+                    elif key in ['release_builds', 'source_builds', 'doc_builds']:
                         list_value = True
                     else:
                         assert False, 'unknown key "%s"' % key

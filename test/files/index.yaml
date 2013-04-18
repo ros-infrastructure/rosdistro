@@ -6,10 +6,11 @@ type: index
 version: 1
 distributions:
   foo:
-    release: foo.yaml
-    release_build: [foo-build.yaml]
-    release_cache: foo-cache.yaml
-    test: foo-devel.yaml
-    test_build: [foo-devel-build.yaml]
-    doc: foo-doc.yaml
+    release: foo/release.yaml
+    release_builds: [foo/release-build.yaml]
+    release_cache: foo/release-cache.yaml
+    source: foo/source.yaml
+    source_builds: [foo/source-build.yaml]
+    doc: foo/doc.yaml
+    doc_builds: [foo/doc-build.yaml]
 

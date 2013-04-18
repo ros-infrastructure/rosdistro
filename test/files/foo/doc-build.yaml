@@ -1,0 +1,17 @@
+%YAML 1.1
+# ROS doc-build file
+# see REP 137: http://ros.org/reps/rep-0137.html
+---
+type: doc-build
+version: 1
+targets:
+  precise: [amd64]
+notifications:
+  emails: [admin@example.com]
+  maintainers: true
+jenkins_url: http://farm.example.com:8080
+jenkins_job_timeout: 23
+apt_mirrors: ['http://repo.example.com/', 'http://archive.ubuntu.com/ubuntu']
+doc_tag_index_repository:
+  url: git@github.com/ros-infrastructure/rosdoc_tag_index
+  type: master

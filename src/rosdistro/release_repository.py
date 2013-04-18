@@ -32,42 +32,44 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from .repository import Repository
+from .status import valid_statuses
 
 
-class DocFile(object):
-
-    _type = 'doc'
+class ReleaseRepository(Repository):
 
     def __init__(self, name, data):
-        assert 'type' in data and data['type'] == DocFile._type
-        assert 'version' in data and int(data['version']) == 1
-        self.version = data['version']
+        super(ReleaseRepository, self).__init__(name, data)
+        assert self.type == 'git'
 
-        self.name = name
+        self.tags = {}
+        if self.version is not None:
+            assert 'tags' in data
+            assert 'release' in data['tags']
+        if 'tags' in data:
+            for tag_type in data['tags']:
+                tag_data = data['tags'][tag_type]
+                self.tags[tag_type] = str(tag_data)
 
-        self.repositories = {}
-        self.repository_dependencies = {}
-        if 'repositories' in data:
-            for repo_name in data['repositories']:
-                repo_data = data['repositories'][repo_name]
-                repo = Repository(repo_name, repo_data)
-                self.repositories[repo_name] = repo
-                self.repository_dependencies[repo_name] = []
-                if 'depends' in repo_data:
-                    for dep in repo_data['depends']:
-                        self.repository_dependencies[repo_name].append(dep)
-        for repo_name in self.repositories:
-            for dep_name in self.repository_dependencies[repo_name]:
-                assert dep_name in self.repositories
+        self.status = data.get('status', None)
+        if self.status is not None:
+            assert self.status in valid_statuses
+        self.status_description = data.get('status_description', None)
+
+        self.package_names = []
+        if 'packages' in data and data['packages']:
+            self.package_names = sorted(data['packages'].keys())
+        else:
+            # no package means a single package
+            self.package_names = [self.name]
 
     def get_data(self):
-        data = {}
-        data['type'] = DocFile._type
-        data['version'] = 1
-        data['repositories'] = {}
-        for repo_name in sorted(self.repositories):
-            repo = self.repositories[repo_name]
-            data['repositories'][repo_name] = repo.get_data()
-            if self.repository_dependencies[repo_name]:
-                data['repositories'][repo_name]['depends'] = self.repository_dependencies[repo_name]
+        data = self._get_data(skip_git_type=True)
+        if self.version is not None and self.tags:
+            data['tags'] = {}
+            for tag in self.tags:
+                data['tags'][tag] = str(self.tags[tag])
+        if self.status is not None:
+            data['status'] = str(self.status)
+        if self.status_description is not None:
+            data['status_description'] = str(self.status_description)
         return data

@@ -31,8 +31,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .status import valid_statuses
-
 
 class Repository(object):
 
@@ -42,37 +40,13 @@ class Repository(object):
         self.url = data['url']
         self.version = data.get('version', None)
 
-        self.tags = {}
-        if 'tags' in data:
-            assert 'release' in data['tags']
-            for tag_type in data['tags']:
-                tag_data = data['tags'][tag_type]
-                self.tags[tag_type] = str(tag_data)
-
-        self.status = data.get('status', None)
-        if self.status is not None:
-            assert self.status in valid_statuses
-        self.status_description = data.get('status_description', None)
-
-        self.package_names = []
-        if 'packages' in data and data['packages']:
-            self.package_names = sorted(data['packages'].keys())
-        else:
-            # no package means a single package
-            self.package_names = [self.name]
-
     def get_data(self):
+        return self._get_data(skip_git_type=False)
+
+    def _get_data(self, skip_git_type=False):
         data = {}
-        if self.type != 'git':
+        if self.type != 'git' or not skip_git_type:
             data['type'] = str(self.type)
         data['url'] = str(self.url)
         data['version'] = self.version
-        if self.version is not None and self.tags:
-            data['tags'] = {}
-            for tag in self.tags:
-                data['tags'][tag] = str(self.tags[tag])
-        if self.status is not None:
-            data['status'] = str(self.status)
-        if self.status_description is not None:
-            data['status_description'] = str(self.status_description)
         return data

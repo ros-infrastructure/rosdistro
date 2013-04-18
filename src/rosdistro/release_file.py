@@ -31,18 +31,40 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .test_file import TestFile
+from .package import Package
+from .release_repository import ReleaseRepository
 
 
-class ReleaseFile(TestFile):
+class ReleaseFile(object):
+
+    _type = 'release'
 
     def __init__(self, name, data):
-        super(ReleaseFile, self).__init__(name, data, expected_type='release')
+        assert 'type' in data and data['type'] == ReleaseFile._type
+        assert 'version' in data and int(data['version']) == 1
+        self.version = data['version']
 
-        for repo in self.repositories.values():
-            assert repo.type == 'git'
-            if repo.version is not None:
-                assert 'release' in repo.tags
+        self.name = name
+
+        self.repositories = {}
+        self.packages = {}
+        if 'repositories' in data:
+            for repo_name in data['repositories']:
+                repo_data = data['repositories'][repo_name]
+                repo = ReleaseRepository(repo_name, repo_data)
+                self.repositories[repo_name] = repo
+
+                if repo.package_names:
+                    for pkg_name in repo.package_names:
+                        assert pkg_name not in self.packages
+                        try:
+                            pkg_data = repo_data['packages'][pkg_name]
+                        except KeyError:
+                            pkg_data = None
+                        self._add_package(pkg_name, repo, pkg_data, unary_repo=len(repo.package_names) == 1)
+                else:
+                    # no package means a single package in the root of the repository
+                    self._add_package(repo_name, repo, {'subfolder': '.'}, True)
 
         self.platforms = []
         if 'platforms' in data:
@@ -51,9 +73,30 @@ class ReleaseFile(TestFile):
                 assert platform_name not in self.platforms
                 self.platforms.append(platform_name)
 
+    def _add_package(self, pkg_name, repo, pkg_data, unary_repo):
+        assert pkg_name not in self.packages
+        pkg = Package(pkg_name, repo.name, pkg_data, unary_repo=unary_repo)
+        if pkg.status is None:
+            pkg.status = repo.status
+        if pkg.status_description is None:
+            pkg.status_description = repo.status_description
+        self.packages[pkg_name] = pkg
+
     def get_data(self):
-        data = super(ReleaseFile, self).get_data()
-        if self._type == 'release':
-            data['gbp-repos'] = {'You must update to a newer rosdep version by calling..sudo apt-get update && sudo apt-get install python-rosdep (make sure to uninstall the pip version on Ubuntu': None}
+        data = {}
+        data['type'] = ReleaseFile._type
+        data['version'] = self.version
+        data['repositories'] = {}
+        for repo_name in sorted(self.repositories):
+            repo = self.repositories[repo_name]
+            data['repositories'][repo_name] = repo.get_data()
+            for pkg_name in repo.package_names:
+                pkg_data = self.packages[pkg_name].get_data(len(repo.package_names) == 1, repo.status, repo.status_description)
+                # skip unary if its data is an empty dict
+                if len(repo.package_names) == 1 and not pkg_data:
+                    continue
+                if 'packages' not in data['repositories'][repo_name]:
+                    data['repositories'][repo_name]['packages'] = {}
+                data['repositories'][repo_name]['packages'][pkg_name] = pkg_data
         data['platforms'] = self.platforms
         return data
