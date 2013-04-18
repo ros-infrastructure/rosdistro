@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='rosdistro',
-    version='0.1.18',
+    version='0.1.19',
     packages=[
         'rosdistro',
         'rosdistro.manifest_provider'
