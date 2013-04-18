@@ -39,7 +39,7 @@ import os
 import sys
 import yaml
 
-from rosdistro import get_cached_release, get_release_file_data, get_index, get_release_cache, logger
+from rosdistro import _get_dist_file_data, get_cached_release, get_index, get_release_cache, logger
 from rosdistro.release_cache import ReleaseCache
 
 logging.basicConfig(level=logging.INFO)
@@ -97,7 +97,7 @@ def main():
                     # get release cache
                     cache = get_release_cache(index, dist_name)
                 # get current release file
-                rel_file_data = get_release_file_data(index, dist_name, 'release')
+                rel_file_data = _get_dist_file_data(index, dist_name, 'release')
                 # update cache with current release file
                 cache.update_distribution(rel_file_data)
         except:
@@ -107,7 +107,7 @@ def main():
         else:
             print('- build cache from scratch')
             # get empty cache with release file
-            rel_file_data = get_release_file_data(index, dist_name, 'release')
+            rel_file_data = _get_dist_file_data(index, dist_name, 'release')
             cache = ReleaseCache(dist_name, rel_file_data=rel_file_data)
 
         # get distribution
@@ -138,8 +138,8 @@ def main():
             errors = True
         else:
             # write the cache
-            with open(dist_name + '-cache.yaml', 'w') as f:
-                print('- write cache file "%s-cache.yaml"' % dist_name)
+            with open(dist_name + '/release-cache.yaml', 'w') as f:
+                print('- write cache file "%s/release-cache.yaml"' % dist_name)
                 yaml.dump(cache.get_data(), f)
     if errors:
         sys.exit(1)
