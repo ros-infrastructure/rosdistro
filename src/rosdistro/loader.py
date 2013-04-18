@@ -31,18 +31,22 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import socket
 import time
 import urllib2
 
 
-def load_url(url, retry_on_503=2, retry_period=1, timeout=5):
+def load_url(url, retry=2, retry_period=1, timeout=10):
     try:
         fh = urllib2.urlopen(url, timeout=timeout)
     except urllib2.HTTPError as e:
-        if e.code == 503 and retry_on_503:
+        if e.code == 503 and retry:
             time.sleep(retry_period)
-            return load_url(url, retry_on_503 - 1, retry_period)
+            return load_url(url, retry=retry - 1, retry_period=retry_period, timeout=timeout)
         raise
     except urllib2.URLError as e:
+        if isinstance(e.reason, socket.timeout) and retry:
+            time.sleep(retry_period)
+            return load_url(url, retry=retry - 1, retry_period=retry_period, timeout=timeout)
         raise urllib2.URLError(str(e) + ' (%s)' % url)
     return fh.read()
