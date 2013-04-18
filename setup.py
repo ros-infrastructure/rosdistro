@@ -23,8 +23,9 @@ setup(
     download_url='http://pr.willowgarage.com/downloads/rosdistro/',
     keywords=['ROS'],
     classifiers=['Programming Language :: Python',
-                 'License :: OSI Approved :: BSD License'],
+                 'License :: OSI Approved :: BSD License',
+                 'License :: OSI Approved :: MIT License'],
     description="A tool to work with rosdistro files",
     long_description="""A tool to work with rosdistro files""",
-    license='BSD'
+    license='BSD, MIT'
 )
