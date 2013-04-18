@@ -81,8 +81,8 @@ def get_index_url():
 
     # if not found, look for the global configuration *usually /etc/xdg/rosdistro)
     site_cfg_paths = os.path.join(site_config_dir('rosdistro', multipath=True), cfg_file).split(os.pathsep)
-    for scfg in site_cfg_paths:
-        index_url = read_cfg_index_url(scfg)
+    for site_cfg_path in site_cfg_paths:
+        index_url = read_cfg_index_url(site_cfg_path)
         if index_url is not None:
             return index_url
 
