@@ -69,15 +69,15 @@ def convert_release(dist_name, targets):
 
     # improve conversion performance by reusing results from last run
     last_dist = None
-    if os.path.exists(dist_name + '.yaml'):
-        with open(dist_name + '.yaml', 'r') as f:
+    if os.path.exists(dist_name + '/release.yaml'):
+        with open(dist_name + '/release.yaml', 'r') as f:
             last_data = yaml.load(f.read())
             last_dist = ReleaseFile(dist_name, last_data)
 
     output = {}
     output['type'] = 'release'
     output['version'] = 1
-    output['platforms'] = targets[dist_name]
+    output['platforms'] = {'ubuntu': targets[dist_name]}
     output['repositories'] = {}
 
     for repo_name in sorted(input_['repositories']):
@@ -173,7 +173,7 @@ def convert_source(dist_name):
 
 def convert_doc(dist_name):
     base = tempfile.mktemp()
-    rc = subprocess.call(['git', 'clone', 'git://github.com/ros/rosdistro.git', base])
+    rc = subprocess.call(['git', 'clone', '--depth', '0', 'git://github.com/ros/rosdistro.git', base])
     if rc:
         print('Failed to checkout rosdistro repo', file=sys.stderr)
         shutil.rmtree(base)

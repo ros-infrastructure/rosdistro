@@ -87,8 +87,8 @@ def main():
         try:
             if not args.preclean:
                 print('- trying to use local cache')
-                if os.path.exists(dist_name + '-cache.yaml'):
-                    with open(dist_name + '-cache.yaml', 'r') as f:
+                if os.path.exists(dist_name + '/release-cache.yaml'):
+                    with open(dist_name + '/release-cache.yaml', 'r') as f:
                         yaml_str = f.read()
                     data = yaml.load(yaml_str)
                     cache = ReleaseCache(dist_name, data)

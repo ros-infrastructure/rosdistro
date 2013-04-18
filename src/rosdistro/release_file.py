@@ -49,7 +49,7 @@ class ReleaseFile(object):
         self.repositories = {}
         self.packages = {}
         if 'repositories' in data:
-            for repo_name in data['repositories']:
+            for repo_name in data['repositories'].keys():
                 repo_data = data['repositories'][repo_name]
                 repo = ReleaseRepository(repo_name, repo_data)
                 self.repositories[repo_name] = repo
@@ -66,12 +66,13 @@ class ReleaseFile(object):
                     # no package means a single package in the root of the repository
                     self._add_package(repo_name, repo, {'subfolder': '.'}, True)
 
-        self.platforms = []
+        self.platforms = {}
         if 'platforms' in data:
-            for platform_name in data['platforms']:
-                platform_name = str(platform_name)
-                assert platform_name not in self.platforms
-                self.platforms.append(platform_name)
+            for os_name in data['platforms'].keys():
+                self.platforms[os_name] = []
+                for dist_name in data['platforms'][os_name]:
+                    assert dist_name not in self.platforms[os_name]
+                    self.platforms[os_name].append(dist_name)
 
     def _add_package(self, pkg_name, repo, pkg_data, unary_repo):
         assert pkg_name not in self.packages
@@ -87,7 +88,7 @@ class ReleaseFile(object):
         data['type'] = ReleaseFile._type
         data['version'] = self.version
         data['repositories'] = {}
-        for repo_name in sorted(self.repositories):
+        for repo_name in sorted(self.repositories.keys()):
             repo = self.repositories[repo_name]
             data['repositories'][repo_name] = repo.get_data()
             for pkg_name in repo.package_names:

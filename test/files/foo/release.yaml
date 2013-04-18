@@ -3,9 +3,8 @@
 # see REP 137: http://ros.org/reps/rep-0137.html
 ---
 platforms:
-- precise
-- quantal
-- raring
+  debian: [wheezy]
+  ubuntu: [precise, quantal, raring]
 repositories:
   bar_repo:
     tags:
