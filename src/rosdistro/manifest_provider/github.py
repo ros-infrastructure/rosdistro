@@ -51,6 +51,6 @@ def github_manifest_provider(_dist_name, repo, pkg_name):
         logger.debug('Load package.xml file from url "%s"' % url)
         package_xml = urllib2.urlopen(url).read()
         return package_xml
-    except Exception as e:
+    except urllib2.URLError as e:
         logger.debug('- failed (%s), trying "%s"' % (e, url))
         raise RuntimeError()

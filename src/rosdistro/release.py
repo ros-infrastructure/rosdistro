@@ -62,8 +62,9 @@ class Release(object):
             for mp in self._manifest_providers:
                 #try:
                 package_xml = mp(self._rel_file.name, repo, pkg_name)
-                break
                 #except:
                 #    pass
+                if package_xml is not None:
+                    break
             self._package_xmls[pkg_name] = package_xml
         return self._package_xmls[pkg_name]
