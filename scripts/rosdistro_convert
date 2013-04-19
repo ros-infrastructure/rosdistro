@@ -85,25 +85,39 @@ def convert_release(dist_name, targets):
         output_repo = {}
         output_repo['url'] = input_repo['url']
         output_repo['version'] = input_repo['version']
+        if output_repo['version'] is None:
+            print('- "' + repo_name + '" has no version')
+            del output_repo['version']
         pkg_name = repo_name
         if 'packages' in input_repo:
             output_repo['packages'] = {}
+            unary_repo = len(input_repo['packages']) == 1
             for pkg_name in input_repo['packages']:
-                if len(input_repo['packages']) == 1 and pkg_name == repo_name and input_repo['packages'][pkg_name] is None:
-                    del output_repo['packages']
+                if unary_repo:
+                    if input_repo['packages'][pkg_name] is None:
+                        if pkg_name == repo_name:
+                            del output_repo['packages']
+                        else:
+                            output_repo['packages'][pkg_name] = {'subfolder': pkg_name}
+                    else:
+                        output_repo['packages'][pkg_name] = input_repo['packages'][pkg_name]
                     break
                 output_repo['packages'][pkg_name] = None
-                if input_repo['packages'][pkg_name] is not None:
+                if input_repo['packages'][pkg_name] is not None and input_repo['packages'][pkg_name] != pkg_name:
                     output_repo['packages'][pkg_name] = {'subfolder': input_repo['packages'][pkg_name]}
         output['repositories'][repo_name] = output_repo
 
-        if output_repo['version'] is not None:
+        if 'version' in output_repo and output_repo['version'] is not None:
             tag_template = _get_tag_template(dist_name, output_repo, pkg_name, last_dist.repositories[repo_name] if last_dist and repo_name in last_dist.repositories else None)
             output_repo['tags'] = {'release': tag_template}
 
     yaml_str = yaml.dump(output, default_flow_style=False)
     yaml_str = yaml_str.replace(': null', ':')
     with open(dist_name + '/release.yaml', 'w') as f:
+        f.write('%YAML 1.1\n')
+        f.write('# ROS release file\n')
+        f.write('# see REP 137: http://ros.org/reps/rep-0137.html\n')
+        f.write('---\n')
         f.write(yaml_str)
 
 
@@ -147,7 +161,7 @@ def convert_source(dist_name):
     input_ = yaml.load(yaml_str)
 
     output = {}
-    output['type'] = 'test'
+    output['type'] = 'source'
     output['version'] = 1
     output['repositories'] = {}
 
@@ -157,17 +171,20 @@ def convert_source(dist_name):
         output_repo['type'] = input_repo['type']
         output_repo['url'] = input_repo['url']
         output_repo['version'] = input_repo['version']
-        if 'packages' in input_repo:
-            output_repo['packages'] = {}
-            for pkg_name in input_repo['packages']:
-                output_repo['packages'][pkg_name] = None
-                if input_repo['packages'][pkg_name] is not None:
-                    output_repo['packages'][pkg_name] = {'subfolder': input_repo['packages'][pkg_name]}
+        if output_repo['type'] == 'svn' and output_repo['version'] is None:
+            output_repo['version'] = 'HEAD'
+        if output_repo['version'] is None:
+            print('- "' + repo_name + '" has no version')
+            del output_repo['version']
         output['repositories'][repo_name] = output_repo
 
     yaml_str = yaml.dump(output, default_flow_style=False)
     yaml_str = yaml_str.replace(': null', ':')
     with open(dist_name + '/source.yaml', 'w') as f:
+        f.write('%YAML 1.1\n')
+        f.write('# ROS source file\n')
+        f.write('# see REP 137: http://ros.org/reps/rep-0137.html\n')
+        f.write('---\n')
         f.write(yaml_str)
 
 
@@ -208,6 +225,12 @@ def convert_doc(dist_name):
             output_repo['url'] = input_data['uri']
             if 'version' in input_data:
                 output_repo['version'] = input_data['version']
+            if output_repo['type'] == 'svn' and ('version' not in output_repo or output_repo['version'] is None):
+                output_repo['version'] = 'HEAD'
+            if 'version' not in output_repo or output_repo['version'] is None:
+                print('- "' + repo_name + '" has no version')
+                if 'version' in output_repo:
+                    del output_repo['version']
             local_name = input_data['local-name']
             if local_name in output['repositories']:
                 if output_repo == output['repositories'][local_name]:
@@ -228,6 +251,10 @@ def convert_doc(dist_name):
     yaml_str = yaml.dump(output, default_flow_style=False)
     yaml_str = yaml_str.replace(': null', ':')
     with open(dist_name + '/doc.yaml', 'w') as f:
+        f.write('%YAML 1.1\n')
+        f.write('# ROS doc file\n')
+        f.write('# see REP 137: http://ros.org/reps/rep-0137.html\n')
+        f.write('---\n')
         f.write(yaml_str)
 
 

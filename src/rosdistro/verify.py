@@ -31,58 +31,106 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import print_function
+
 import difflib
+import sys
 import yaml
 
-from . import get_doc_file, get_index, get_release_file, get_source_file
+from . import get_doc_build_files, get_doc_file, get_index, get_release_build_files, get_release_file, get_source_build_files, get_source_file
 from .loader import load_url
 
 
 def verify_files_parsable(index_url):
+    return verify_files(index_url, _check_files_parsable)
+
+
+def _check_files_parsable(index, dist_name, loader_function, _yaml_url, _file_type):
+    try:
+        loader_function(index, dist_name)
+    except Exception as e:
+        print(str(e), file=sys.stderr)
+        return False
+    return True
+
+
+def reformat_files(index_url):
+    return verify_files(index_url, _reformat_files)
+
+
+def verify_files_identical(index_url):
+    return verify_files(index_url, _check_files_identical)
+
+
+def verify_files(index_url, callback):
+    identical = True
     index = get_index(index_url)
-    for dist_name in sorted(index.distributions):
+    for dist_name in sorted(index.distributions.keys()):
         dist = index.distributions[dist_name]
-        if 'release' in dist:
-            url = dist['release']
-            yaml_str = load_url(url)
-            rel_file = get_release_file(index, dist_name)
-            if yaml_str != _to_yaml(rel_file.get_data()):
-                diff = difflib.unified_diff(
-                    _clean_yaml(yaml_str), _to_yaml(rel_file.get_data()).splitlines(),
-                    'release.org', 'release.load-and-save',
-                    n=0, lineterm='')
-                for line in diff:
-                    print(line)
-                #assert False
-        elif 'source' in dist:
-            url = dist['source']
-            yaml_str = load_url(url)
-            src_file = get_source_file(index, dist_name)
-            if yaml_str != _to_yaml(src_file.get_data()):
-                diff = difflib.unified_diff(
-                    _clean_yaml(yaml_str), _to_yaml(src_file.get_data()).splitlines(),
-                    'source.org', 'source.load-and-save',
-                    n=0, lineterm='')
-                for line in diff:
-                    print(line)
-                #assert False
-        elif 'doc' in dist:
-            url = dist['doc']
-            yaml_str = load_url(url)
-            doc_file = get_doc_file(index, dist_name)
-            if yaml_str != _to_yaml(doc_file.get_data()):
-                diff = difflib.unified_diff(
-                    _clean_yaml(yaml_str), _to_yaml(doc_file.get_data()).splitlines(),
-                    'source.org', 'source.load-and-save',
-                    n=0, lineterm='')
-                for line in diff:
-                    print(line)
-                #assert False
+        file_providers = {
+            'release': (get_release_file, 'release'),
+            'release_builds': (get_release_build_files, 'release-build'),
+            'source': (get_source_file, 'source'),
+            'source_builds': (get_source_build_files, 'source-build'),
+            'doc': (get_doc_file, 'doc'),
+            'doc_builds': (get_doc_build_files, 'doc-build')
+        }
+        for key in sorted(file_providers.keys()):
+            file_provider, file_type = file_providers[key]
+            yaml_url = dist[key]
+            identical &= callback(index, dist_name, file_provider, yaml_url, file_type)
+    return identical
 
 
-def _clean_yaml(data):
-    lines = data.splitlines()
-    return [l for l in lines if l != '%YAML 1.1' and not l.startswith('#')]
+def _reformat_files(index, dist_name, loader_function, yaml_url, file_type):
+    files = loader_function(index, dist_name)
+    if not isinstance(files, list):
+        files = [files]
+        yaml_url = [yaml_url]
+    for i, f in enumerate(files):
+        url = yaml_url[i]
+        if not url.startswith('file://'):
+            print('Skipping non-file url: %s' % url)
+            continue
+        identical = _check_file_identical(f, yaml_url[i], file_type)
+        path = url[7:]
+        if identical:
+            print('Skipping identical file: %s' % path)
+            continue
+        print('Updating file: %s' % path)
+        dist_file_data = _to_yaml(f.get_data())
+        dist_file_data = '\n'.join(_yaml_header_lines(file_type)) + '\n' + dist_file_data
+        with open(path, 'w') as f:
+            f.write(dist_file_data)
+    return True
+
+
+def _check_files_identical(index, dist_name, loader_function, yaml_url, file_type):
+    identical = True
+    files = loader_function(index, dist_name)
+    if not isinstance(files, list):
+        files = [files]
+        yaml_url = [yaml_url]
+    for i, f in enumerate(files):
+        identical &= _check_file_identical(f, yaml_url[i], file_type)
+    return identical
+
+
+def _check_file_identical(dist_file, yaml_url, file_type):
+    yaml_str = load_url(yaml_url)
+    yaml_lines = yaml_str.splitlines()
+    dist_file_data = dist_file.get_data()
+    dist_file_lines = _to_yaml(dist_file_data).splitlines()
+    dist_file_lines[0:0] = _yaml_header_lines(file_type)
+    if yaml_lines != dist_file_lines:
+        diff = difflib.unified_diff(
+            yaml_lines, dist_file_lines,
+            yaml_url, 'loaded-and-saved',
+            n=1, lineterm='')
+        for line in diff:
+            print(line, file=sys.stderr)
+        return False
+    return True
 
 
 def _to_yaml(data):
@@ -90,3 +138,12 @@ def _to_yaml(data):
     yaml_str = yaml_str.replace(': null', ':')
     yaml_str = yaml_str.replace(': {}', ':')
     return yaml_str
+
+
+def _yaml_header_lines(file_type):
+    return [
+        '%YAML 1.1',
+        '# ROS %s file' % file_type,
+        '# see REP 137: http://ros.org/reps/rep-0137.html',
+        '---'
+    ]

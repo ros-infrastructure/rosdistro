@@ -2,8 +2,6 @@
 # ROS source file
 # see REP 137: http://ros.org/reps/rep-0137.html
 ---
-type: source
-version: 1
 repositories:
   bar_repo:
     type: git
@@ -13,3 +11,5 @@ repositories:
     type: hg
     url: https://bitbucket.org/baz-test/baz-repo
     version: default
+type: source
+version: 1

@@ -5,7 +5,7 @@ from rosdistro import get_doc_file, get_index
 from rosdistro.doc_file import DocFile
 from rosdistro.loader import load_url
 
-FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), 'files'))
+FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'files'))
 
 
 def test_doc_file():

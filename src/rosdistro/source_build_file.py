@@ -65,13 +65,19 @@ class SourceBuildFile(object):
                 self.notify_committers = True
 
         assert 'targets' in data
-        self.targets = {}
-        for platform_name in data['targets'].keys():
-            platform_name = str(platform_name)
-            assert platform_name not in self.targets
-            self.targets[platform_name] = []
-            for arch_name in data['targets'][platform_name]:
-                self.targets[platform_name].append(arch_name)
+        self._targets = {}
+        for os_name in data['targets'].keys():
+            if os_name == '_config':
+                self._targets[os_name] = data['targets'][os_name]
+                continue
+            self._targets[os_name] = {}
+            for os_code_name in data['targets'][os_name]:
+                if os_code_name == '_config':
+                    self._targets[os_name][os_code_name] = data['targets'][os_name][os_code_name]
+                    continue
+                self._targets[os_name][os_code_name] = {}
+                for arch in data['targets'][os_name][os_code_name]:
+                    self._targets[os_name][os_code_name][arch] = data['targets'][os_name][os_code_name][arch]
 
         assert 'jenkins_url' in data
         self.jenkins_url = str(data['jenkins_url'])
@@ -79,9 +85,22 @@ class SourceBuildFile(object):
         if 'jenkins_job_timeout' in data:
             self.jenkins_job_timeout = int(data['jenkins_job_timeout'])
 
-        assert 'apt_mirrors' in data
-        self.apt_mirrors = data['apt_mirrors']
-        assert isinstance(self.apt_mirrors, list)
+    def get_target_os_names(self):
+        return [t for t in self._targets.keys() if t != '_config']
+
+    def get_target_os_code_names(self, os_name):
+        os_code_names = self._targets[os_name]
+        return [t for t in os_code_names.keys() if t != '_config']
+
+    def get_target_arches(self, os_name, os_code_name):
+        arches = self._targets[os_name][os_code_name]
+        return [t for t in arches.keys() if t != '_config']
+
+    def get_target_configuration(self, os_name=None, os_code_name=None, arch=None):
+        assert os_code_name is not None or arch is None
+        assert os_name is not None or os_code_name is None
+        arches = self._targets[os_name][os_code_name]
+        return [t for t in arches.keys() if t != '_config']
 
     def get_data(self):
         data = {}
@@ -101,14 +120,10 @@ class SourceBuildFile(object):
             if self.notify_committers is not None:
                 data['notifications']['committers'] = bool(self.notify_committers)
 
-        data['targets'] = {}
-        for platform_name in self.targets:
-            data['targets'][platform_name] = self.targets[platform_name]
+        data['targets'] = self._targets
 
         data['jenkins_url'] = self.jenkins_url
         if self.jenkins_job_timeout:
             data['jenkins_job_timeout'] = self.jenkins_job_timeout
-
-        data['apt_mirrors'] = self.apt_mirrors
 
         return data

@@ -70,9 +70,9 @@ class ReleaseFile(object):
         if 'platforms' in data:
             for os_name in data['platforms'].keys():
                 self.platforms[os_name] = []
-                for dist_name in data['platforms'][os_name]:
-                    assert dist_name not in self.platforms[os_name]
-                    self.platforms[os_name].append(dist_name)
+                for os_code_name in data['platforms'][os_name]:
+                    assert os_code_name not in self.platforms[os_name]
+                    self.platforms[os_name].append(os_code_name)
 
     def _add_package(self, pkg_name, repo, pkg_data, unary_repo):
         assert pkg_name not in self.packages

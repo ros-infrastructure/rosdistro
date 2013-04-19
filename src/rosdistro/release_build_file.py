@@ -65,13 +65,19 @@ class ReleaseBuildFile(object):
                 self.notify_committers = True
 
         assert 'targets' in data
-        self.targets = {}
-        for platform_name in data['targets'].keys():
-            platform_name = str(platform_name)
-            assert platform_name not in self.targets
-            self.targets[platform_name] = []
-            for arch_name in data['targets'][platform_name]:
-                self.targets[platform_name].append(arch_name)
+        self._targets = {}
+        for os_name in data['targets'].keys():
+            if os_name == '_config':
+                self._targets[os_name] = data['targets'][os_name]
+                continue
+            self._targets[os_name] = {}
+            for os_code_name in data['targets'][os_name]:
+                if os_code_name == '_config':
+                    self._targets[os_name][os_code_name] = data['targets'][os_name][os_code_name]
+                    continue
+                self._targets[os_name][os_code_name] = {}
+                for arch in data['targets'][os_name][os_code_name]:
+                    self._targets[os_name][os_code_name][arch] = data['targets'][os_name][os_code_name][arch]
 
         assert 'jenkins_url' in data
         self.jenkins_url = str(data['jenkins_url'])
@@ -82,17 +88,6 @@ class ReleaseBuildFile(object):
         if 'jenkins_binarydeb_job_timeout' in data:
             self.jenkins_binarydeb_job_timeout = int(data['jenkins_binarydeb_job_timeout'])
 
-        self.apt_mirrors = []
-        if 'apt_mirrors' in data:
-            self.apt_mirrors = data['apt_mirrors']
-            assert isinstance(self.apt_mirrors, list)
-        self.apt_target_repository = None
-        if 'apt_target_repository' in data:
-            self.apt_target_repository = str(data['apt_target_repository'])
-            if not self.apt_mirrors:
-                self.apt_mirrors.append(self.apt_target_repository)
-        assert self.apt_mirrors
-
         self.sync_package_count = None
         self.sync_packages = []
         if 'sync' in data:
@@ -101,6 +96,34 @@ class ReleaseBuildFile(object):
             if 'packages' in data['sync']:
                 self.notify_maintainers = data['sync']['packages']
                 assert isinstance(self.sync_packages, list)
+
+    def get_target_os_names(self):
+        return [t for t in self._targets.keys() if t != '_config']
+
+    def get_target_os_code_names(self, os_name):
+        os_code_names = self._targets[os_name]
+        return [t for t in os_code_names.keys() if t != '_config']
+
+    def get_target_arches(self, os_name, os_code_name):
+        arches = self._targets[os_name][os_code_name]
+        return [t for t in arches.keys() if t != '_config']
+
+    def get_target_configuration(self, os_name=None, os_code_name=None, arch=None):
+        assert os_code_name is not None or arch is None
+        assert os_name is not None or os_code_name is None
+        config = {}
+        if '_config' in self._targets:
+            config.update(self._targets['_config'])
+        if os_name is not None:
+            if '_config' in self._targets[os_name]:
+                config.update(self._targets[os_name]['_config'])
+            if os_code_name is not None:
+                if '_config' in self._targets[os_name][os_code_name]:
+                    config.update(self._targets[os_name][os_code_name]['_config'])
+                if arch is not None:
+                    if '_config' in self._targets[os_name][os_code_name][arch]:
+                        config.update(self._targets[os_name][os_code_name][arch]['_config'])
+        return config
 
     def get_data(self):
         data = {}
@@ -120,9 +143,7 @@ class ReleaseBuildFile(object):
             if self.notify_committers is not None:
                 data['notifications']['committers'] = bool(self.notify_committers)
 
-        data['targets'] = {}
-        for platform_name in self.targets:
-            data['targets'][platform_name] = self.targets[platform_name]
+        data['targets'] = self._targets
 
         data['jenkins_url'] = self.jenkins_url
         if self.jenkins_sourcedeb_job_timeout:
@@ -130,17 +151,10 @@ class ReleaseBuildFile(object):
         if self.jenkins_binarydeb_job_timeout:
             data['jenkins_binarydeb_job_timeout'] = self.jenkins_binarydeb_job_timeout
 
-        if self.apt_mirrors:
-            data['apt_mirrors'] = []
-            if len(self.apt_mirrors) != 1 or self.apt_mirrors[0] != self.apt_target_repository:
-                data['apt_mirrors'] = self.apt_mirrors
-        if self.apt_target_repository:
-            data['apt_target_repository'] = self.apt_target_repository
-
         if self.sync_package_count or self.sync_packages:
             data['sync'] = {}
             if self.sync_package_count is not None:
-                data['sync']['package_count'] = self.notify_emails
+                data['sync']['package_count'] = self.sync_package_count
             if self.sync_packages:
                 data['sync']['packages'] = self.sync_packages
 

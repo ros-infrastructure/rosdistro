@@ -13,7 +13,8 @@ setup(
         'scripts/rosdistro',
         'scripts/rosdistro_build_cache',
         'scripts/rosdistro_convert',
-        'scripts/rosdistro_generate_cache'
+        'scripts/rosdistro_generate_cache',
+        'scripts/rosdistro_reformat'
     ],
     author='Wim Meeussen',
     author_email='wim@hidof.com',

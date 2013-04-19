@@ -5,7 +5,7 @@ from rosdistro import get_index, get_source_file
 from rosdistro.loader import load_url
 from rosdistro.source_file import SourceFile
 
-FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), 'files'))
+FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'files'))
 
 
 def test_source_file():

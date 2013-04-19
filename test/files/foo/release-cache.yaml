@@ -1,5 +1,6 @@
 release_file:
-  platforms: [precise, quantal, raring]
+  platforms: 
+    ubuntu: [precise, quantal, raring]
   repositories:
     catkin: 
       tags:

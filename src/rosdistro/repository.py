@@ -41,12 +41,13 @@ class Repository(object):
         self.version = data.get('version', None)
 
     def get_data(self):
-        return self._get_data(skip_git_type=False)
+        return self._get_data()
 
     def _get_data(self, skip_git_type=False):
         data = {}
         if self.type != 'git' or not skip_git_type:
             data['type'] = str(self.type)
         data['url'] = str(self.url)
-        data['version'] = self.version
+        if self.version is not None:
+            data['version'] = self.version
         return data

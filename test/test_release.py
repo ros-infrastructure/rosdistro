@@ -5,7 +5,7 @@ from rosdistro import get_index, get_release_file
 from rosdistro.release_file import ReleaseFile
 from rosdistro.loader import load_url
 
-FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), 'files'))
+FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'files'))
 
 
 def test_release_file():

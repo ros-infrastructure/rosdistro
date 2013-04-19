@@ -2,17 +2,33 @@
 # ROS release-build file
 # see REP 137: http://ros.org/reps/rep-0137.html
 ---
-type: release-build
-version: 1
-targets:
-  precise: [amd64, i386]
-  quantal: [amd64, i386]
-  raring: [amd64, i386]
-notifications:
-  emails: [admin@example.com]
-jenkins_url: http://farm.example.com:8080
-jenkins_sourcedeb_job_timeout: 5
 jenkins_binarydeb_job_timeout: 42
-apt_target_repository: http://repo.example.com/
+jenkins_sourcedeb_job_timeout: 5
+jenkins_url: http://farm.example.com:8080
+notifications:
+  emails:
+  - admin@example.com
 sync:
   package_count: 123
+targets:
+  _config:
+    apt_target_repository: http://repo.example.com/
+    foo: bar
+  ubuntu:
+    _config:
+      bar: baz
+    precise:
+      _config:
+        ping: pong
+      amd64:
+        _config:
+          foo: baz
+      i386:
+    quantal:
+      amd64:
+      i386:
+    raring:
+      amd64:
+      i386:
+type: release-build
+version: 1

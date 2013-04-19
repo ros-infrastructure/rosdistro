@@ -2,15 +2,15 @@
 # ROS index file
 # see REP 137: http://ros.org/reps/rep-0137.html
 ---
-type: index
-version: 1
 distributions:
   foo:
+    doc: foo/doc.yaml
+    doc_builds: [foo/doc-build.yaml]
     release: foo/release.yaml
     release_builds: [foo/release-build.yaml]
     release_cache: foo/release-cache.yaml
     source: foo/source.yaml
     source_builds: [foo/source-build.yaml]
-    doc: foo/doc.yaml
-    doc_builds: [foo/doc-build.yaml]
+type: index
+version: 1
 
