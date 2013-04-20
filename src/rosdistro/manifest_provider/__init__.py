@@ -34,8 +34,9 @@
 
 def get_release_tag(repo, pkg_name):
     data = {
-        'package': pkg_name,
-        'version': repo.version,
-        'upstream_version': repo.version.split('-')[0],
+        'package': pkg_name
     }
+    if repo.version is not None:
+        data['version'] = repo.version
+        data['upstream_version'] = repo.version.split('-')[0]
     return repo.tags['release'].format(**data)
