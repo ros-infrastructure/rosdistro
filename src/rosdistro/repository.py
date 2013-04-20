@@ -38,6 +38,7 @@ class Repository(object):
         self.name = name
         self.type = data.get('type', 'git')
         self.url = data['url']
+        assert(self.url)
         self.version = data.get('version', None)
 
     def get_data(self):
