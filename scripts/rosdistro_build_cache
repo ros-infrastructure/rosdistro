@@ -137,6 +137,9 @@ def main():
             print('- missing package xml files: %s' % ', '.join(missing_package_xmls))
             errors = True
         else:
+            # make sure the subdirectory exists
+            if not os.path.isdir(dist_name):
+                os.makedirs(dist_name)
             # write the cache
             with open(dist_name + '/release-cache.yaml', 'w') as f:
                 print('- write cache file "%s/release-cache.yaml"' % dist_name)
