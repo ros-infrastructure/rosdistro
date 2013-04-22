@@ -46,6 +46,7 @@ logger = logging.getLogger('rosdistro')
 
 from doc_build_file import DocBuildFile
 from doc_file import DocFile
+from external.appdirs import user_config_dir, site_config_dir
 from index import Index
 from loader import load_url
 from manifest_provider.cache import CachedManifestProvider
@@ -65,8 +66,33 @@ DEFAULT_INDEX_URL = 'file:///home/dthomas/wg/github/ros/rosdistro/index.yaml'
 
 
 def get_index_url():
+    # environment variable has precedence over configuration files
     if 'ROSDISTRO_INDEX_URL' in os.environ:
         return os.environ['ROSDISTRO_INDEX_URL']
+
+    def read_cfg_index_url(fname):
+        try:
+            with open(fname) as f:
+                return yaml.load(f.read())['index_url']
+        except (IOError, KeyError, yaml.YAMLError):
+            return None
+
+    cfg_file = 'config.yaml'
+
+    # first, look for the user configuration (usually ~/.config/rosdistro)
+    user_cfg_path = os.path.join(user_config_dir('rosdistro'), cfg_file)
+    index_url = read_cfg_index_url(user_cfg_path)
+    if index_url is not None:
+        return index_url
+
+    # if not found, look for the global configuration *usually /etc/xdg/rosdistro)
+    site_cfg_paths = os.path.join(site_config_dir('rosdistro', multipath=True), cfg_file).split(os.pathsep)
+    for site_cfg_path in site_cfg_paths:
+        index_url = read_cfg_index_url(site_cfg_path)
+        if index_url is not None:
+            return index_url
+
+    # if nothing is found, use the default (provided by OSRF)
     return DEFAULT_INDEX_URL
 
 
