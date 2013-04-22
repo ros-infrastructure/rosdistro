@@ -5,19 +5,18 @@ from setuptools import setup, find_packages
 setup(
     name='rosdistro',
     version='0.1.18',
-    install_requires=['PyYAML', 'argparse', 'rospkg', 'distribute'],
-    packages = find_packages('src'),
-    package_dir = {'': 'src'},
-    package_data = {'rosdistro': ['resources/templates/*']},
-    scripts = [
+    install_requires=['argparse', 'distribute', 'rospkg', 'PyYAML'],
+    packages=find_packages('src'),
+    package_dir={'': 'src'},
+    scripts=[
         'scripts/rosdistro',
         'scripts/rosdistro_build_cache',
         'scripts/rosdistro_convert',
         'scripts/rosdistro_generate_cache',
         'scripts/rosdistro_reformat'
     ],
-    author='Wim Meeussen',
-    author_email='wim@hidof.com',
+    author='Wim Meeussen, Dirk Thomas',
+    author_email='wim@hidof.com, dthomas@osrfoundation.org',
     maintainer='Dirk Thomas',
     maintainer_email='dthomas@osrfoundation.org',
     url='http://www.ros.org/wiki/rosdistro',
