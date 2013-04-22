@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='rosdistro',
-    version='0.1.18',
+    version='0.2.0',
     install_requires=['argparse', 'distribute', 'rospkg', 'PyYAML'],
     packages=find_packages('src'),
     package_dir={'': 'src'},
