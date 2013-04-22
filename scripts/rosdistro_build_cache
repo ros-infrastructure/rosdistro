@@ -138,8 +138,8 @@ def main():
             errors = True
         else:
             # write the cache
-            with open(dist_name + '/release-cache.yaml', 'w') as f:
-                print('- write cache file "%s/release-cache.yaml"' % dist_name)
+            with open('%s-cache.yaml' % dist_name, 'w') as f:
+                print('- write cache file "%s-cache.yaml"' % dist_name)
                 yaml.dump(cache.get_data(), f)
     if errors:
         sys.exit(1)
