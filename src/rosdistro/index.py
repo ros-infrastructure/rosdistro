@@ -48,10 +48,10 @@ class Index(object):
 
         self.distributions = {}
         if 'distributions' in data and data['distributions']:
-            # if distributions is not a list raise an exception including the value
+            # if distributions is not a dict raise an exception including the value
             # this can be used to notify users (e.g. if an index.yaml file has been deleted / moved)
-            if not isinstance(data['distributions'], list):
-                raise RuntimeError('List of distributions is invalid: ' + data['distributions'])
+            if not isinstance(data['distributions'], dict):
+                raise RuntimeError("Distributions type is invalid: expected 'dict', but got '%s': %s" % (type(data['distributions']).__name__, data['distributions']))
             for distro_name in sorted(data['distributions']):
                 self.distributions[distro_name] = {}
                 distro_data = data['distributions'][distro_name]
