@@ -9,10 +9,10 @@ setup(
     packages=find_packages('src'),
     package_dir={'': 'src'},
     scripts=[
-        'scripts/rosdistro',
+#        'scripts/rosdistro',
         'scripts/rosdistro_build_cache',
-        'scripts/rosdistro_convert',
-        'scripts/rosdistro_generate_cache',
+#        'scripts/rosdistro_convert',
+#        'scripts/rosdistro_generate_cache',
         'scripts/rosdistro_reformat'
     ],
     author='Wim Meeussen, Dirk Thomas',
