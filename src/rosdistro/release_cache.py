@@ -44,7 +44,7 @@ class ReleaseCache(object):
             assert data['name'] == name
         else:
             self.version = 1
-        assert self.version == 1
+        assert self.version == 1, 'Unable to handle format version %d, please update rosdistro' % int(data['version'])
 
         self._rel_file_data = data['release_file'] if data else rel_file_data
         self.release_file = ReleaseFile(name, self._rel_file_data)

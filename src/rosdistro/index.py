@@ -44,7 +44,7 @@ class Index(object):
     def __init__(self, data, base_url):
         assert data['type'] == 'index'
         self.version = int(data['version'])
-        assert self.version == 1
+        assert self.version == 1, 'Unable to handle format version %d, please update rosdistro' % int(data['version'])
 
         self.distributions = {}
         if 'distributions' in data and data['distributions']:

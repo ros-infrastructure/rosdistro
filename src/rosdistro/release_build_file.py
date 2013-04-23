@@ -38,7 +38,8 @@ class ReleaseBuildFile(object):
 
     def __init__(self, name, data):
         assert 'type' in data and data['type'] == ReleaseBuildFile._type
-        assert 'version' in data and int(data['version']) == 1
+        assert 'version' in data
+        assert int(data['version']) == 1, 'Unable to handle format version %d, please update rosdistro' % int(data['version'])
         self.version = data['version']
 
         self.name = name
