@@ -38,8 +38,10 @@ from rosdistro import RosDistro
 from develdistro import DevelDistro
 from aptdistro import AptDistro
 
+import gzip
 import logging
 import os
+from StringIO import StringIO
 import yaml
 
 logger = logging.getLogger('rosdistro')
@@ -91,7 +93,7 @@ def get_index_url():
         if index_url is not None:
             return index_url
 
-    # if nothing is found, use the default (provided by OSRF)
+    # if nothing is found, use the default
     return DEFAULT_INDEX_URL
 
 
@@ -142,7 +144,16 @@ def get_release_cache(index, dist_name):
     url = dist['release_cache']
 
     logger.debug('Load cache from "%s"' % url)
-    yaml_str = load_url(url)
+    if url.endswith('.yaml'):
+        yaml_str = load_url(url)
+    elif url.endswith('.yaml.gz'):
+        yaml_gz_str = load_url(url)
+        yaml_gz_stream = StringIO(yaml_gz_str)
+        f = gzip.GzipFile(fileobj=yaml_gz_stream, mode='rb')
+        yaml_str = f.read()
+        f.close()
+    else:
+        raise NotImplementedError('The url of the cache must end with either ".yaml" or ".yaml.gz"')
     data = yaml.load(yaml_str)
     return ReleaseCache(dist_name, data)
 

@@ -34,6 +34,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import argparse
+import gzip
 import logging
 import os
 import sys
@@ -87,9 +88,16 @@ def main():
         try:
             if not args.preclean:
                 print('- trying to use local cache')
-                if os.path.exists('%s-cache.yaml' % dist_name):
+                yaml_str = None
+                if os.path.exists('%s-cache.yaml.gz' % dist_name):
+                    print('- use local file "%s-cache.yaml.gz"' % dist_name)
+                    with gzip.open('%s-cache.yaml.gz' % dist_name, 'rb') as f:
+                        yaml_str = f.read()
+                elif os.path.exists('%s-cache.yaml' % dist_name):
+                    print('- use local file "%s-cache.yaml"' % dist_name)
                     with open('%s-cache.yaml' % dist_name, 'r') as f:
                         yaml_str = f.read()
+                if yaml_str is not None:
                     data = yaml.load(yaml_str)
                     cache = ReleaseCache(dist_name, data)
                 if not cache:
@@ -138,9 +146,13 @@ def main():
             errors = True
         else:
             # write the cache
+            data = yaml.dump(cache.get_data())
             with open('%s-cache.yaml' % dist_name, 'w') as f:
                 print('- write cache file "%s-cache.yaml"' % dist_name)
-                yaml.dump(cache.get_data(), f)
+                f.write(data)
+            with gzip.open('%s-cache.yaml.gz' % dist_name, 'wb') as f:
+                print('- write compressed cache file "%s-cache.yaml.gz"' % dist_name)
+                f.write(data)
     if errors:
         sys.exit(1)
 
