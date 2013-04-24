@@ -53,8 +53,8 @@ def parse_args(args=sys.argv[1:]):
         description='Build the cache for rosdistro release distributions.'
     )
     add = parser.add_argument
-    add('index_url',
-        help='The url of the index file'
+    add('index',
+        help='The path or url of the index.yaml file (must be either a local file or a file:// url)'
     )
     add('dist_names', nargs='*',
         help='The names of the distributions (default: all)'
@@ -75,7 +75,10 @@ def main():
         logger.level = logging.DEBUG
 
     # get index
-    index = get_index(args.index_url)
+    index = args.index
+    if os.path.isfile(index):
+        index = 'file://' + os.path.abspath(index)
+    index = get_index(index)
 
     if not args.dist_names:
         args.dist_names = sorted(index.distributions.keys())

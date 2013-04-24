@@ -34,6 +34,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import argparse
+import os
 import sys
 
 from rosdistro.verify import reformat_files
@@ -44,13 +45,16 @@ def parse_args(args=sys.argv[1:]):
         description='Reformat the rosdistro files by reading and overwriting each file referenced from the index.'
     )
     add = parser.add_argument
-    add('index_url',
-        help='The url of the index file (must be a file:// url)'
+    add('index',
+        help='The path or url of the index.yaml file (must be either a local file or a file:// url)'
     )
     return parser.parse_args(args)
 
 
 if __name__ == '__main__':
     args = parse_args()
-    success = reformat_files(args.index_url)
+    index = args.index
+    if os.path.isfile(index):
+        index = 'file://' + os.path.abspath(index)
+    success = reformat_files(index)
     sys.exit(0 if success else 1)
