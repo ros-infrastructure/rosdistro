@@ -64,7 +64,7 @@ class ReleaseRepository(Repository):
 
     def get_data(self):
         data = self._get_data(skip_git_type=True)
-        if self.version is not None and self.tags:
+        if self.tags:
             data['tags'] = {}
             for tag in self.tags:
                 data['tags'][tag] = str(self.tags[tag])
