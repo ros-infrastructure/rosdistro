@@ -39,4 +39,7 @@ def get_release_tag(repo, pkg_name):
     if repo.version is not None:
         data['version'] = repo.version
         data['upstream_version'] = repo.version.split('-')[0]
-    return repo.tags['release'].format(**data)
+    release_tag = repo.tags['release']
+    for k, v in data.items():
+        release_tag = release_tag.replace('{%s}' % k, v)
+    return release_tag
