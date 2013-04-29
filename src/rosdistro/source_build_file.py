@@ -31,6 +31,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import copy
+
 
 class SourceBuildFile(object):
 
@@ -85,6 +87,13 @@ class SourceBuildFile(object):
         self.jenkins_job_timeout = None
         if 'jenkins_job_timeout' in data:
             self.jenkins_job_timeout = int(data['jenkins_job_timeout'])
+
+    def filter_repositories(self, repos):
+        res = copy.copy(set(repos))
+        if self.repository_whitelist:
+            res &= set(self.repository_whitelist)
+        res -= set(self.repository_blacklist)
+        return res
 
     def get_target_os_names(self):
         return [t for t in self._targets.keys() if t != '_config']

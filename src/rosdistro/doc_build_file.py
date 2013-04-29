@@ -31,6 +31,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import copy
+
 from .repository import Repository
 
 
@@ -90,6 +92,13 @@ class DocBuildFile(object):
 
         assert 'doc_tag_index_repository' in data
         self.doc_tag_index_repository = Repository('doc_tag_index', data['doc_tag_index_repository'])
+
+    def filter_repositories(self, repos):
+        res = copy.copy(set(repos))
+        if self.repository_whitelist:
+            res &= set(self.repository_whitelist)
+        res -= set(self.repository_blacklist)
+        return res
 
     def get_target_os_names(self):
         return [t for t in self._targets.keys() if t != '_config']
