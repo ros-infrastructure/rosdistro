@@ -33,19 +33,18 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import print_function
+
 import argparse
 import gzip
 import logging
-import os
 import sys
 import yaml
 
-from rosdistro import _get_dist_file_data, get_cached_release, get_index, get_release_cache, logger
-from rosdistro.release_cache import ReleaseCache
+from rosdistro import logger
+from rosdistro.release_cache_generator import generate_release_caches
 
 logging.basicConfig(level=logging.INFO)
-
-DEST_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'examples', 'convert'))
 
 
 def parse_args(args=sys.argv[1:]):
@@ -74,90 +73,21 @@ def main():
     if args.debug:
         logger.level = logging.DEBUG
 
-    # get index
-    index = args.index
-    if os.path.isfile(index):
-        index = 'file://' + os.path.abspath(index)
-    index = get_index(index)
-
-    if not args.dist_names:
-        args.dist_names = sorted(index.distributions.keys())
-
-    errors = False
-    for dist_name in args.dist_names:
-        missing_package_xmls = []
-        print('Build cache for "%s"' % dist_name)
-        cache = None
-        try:
-            if not args.preclean:
-                print('- trying to use local cache')
-                yaml_str = None
-                if os.path.exists('%s-cache.yaml.gz' % dist_name):
-                    print('- use local file "%s-cache.yaml.gz"' % dist_name)
-                    with gzip.open('%s-cache.yaml.gz' % dist_name, 'rb') as f:
-                        yaml_str = f.read()
-                elif os.path.exists('%s-cache.yaml' % dist_name):
-                    print('- use local file "%s-cache.yaml"' % dist_name)
-                    with open('%s-cache.yaml' % dist_name, 'r') as f:
-                        yaml_str = f.read()
-                if yaml_str is not None:
-                    data = yaml.load(yaml_str)
-                    cache = ReleaseCache(dist_name, data)
-                if not cache:
-                    print('- trying to fetch cache')
-                    # get release cache
-                    cache = get_release_cache(index, dist_name)
-                # get current release file
-                rel_file_data = _get_dist_file_data(index, dist_name, 'release')
-                # update cache with current release file
-                cache.update_distribution(rel_file_data)
-        except:
-            print('- failed to fetch old cache')
-        if cache:
-            print('- update cache')
-        else:
-            print('- build cache from scratch')
-            # get empty cache with release file
-            rel_file_data = _get_dist_file_data(index, dist_name, 'release')
-            cache = ReleaseCache(dist_name, rel_file_data=rel_file_data)
-
-        # get distribution
-        dist = get_cached_release(index, dist_name, cache=cache, allow_lazy_load=True)
-
-        # fetch all manifests
-        print('- fetch missing manifests')
-        for pkg_name in sorted(dist.packages.keys()):
-            repo = dist.repositories[dist.packages[pkg_name].repository_name]
-            if repo.version is None:
-                if args.debug:
-                    print('  - skip "%s"' % pkg_name)
-                continue
-            if args.debug:
-                print('  - fetch "%s"' % pkg_name)
-            else:
-                sys.stdout.write('.')
-                sys.stdout.flush()
-            package_xml = dist.get_package_xml(pkg_name)
-            if not package_xml:
-                missing_package_xmls.append(pkg_name)
-
-        if not args.debug:
-            print('')
-
-        if missing_package_xmls:
-            print('- missing package xml files: %s' % ', '.join(missing_package_xmls))
-            errors = True
-        else:
-            # write the cache
-            data = yaml.dump(cache.get_data())
-            with open('%s-cache.yaml' % dist_name, 'w') as f:
-                print('- write cache file "%s-cache.yaml"' % dist_name)
-                f.write(data)
-            with gzip.open('%s-cache.yaml.gz' % dist_name, 'wb') as f:
-                print('- write compressed cache file "%s-cache.yaml.gz"' % dist_name)
-                f.write(data)
-    if errors:
+    try:
+        caches = generate_release_caches(args.index, preclean=args.preclean, debug=args.debug)
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
         sys.exit(1)
+
+    for dist_name, cache in caches.items():
+        # write the cache
+        data = yaml.dump(cache.get_data())
+        with open('%s-cache.yaml' % dist_name, 'w') as f:
+            print('- write cache file "%s-cache.yaml"' % dist_name)
+            f.write(data)
+        with gzip.open('%s-cache.yaml.gz' % dist_name, 'wb') as f:
+            print('- write compressed cache file "%s-cache.yaml.gz"' % dist_name)
+            f.write(data)
 
 
 if __name__ == '__main__':
