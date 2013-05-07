@@ -43,6 +43,7 @@ def load_url(url, retry=2, retry_period=1, timeout=10):
         if e.code == 503 and retry:
             time.sleep(retry_period)
             return load_url(url, retry=retry - 1, retry_period=retry_period, timeout=timeout)
+        e.msg += ' (%s)' % url
         raise
     except urllib2.URLError as e:
         if isinstance(e.reason, socket.timeout) and retry:
