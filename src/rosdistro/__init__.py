@@ -46,6 +46,7 @@ import yaml
 
 logger = logging.getLogger('rosdistro')
 
+from _version import __version__
 from doc_build_file import DocBuildFile
 from doc_file import DocFile
 from external.appdirs import user_config_dir, site_config_dir

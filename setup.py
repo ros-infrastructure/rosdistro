@@ -2,9 +2,11 @@
 
 from setuptools import setup, find_packages
 
+exec(open('src/rosdistro/_version.py').read())
+
 setup(
     name='rosdistro',
-    version='0.2.8',
+    version=__version__,
     install_requires=['argparse', 'catkin_pkg', 'distribute', 'rospkg', 'PyYAML'],
     packages=find_packages('src'),
     package_dir={'': 'src'},
