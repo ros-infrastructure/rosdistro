@@ -2,7 +2,7 @@
 
 from setuptools import setup, find_packages
 
-exec(open('src/rosdistro/_version.py').read())
+exec(open(os.path.join(os.path.dirname(__file__), 'src', 'rosdistro', '_version.py')).read())
 
 setup(
     name='rosdistro',
