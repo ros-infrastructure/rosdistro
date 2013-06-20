@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import os
 from setuptools import setup, find_packages
 
 exec(open(os.path.join(os.path.dirname(__file__), 'src', 'rosdistro', '_version.py')).read())
