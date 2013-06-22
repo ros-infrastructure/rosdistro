@@ -42,7 +42,7 @@ except ImportError:
 class Index(object):
 
     def __init__(self, data, base_url):
-        assert data['type'] == 'index'
+        assert data['type'] == 'index', "Expected file type is 'index', not '%s'" % data['type']
         self.version = int(data['version'])
         assert self.version == 1, 'Unable to handle format version %d, please update rosdistro' % int(data['version'])
 

@@ -39,7 +39,7 @@ class ReleaseCache(object):
     def __init__(self, name, data=None, rel_file_data=None):
         assert data or rel_file_data
         if data:
-            assert data['type'] == 'cache'
+            assert data['type'] == 'cache', "Expected file type is 'cache', not '%s'" % data['type']
             self.version = int(data['version'])
             assert data['name'] == name
         else:
