@@ -35,6 +35,7 @@ import urllib2
 
 from rosdistro import logger
 from rosdistro.manifest_provider import get_release_tag
+from rosdistro.manifest_provider.git import check_remote_tag_exists
 
 
 def github_manifest_provider(_dist_name, repo, pkg_name):
@@ -44,6 +45,10 @@ def github_manifest_provider(_dist_name, repo, pkg_name):
         raise RuntimeError('can not handle non github urls')
 
     release_tag = get_release_tag(repo, pkg_name)
+
+    if not check_remote_tag_exists(repo.url, release_tag):
+        raise RuntimeError('specified tag "%s" is not a git tag' % release_tag)
+
     url = repo.url.replace('.git', '/%s/package.xml' % release_tag)
     url = url.replace('git://', 'https://')
     url = url.replace('https://', 'https://raw.')
