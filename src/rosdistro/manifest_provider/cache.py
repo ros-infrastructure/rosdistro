@@ -49,8 +49,9 @@ class CachedManifestProvider(object):
                 try:
                     package_xml = mp(dist_name, repo, pkg_name)
                     break
-                except Exception:
-                    pass
+                except Exception as e:
+                    # pass and try next manifest provider
+                    logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
             if package_xml is None:
                 return None
             self._distribution_cache.package_xmls[pkg_name] = package_xml
