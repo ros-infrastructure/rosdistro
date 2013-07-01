@@ -41,12 +41,14 @@ class DocBuildFile(object):
     _type = 'doc-build'
 
     def __init__(self, name, data):
-        assert 'type' in data and data['type'] == DocBuildFile._type
-        assert 'version' in data
-        assert int(data['version']) == 1, 'Unable to handle format version %d, please update rosdistro' % int(data['version'])
-        self.version = data['version']
-
         self.name = name
+
+        assert 'type' in data, "Expected file type is '%s'" % DocBuildFile._type
+        assert data['type'] == DocBuildFile._type, "Expected file type is '%s', not '%s'" % (DocBuildFile._type, data['type'])
+
+        assert 'version' in data, "Doc build file for '%s' lacks required version information" % self.name
+        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (DocBuildFile._type, int(data['version']))
+        self.version = int(data['version'])
 
         self.repository_whitelist = []
         if 'repository_whitelist' in data:
@@ -91,7 +93,11 @@ class DocBuildFile(object):
             self.jenkins_job_timeout = int(data['jenkins_job_timeout'])
 
         assert 'doc_tag_index_repository' in data
-        self.doc_tag_index_repository = Repository('doc_tag_index', data['doc_tag_index_repository'])
+        try:
+            self.doc_tag_index_repository = Repository('doc_tag_index', data['doc_tag_index_repository'])
+        except AssertionError as e:
+            e.args = [("Doc build file '%s': %s" % (self.name, a) if i == 0 else a) for i, a in enumerate(e.args)]
+            raise e
 
     def filter_repositories(self, repos):
         res = copy.copy(set(repos))

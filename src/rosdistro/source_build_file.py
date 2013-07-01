@@ -39,12 +39,14 @@ class SourceBuildFile(object):
     _type = 'source-build'
 
     def __init__(self, name, data):
-        assert 'type' in data and data['type'] == SourceBuildFile._type
-        assert 'version' in data
-        assert int(data['version']) == 1, 'Unable to handle format version %d, please update rosdistro' % int(data['version'])
-        self.version = data['version']
-
         self.name = name
+
+        assert 'type' in data, "Expected file type is '%s'" % SourceBuildFile._type
+        assert data['type'] == SourceBuildFile._type, "Expected file type is '%s', not '%s'" % (SourceBuildFile._type, data['type'])
+
+        assert 'version' in data, "Source build file for '%s' lacks required version information" % self.name
+        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (SourceBuildFile._type, int(data['version']))
+        self.version = int(data['version'])
 
         self.repository_whitelist = []
         if 'repository_whitelist' in data:

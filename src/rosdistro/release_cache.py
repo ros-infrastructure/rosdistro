@@ -36,15 +36,22 @@ from .release_file import ReleaseFile
 
 class ReleaseCache(object):
 
+    _type = 'cache'
+
     def __init__(self, name, data=None, rel_file_data=None):
         assert data or rel_file_data
         if data:
-            assert data['type'] == 'cache', "Expected file type is 'cache', not '%s'" % data['type']
+            assert 'type' in data, "Expected file type is '%s'" % ReleaseCache._type
+            assert data['type'] == ReleaseCache._type, "Expected file type is '%s', not '%s'" % (ReleaseCache._type, data['type'])
+
+            assert 'version' in data, "Release cache file for '%s' lacks required version information" % name
             self.version = int(data['version'])
-            assert data['name'] == name
+
+            assert 'name' in data, "Release cache file for '%s' lacks required name information" % name
+            assert data['name'] == name, "Release cache file for '%s' does not match the name '%s'" % (name, data['name'])
         else:
             self.version = 1
-        assert self.version == 1, 'Unable to handle format version %d, please update rosdistro' % int(data['version'])
+        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (ReleaseCache._type, int(data['version']))
 
         self._rel_file_data = data['release_file'] if data else rel_file_data
         self.release_file = ReleaseFile(name, self._rel_file_data)

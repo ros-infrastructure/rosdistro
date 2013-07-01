@@ -39,18 +39,24 @@ class SourceFile(object):
     _type = 'source'
 
     def __init__(self, name, data):
-        assert 'type' in data and data['type'] == SourceFile._type
-        assert 'version' in data
-        assert int(data['version']) == 1, 'Unable to handle format version %d, please update rosdistro' % int(data['version'])
-        self.version = data['version']
-
         self.name = name
+
+        assert 'type' in data, "Expected file type is '%s'" % SourceFile._type
+        assert data['type'] == SourceFile._type, "Expected file type is '%s', not '%s'" % (SourceFile._type, data['type'])
+
+        assert 'version' in data, "Source file for '%s' lacks required version information" % self.name
+        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (SourceFile._type, int(data['version']))
+        self.version = int(data['version'])
 
         self.repositories = {}
         if 'repositories' in data:
             for repo_name in data['repositories']:
                 repo_data = data['repositories'][repo_name]
-                repo = Repository(repo_name, repo_data)
+                try:
+                    repo = Repository(repo_name, repo_data)
+                except AssertionError as e:
+                    e.args = [("Source file '%s': %s" % (self.name, a) if i == 0 else a) for i, a in enumerate(e.args)]
+                    raise e
                 self.repositories[repo_name] = repo
 
     def get_data(self):

@@ -41,10 +41,15 @@ except ImportError:
 
 class Index(object):
 
+    _type = 'index'
+
     def __init__(self, data, base_url):
-        assert data['type'] == 'index', "Expected file type is 'index', not '%s'" % data['type']
+        assert 'type' in data, "Expected file type is '%s'" % Index._type
+        assert data['type'] == Index._type, "Expected file type is '%s', not '%s'" % (Index._type, data['type'])
+
+        assert 'version' in data, 'Index file lacks required version information'
+        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (Index._type, int(data['version']))
         self.version = int(data['version'])
-        assert self.version == 1, 'Unable to handle format version %d, please update rosdistro' % int(data['version'])
 
         self.distributions = {}
         if 'distributions' in data and data['distributions']:

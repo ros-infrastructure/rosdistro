@@ -42,16 +42,16 @@ class ReleaseBuild(object):
         self._verify_package_names(self._build_file.package_blacklist)
 
         for os_name in self._build_file.get_target_os_names():
-            assert os_name in self._dist.platforms.keys()
+            assert os_name in self._dist.platforms.keys(), "Distribution '%s' specifies to build for os_name '%s' which is not listed in the release file" % (self._dist.name, os_name)
             for os_code_name in self._build_file.get_target_os_code_names(os_name):
-                assert os_code_name in self._dist.platforms[os_name]
+                assert os_code_name in self._dist.platforms[os_name], "Distribution '%s' specifies to build for os_code_name '%s' which is not listed in the release file" % (self._dist.name, os_code_name)
 
         self._verify_package_names(self._build_file.sync_packages)
 
     def _verify_package_names(self, pkg_names):
         if pkg_names:
             for pkg_name in pkg_names:
-                assert pkg_name in self._dist.packages
+                assert pkg_name in self._dist.packages, "Distribution '%s' specifies to build the package '%s' which is not listed in the release file" % (self._dist.name, pkg_name)
 
     def __getattr__(self, name):
         return getattr(self._build_file, name)
@@ -59,4 +59,4 @@ class ReleaseBuild(object):
     def get_package_names(self):
         if not self._build_file.package_whitelist and not self._build_file.package_blacklist:
             return self._dist.get_package_names()
-        assert False
+        raise NotImplementedError('Package whitelisting/blacklisting has not been implemented yet')

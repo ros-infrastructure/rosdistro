@@ -43,7 +43,7 @@ class Package:
         self.subfolder = data.get('subfolder', '.' if unary_repo else name)
         self.status = data.get('status', None)
         if self.status is not None:
-            assert self.status in valid_statuses
+            assert self.status in valid_statuses, "Package '%s' has invalid status '%s', valid statuses are: " % (self.name, self.status, ', '.join(valid_statuses))
         self.status_description = data.get('status_description', None)
 
     def get_data(self, unary_repo=False, repo_status=None, repo_status_description=None):
@@ -54,7 +54,7 @@ class Package:
         if (not unary_repo and self.subfolder != self.name) or (unary_repo and self.subfolder != '.'):
             data['subfolder'] = str(self.subfolder)
         if self.status is not None and self.status != repo_status:
-            assert self.status in valid_statuses
+            assert self.status in valid_statuses, "Package '%s' has invalid status '%s', valid statuses are: " % (self.name, self.status, ', '.join(valid_statuses))
             data['status'] = str(self.status)
         if self.status_description is not None and self.status_description != repo_status_description:
             data['status_description'] = str(self.status_description)

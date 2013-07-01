@@ -37,12 +37,14 @@ class ReleaseBuildFile(object):
     _type = 'release-build'
 
     def __init__(self, name, data):
-        assert 'type' in data and data['type'] == ReleaseBuildFile._type
-        assert 'version' in data
-        assert int(data['version']) == 1, 'Unable to handle format version %d, please update rosdistro' % int(data['version'])
-        self.version = data['version']
-
         self.name = name
+
+        assert 'type' in data, "Expected file type is '%s'" % ReleaseBuildFile._type
+        assert data['type'] == ReleaseBuildFile._type, "Expected file type is '%s', not '%s'" % (ReleaseBuildFile._type, data['type'])
+
+        assert 'version' in data, "Release build file for '%s' lacks required version information" % self.name
+        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (ReleaseBuildFile._type, int(data['version']))
+        self.version = int(data['version'])
 
         self.package_whitelist = []
         if 'package_whitelist' in data:

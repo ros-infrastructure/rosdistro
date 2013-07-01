@@ -40,19 +40,25 @@ class ReleaseFile(object):
     _type = 'release'
 
     def __init__(self, name, data):
-        assert 'type' in data and data['type'] == ReleaseFile._type
-        assert 'version' in data
-        assert int(data['version']) == 1, 'Unable to handle format version %d, please update rosdistro' % int(data['version'])
-        self.version = data['version']
-
         self.name = name
+
+        assert 'type' in data, "Expected file type is '%s'" % ReleaseFile._type
+        assert data['type'] == ReleaseFile._type, "Expected file type is '%s', not '%s'" % (ReleaseFile._type, data['type'])
+
+        assert 'version' in data, "Release file for '%s' lacks required version information" % self.name
+        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (ReleaseFile._type, int(data['version']))
+        self.version = int(data['version'])
 
         self.repositories = {}
         self.packages = {}
         if 'repositories' in data:
             for repo_name in data['repositories'].keys():
                 repo_data = data['repositories'][repo_name]
-                repo = ReleaseRepository(repo_name, repo_data)
+                try:
+                    repo = ReleaseRepository(repo_name, repo_data)
+                except AssertionError as e:
+                    e.args = [("Release file '%s': %s" % (self.name, a) if i == 0 else a) for i, a in enumerate(e.args)]
+                    raise e
                 self.repositories[repo_name] = repo
 
                 if repo.package_names:
@@ -72,12 +78,16 @@ class ReleaseFile(object):
             for os_name in data['platforms'].keys():
                 self.platforms[os_name] = []
                 for os_code_name in data['platforms'][os_name]:
-                    assert os_code_name not in self.platforms[os_name]
+                    assert os_code_name not in self.platforms[os_name], "Distribution '%s' specifies the os_code_name '%s' multiple times for the os_name '%s'" % (self.name, os_code_name, os_name)
                     self.platforms[os_name].append(os_code_name)
 
     def _add_package(self, pkg_name, repo, pkg_data, unary_repo):
         assert pkg_name not in self.packages
-        pkg = Package(pkg_name, repo.name, pkg_data, unary_repo=unary_repo)
+        try:
+            pkg = Package(pkg_name, repo.name, pkg_data, unary_repo=unary_repo)
+        except AssertionError as e:
+            e.args = [("Release file '%s': %s" % (self.name, a) if i == 0 else a) for i, a in enumerate(e.args)]
+            raise e
         if pkg.status is None:
             pkg.status = repo.status
         if pkg.status_description is None:

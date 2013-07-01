@@ -37,8 +37,8 @@ class Repository(object):
     def __init__(self, name, data):
         self.name = name
         self.type = data.get('type', 'git')
+        assert 'url' in data and data['url'], "Repository '%s' lacks required URL information" % name
         self.url = data['url']
-        assert(self.url)
         self.version = data.get('version', None)
 
     def get_data(self):

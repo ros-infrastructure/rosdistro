@@ -39,19 +39,23 @@ class DocFile(object):
     _type = 'doc'
 
     def __init__(self, name, data):
+        self.name = name
+
         assert 'type' in data and data['type'] == DocFile._type
         assert 'version' in data
-        assert int(data['version']) == 1, 'Unable to handle format version %d, please update rosdistro' % int(data['version'])
+        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (DocFile._type, int(data['version']))
         self.version = data['version']
-
-        self.name = name
 
         self.repositories = {}
         self.repository_dependencies = {}
         if 'repositories' in data:
             for repo_name in data['repositories']:
                 repo_data = data['repositories'][repo_name]
-                repo = Repository(repo_name, repo_data)
+                try:
+                    repo = Repository(repo_name, repo_data)
+                except AssertionError as e:
+                    e.args = [("Doc file '%s': %s" % (self.name, a) if i == 0 else a) for i, a in enumerate(e.args)]
+                    raise e
                 self.repositories[repo_name] = repo
                 self.repository_dependencies[repo_name] = []
                 if 'depends' in repo_data:
