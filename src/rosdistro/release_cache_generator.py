@@ -35,8 +35,11 @@ from __future__ import print_function
 
 import gzip
 import os
+import re
 import sys
 import yaml
+
+from catkin_pkg.package import InvalidPackage, parse_package_string
 
 from . import _get_dist_file_data, get_cached_release, get_index, get_release_cache
 from .release_cache import ReleaseCache
@@ -68,7 +71,7 @@ def generate_release_cache(index, dist_name, preclean=False, debug=False):
     dist, cache = _get_cached_release(index, dist_name, preclean)
     # fetch all manifests
     print('- fetch missing manifests')
-    missing_package_xmls = []
+    errors = []
     for pkg_name in sorted(dist.packages.keys()):
         repo = dist.repositories[dist.packages[pkg_name].repository_name]
         if repo.version is None:
@@ -80,15 +83,26 @@ def generate_release_cache(index, dist_name, preclean=False, debug=False):
         else:
             sys.stdout.write('.')
             sys.stdout.flush()
+        # check that package.xml is fetchable
         package_xml = dist.get_package_xml(pkg_name)
         if not package_xml:
-            missing_package_xmls.append(pkg_name)
+            errors.append('%s: missing package.xml file for package "%s"' % (dist_name, pkg_name))
+            continue
+        # check that package.xml is parseable
+        try:
+            pkg = parse_package_string(package_xml)
+        except InvalidPackage as e:
+            errors.append('%s: invalid package.xml file for package "%s"' % (dist_name, pkg_name))
+            continue
+        # check that version numbers match (at least without deb inc)
+        if not re.match('^%s-\d+$' % re.escape(pkg.version), repo.version):
+            errors.append('%s: different version in package.xml (%s) for package "%s" than for the repository (%s) (after removing the debian increment)' % (dist_name, pkg.version, pkg_name, repo.version))
 
     if not debug:
         print('')
 
-    if missing_package_xmls:
-        raise RuntimeError('%s: missing package xml files: %s' % (dist_name, ', '.join(missing_package_xmls)))
+    if errors:
+        raise RuntimeError('\n'.join(errors))
 
     return cache
 
