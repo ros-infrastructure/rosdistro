@@ -44,7 +44,7 @@ class DependencyWalker(object):
         if pkg_name not in self._packages:
             repo = self._release_instance.repositories[self._release_instance.packages[pkg_name].repository_name]
             assert repo.version is not None, "Package '%s' in repository '%s' has no version set" % (pkg_name, repo.name)
-            assert 'release' in repo.tags, "Package '%s' in repository '%s' has no "release" tag set" % (pkg_name, repo.name)
+            assert 'release' in repo.tags, "Package '%s' in repository '%s' has no 'release' tag set" % (pkg_name, repo.name)
             pkg_xml = self._release_instance.get_package_xml(pkg_name)
             try:
                 pkg = parse_package_string(pkg_xml)
