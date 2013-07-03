@@ -49,9 +49,14 @@ def github_manifest_provider(_dist_name, repo, pkg_name):
     if not check_remote_tag_exists(repo.url, release_tag):
         raise RuntimeError('specified tag "%s" is not a git tag' % release_tag)
 
-    url = repo.url.replace('.git', '/%s/package.xml' % release_tag)
-    url = url.replace('git://', 'https://')
-    url = url.replace('https://', 'https://raw.')
+    url = repo.url
+    if url.endswith('.git'):
+        url = url[:-4]
+    url += '/%s/package.xml' % release_tag
+    if url.startswith('git://'):
+        url = 'https://' + url[6:]
+    if url.startswith('https://'):
+        url = 'https://raw.' + url[8:]
     try:
         logger.debug('Load package.xml file from url "%s"' % url)
         package_xml = urllib2.urlopen(url).read()
