@@ -63,7 +63,7 @@ class ReleaseFile(object):
 
                 if repo.package_names:
                     for pkg_name in repo.package_names:
-                        assert pkg_name not in self.packages
+                        assert pkg_name not in self.packages, "Duplicate package name '%s' exists in repository '%s' as well as in repository '%s'" % (pkg_name, repo_name, self.packages[pkg_name].repository_name)
                         try:
                             pkg_data = repo_data['packages'][pkg_name]
                         except KeyError:
