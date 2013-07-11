@@ -68,7 +68,7 @@ class ReleaseFile(object):
                             pkg_data = repo_data['packages'][pkg_name]
                         except KeyError:
                             pkg_data = None
-                        self._add_package(pkg_name, repo, pkg_data, unary_repo=len(repo.package_names) == 1)
+                        self._add_package(pkg_name, repo, pkg_data, unary_repo=len(repo.package_names) == 1 and pkg_name == repo_name)
                 else:
                     # no package means a single package in the root of the repository
                     self._add_package(repo_name, repo, {'subfolder': '.'}, True)
@@ -103,9 +103,10 @@ class ReleaseFile(object):
             repo = self.repositories[repo_name]
             data['repositories'][repo_name] = repo.get_data()
             for pkg_name in repo.package_names:
-                pkg_data = self.packages[pkg_name].get_data(len(repo.package_names) == 1, repo.status, repo.status_description)
+                is_unary = len(repo.package_names) == 1 and pkg_name == repo_name
+                pkg_data = self.packages[pkg_name].get_data(is_unary, repo.status, repo.status_description)
                 # skip unary if its data is an empty dict
-                if len(repo.package_names) == 1 and not pkg_data:
+                if is_unary and not pkg_data:
                     continue
                 if 'packages' not in data['repositories'][repo_name]:
                     data['repositories'][repo_name]['packages'] = {}
