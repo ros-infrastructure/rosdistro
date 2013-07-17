@@ -57,13 +57,12 @@ class DependencyWalker(object):
         '''Return a set of package names which the package depends on.'''
         deps = self._get_dependencies(pkg_name, depend_type)
         if ros_packages_only:
-            deps = deps & set(self._release_instance.packages.keys())
+            deps &= set(self._release_instance.packages.keys())
         return deps
 
     def get_recursive_depends(self, pkg_name, depend_types, ros_packages_only=False, ignore_pkgs=None):
         '''Return a set of package names which the package (transitively) depends on.'''
-        if ignore_pkgs is None:
-            ignore_pkgs = []
+        ignore_pkgs = set(ignore_pkgs or [])
         depends = set([])
         pkgs_to_check = set([pkg_name])
         while pkgs_to_check:
@@ -71,18 +70,20 @@ class DependencyWalker(object):
             if next_pkg_to_check in ignore_pkgs:
                 continue
             for depend_type in depend_types:
-                deps = self.get_depends(next_pkg_to_check, depend_type)
-                if ros_packages_only:
-                    deps = deps & set(self._release_instance.packages.keys())
+                deps = self.get_depends(next_pkg_to_check, depend_type, ros_packages_only=ros_packages_only)
+                deps -= ignore_pkgs
                 new_deps = deps - depends
                 pkgs_to_check |= new_deps
                 depends |= new_deps
         return depends
 
-    def get_depends_on(self, pkg_name, depend_type):
+    def get_depends_on(self, pkg_name, depend_type, ignore_pkgs=None):
         '''Return a set of package names which depend on the package.'''
+        ignore_pkgs = ignore_pkgs or []
         depends_on = set([])
         for name in self._release_instance.packages.keys():
+            if name in ignore_pkgs:
+                continue
             pkg = self._release_instance.packages[name]
             repo = self._release_instance.repositories[pkg.repository_name]
             if repo.version is None:
@@ -94,16 +95,13 @@ class DependencyWalker(object):
 
     def get_recursive_depends_on(self, pkg_name, depend_types, ignore_pkgs=None):
         '''Return a set of package names which (transitively) depend on the package.'''
-        if ignore_pkgs is None:
-            ignore_pkgs = []
+        ignore_pkgs = ignore_pkgs or []
         depends_on = set([])
         pkgs_to_check = set([pkg_name])
         while pkgs_to_check:
             next_pkg_to_check = pkgs_to_check.pop()
-            if next_pkg_to_check in ignore_pkgs:
-                continue
             for depend_type in depend_types:
-                deps = self.get_depends_on(next_pkg_to_check, depend_type)
+                deps = self.get_depends_on(next_pkg_to_check, depend_type, ignore_pkgs=ignore_pkgs)
                 new_deps = deps - depends_on
                 pkgs_to_check |= new_deps
                 depends_on |= new_deps
