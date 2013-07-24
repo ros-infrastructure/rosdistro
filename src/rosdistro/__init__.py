@@ -138,7 +138,7 @@ def get_release_file(index, dist_name):
 
 def get_release_cache(index, dist_name):
     if dist_name not in index.distributions.keys():
-        raise RuntimeError("Unknown release: '{0}'".format(dist_name))
+        raise RuntimeError("Unknown release: '{0}'. Valid release names are '{1}'".format(dist_name, index.distributions.keys()))
     dist = index.distributions[dist_name]
     if 'release_cache' not in dist.keys():
         raise RuntimeError("Release has no cache: '{0}'".format(dist_name))
