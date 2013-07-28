@@ -50,8 +50,8 @@ class ReleaseCache(object):
             assert 'name' in data, "Release cache file for '%s' lacks required name information" % name
             assert data['name'] == name, "Release cache file for '%s' does not match the name '%s'" % (name, data['name'])
         else:
-            self.version = 1
-        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (ReleaseCache._type, int(data['version']))
+            self.version = rel_file_data['version']
+        assert int(self.version) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (ReleaseCache._type, int(self.version))
 
         self._rel_file_data = data['release_file'] if data else rel_file_data
         self.release_file = ReleaseFile(name, self._rel_file_data)
