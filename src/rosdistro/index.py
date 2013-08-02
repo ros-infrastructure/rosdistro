@@ -78,7 +78,7 @@ class Index(object):
                     for v in value:
                         parts = urlparse(v)
                         if not parts[0]:  # schema
-                            v = os.path.join(base_url, v)
+                            v = base_url + '/' + v
                         self.distributions[distro_name][key].append(v)
                     if not list_value:
                         self.distributions[distro_name][key] = self.distributions[distro_name][key][0]
