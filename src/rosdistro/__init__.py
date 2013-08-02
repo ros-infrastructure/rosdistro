@@ -218,6 +218,9 @@ def _get_dist_file_data(index, dist_name, type_):
         raise RuntimeError('unknown release type "%s"' % type_)
     url = dist[type_]
 
+    #Fix Windows path
+    url = url.replace('\\', '/')
+
     def _load_yaml_data(url):
         logger.debug('Load file from "%s"' % url)
         yaml_str = load_url(url)
