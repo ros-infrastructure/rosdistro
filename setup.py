@@ -23,7 +23,7 @@ setup(
     maintainer='Dirk Thomas',
     maintainer_email='dthomas@osrfoundation.org',
     url='http://www.ros.org/wiki/rosdistro',
-    download_url='http://pr.willowgarage.com/downloads/rosdistro/',
+    download_url='http://download.ros.org/downloads/rosdistro/',
     keywords=['ROS'],
     classifiers=['Programming Language :: Python',
                  'License :: OSI Approved :: BSD License',
