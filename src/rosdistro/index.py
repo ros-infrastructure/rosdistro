@@ -32,7 +32,6 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import os
-import types
 try:
     from urllib.parse import urlparse
 except ImportError:
@@ -70,7 +69,7 @@ class Index(object):
 
                     self.distributions[distro_name][key] = []
                     value = distro_data[key]
-                    if list_value != isinstance(value, types.ListType):
+                    if list_value != isinstance(value, list):
                         assert False, 'wrong type of key "%s"' % key
 
                     if not list_value:

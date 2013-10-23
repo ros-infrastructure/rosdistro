@@ -31,7 +31,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import urllib2
+try:
+    from urllib.request import urlopen
+    from urllib.error import URLError
+except ImportError:
+    from urllib2 import urlopen
+    from urllib2 import URLError
 
 from rosdistro import logger
 from rosdistro.manifest_provider import get_release_tag
@@ -59,8 +64,8 @@ def github_manifest_provider(_dist_name, repo, pkg_name):
         url = 'https://raw.' + url[8:]
     try:
         logger.debug('Load package.xml file from url "%s"' % url)
-        package_xml = urllib2.urlopen(url).read()
+        package_xml = urlopen(url).read()
         return package_xml
-    except urllib2.URLError as e:
+    except URLError as e:
         logger.debug('- failed (%s), trying "%s"' % (e, url))
         raise RuntimeError()
