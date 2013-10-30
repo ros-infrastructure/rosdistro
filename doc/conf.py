@@ -51,7 +51,7 @@ lastmod = subprocess.Popen(gitcmd, stdout=subprocess.PIPE).communicate()[0]
 dochash = subprocess.Popen('git log -n1 --pretty=format:%H'.split(),
                            stdout=subprocess.PIPE).communicate()[0]
 
-print "dochash=", dochash
+print("dochash=", dochash)
 copyright = u'2012, Willow Garage -- ' + ' Version ' + dochash + ", " \
            + ' '.join(lastmod.split(' ')[:4])
 

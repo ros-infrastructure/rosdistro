@@ -40,8 +40,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import urllib2
-import yaml
+try:
+    from urllib.error import HTTPError
+except ImportError:
+    from urllib2 import HTTPError
 
 from rosdistro.loader import load_url
 from rosdistro.release_file import ReleaseFile
@@ -135,7 +137,7 @@ def _get_tag_template(dist_name, repo, pkg_name, last_repo=None):
         try:
             load_url(url)
             return 'release/%s/{package}/{version}' % dist_name
-        except urllib2.HTTPError:
+        except HTTPError:
             # try alternative tag
             upstream_version = repo['version'].split('-')[0]
             release_tag = 'release/{0}/{1}'.format(pkg_name, upstream_version)
@@ -143,7 +145,7 @@ def _get_tag_template(dist_name, repo, pkg_name, last_repo=None):
             print('- ' + pkg_name + ': ' + url)
             load_url(url)
             return 'release/{package}/{upstream_version}'
-    except urllib2.HTTPError as e:
+    except HTTPError as e:
         raise RuntimeError('Could not determine tag using %s, %s, %s: %s' % (dist_name, repo, pkg_name, e))
 
 

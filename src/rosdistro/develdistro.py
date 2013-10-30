@@ -1,10 +1,13 @@
+try:
+    from urllib.request import urlopen
+except ImportError:
+    from urllib2 import urlopen
 import yaml
-import urllib2
 
 
 class DevelDistro:
     def __init__(self, name):
-        url = urllib2.urlopen('https://raw.github.com/ros/rosdistro/master/releases/{0}-devel.yaml'.format(name))
+        url = urlopen('https://raw.github.com/ros/rosdistro/master/releases/{0}-devel.yaml'.format(name))
         distro = yaml.load(url.read())['repositories']
         self.repositories = {}
         for name, data in distro.iteritems():

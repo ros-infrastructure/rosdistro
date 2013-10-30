@@ -5,8 +5,12 @@ import tarfile
 import tempfile
 import threading
 import urllib
-import urllib2
-import yaml
+try:
+    from urllib.request import urlopen
+    from urllib.error import HTTPError
+except ImportError:
+    from urllib2 import urlopen
+    from urllib2 import HTTPError
 
 from .common import info
 from .common import warning
@@ -155,7 +159,7 @@ class RosDistroFile:
         self.name = name
 
         # parse ros distro file
-        distro_url = urllib2.urlopen('https://raw.github.com/ros/rosdistro/master/releases/%s.yaml' % name)
+        distro_url = urlopen('https://raw.github.com/ros/rosdistro/master/releases/%s.yaml' % name)
         distro = yaml.load(distro_url.read())['repositories']
 
         # loop over all repo's
@@ -201,7 +205,7 @@ class RosPackage:
             url = url.replace('https://', 'https://raw.')
             try:
                 try:
-                    package_xml = urllib2.urlopen(url).read()
+                    package_xml = urlopen(url).read()
                 except Exception as e:
                     msg = "Failed to read package.xml file from url '{0}': {1}".format(url, e)
                     warning(msg)
@@ -212,7 +216,7 @@ class RosPackage:
                     url = url.replace('git://', 'https://')
                     url = url.replace('https://', 'https://raw.')
                     info("Trying to read from url '{0}' instead".format(url))
-                    package_xml = urllib2.urlopen(url).read()
+                    package_xml = urlopen(url).read()
             except Exception as e:
                 msg += '\nAND\n'
                 msg += "Failed to read package.xml file from url '{0}': {1}".format(url, e)
@@ -327,8 +331,8 @@ class RosDependencies:
     def _read_server_cache(self):
         self.cache = 'server'
         try:
-            resp = urllib2.urlopen(self.server_url)
-        except urllib2.HTTPError as ex:
+            resp = urlopen(self.server_url)
+        except HTTPError as ex:
             warning("Failed to read server cache: %s" % ex)
             return {}
         with tempfile.NamedTemporaryFile('w') as fh:
@@ -369,7 +373,7 @@ class RosDependencies:
                 yaml.dump({'cache_version': CACHE_VERSION,
                            'repositories': self.dependencies},
                           f)
-        except Exception, ex:
+        except Exception as ex:
             error("Failed to write local dependency cache to %s: %s" % (self.local_url, ex))
 
 

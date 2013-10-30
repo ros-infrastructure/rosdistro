@@ -8,23 +8,23 @@ def depends(args):
     distro = rosdistro.RosDistro(args[1])
     deps = distro.get_depends(args[2:], int(args[0]))
     for t, dep in deps.iteritems():
-        print '%s depends:'%t
-        print ', '.join(dep)
+        print('%s depends:'%t)
+        print(', '.join(dep))
 
 def depends_on(args):
     distro = rosdistro.RosDistro(args[1])
     deps = distro.get_depends_on(args[2:], int(args[0]))
     for t, dep in deps.iteritems():
-        print '%s depends_on:'%t
-        print ', '.join(dep)
+        print('%s depends_on:'%t)
+        print(', '.join(dep))
 
 def help(cmd=None):
-    print "Usage: %s [command]"%sys.argv[0]
-    print "   With [command] one of the following"
+    print("Usage: %s [command]"%sys.argv[0])
+    print("   With [command] one of the following")
     if cmd and type(cmd) == list:
         cmd = cmd[0]
     if cmd and not cmds.has_key(cmd):
-        print "Unknown command %s"%cmd
+        print("Unknown command %s"%cmd)
         cmd = None
     if cmd and cmd == 'help':
         cmd = None
@@ -33,7 +33,7 @@ def help(cmd=None):
         res += (' ' * (30-len(res)))
         res += "with arguments: '%s'"%(' '.join(ops['args']))
         if not cmd or cmd == c:
-            print res
+            print(res)
 
 
 cmds = {'help': {'args': ['command'], 'cmd': help},
@@ -67,18 +67,18 @@ def main():
     # execute command
     try:
         cmds[cmd]['cmd'](commands[1:])
-    except Exception, e:
-        print e
-        print "Failure"
+    except Exception as e:
+        print(e)
+        print("Failure")
     return
 
 
     distro  = rosdistro.RosDistro(args(0), options.cache)
     for r in distro.get_repositories():
-        print "Caching %s"%r
+        print("Caching %s"%r)
         distro.get_depends1(r)
 
-    print "Cache written to %s"%(distro.depends_file.local_url)
+    print("Cache written to %s"%(distro.depends_file.local_url))
 
 if __name__ == "__main__":
     main()

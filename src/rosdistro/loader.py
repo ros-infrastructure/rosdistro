@@ -33,21 +33,28 @@
 
 import socket
 import time
-import urllib2
+try:
+    from urllib.request import urlopen
+    from urllib.error import HTTPError
+    from urllib.error import URLError
+except ImportError:
+    from urllib2 import urlopen
+    from urllib2 import HTTPError
+    from urllib2 import URLError
 
 
 def load_url(url, retry=2, retry_period=1, timeout=10):
     try:
-        fh = urllib2.urlopen(url, timeout=timeout)
-    except urllib2.HTTPError as e:
+        fh = urlopen(url, timeout=timeout)
+    except HTTPError as e:
         if e.code == 503 and retry:
             time.sleep(retry_period)
             return load_url(url, retry=retry - 1, retry_period=retry_period, timeout=timeout)
         e.msg += ' (%s)' % url
         raise
-    except urllib2.URLError as e:
+    except URLError as e:
         if isinstance(e.reason, socket.timeout) and retry:
             time.sleep(retry_period)
             return load_url(url, retry=retry - 1, retry_period=retry_period, timeout=timeout)
-        raise urllib2.URLError(str(e) + ' (%s)' % url)
+        raise URLError(str(e) + ' (%s)' % url)
     return fh.read()

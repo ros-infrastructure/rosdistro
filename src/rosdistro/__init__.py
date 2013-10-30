@@ -32,34 +32,37 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 # legacy imports
-import common
-from rosdistro import walks
-from rosdistro import RosDistro
-from develdistro import DevelDistro
-from aptdistro import AptDistro
+from . import common
+from .rosdistro import walks
+from .rosdistro import RosDistro
+from .develdistro import DevelDistro
+from .aptdistro import AptDistro
 
 import gzip
 import logging
 import os
-from StringIO import StringIO
+try:
+    from io import BytesIO as StringIO
+except ImportError:
+    from cStringIO import StringIO
 import yaml
 
 logger = logging.getLogger('rosdistro')
 
-from _version import __version__
-from doc_build_file import DocBuildFile
-from doc_file import DocFile
-from external.appdirs import user_config_dir, site_config_dir
-from index import Index
-from loader import load_url
-from manifest_provider.cache import CachedManifestProvider
-from release import Release
-from release_build import ReleaseBuild
-from release_build_file import ReleaseBuildFile
-from release_cache import ReleaseCache
-from release_file import ReleaseFile
-from source_build_file import SourceBuildFile
-from source_file import SourceFile
+from ._version import __version__
+from .doc_build_file import DocBuildFile
+from .doc_file import DocFile
+from .external.appdirs import user_config_dir, site_config_dir
+from .index import Index
+from .loader import load_url
+from .manifest_provider.cache import CachedManifestProvider
+from .release import Release
+from .release_build import ReleaseBuild
+from .release_build_file import ReleaseBuildFile
+from .release_cache import ReleaseCache
+from .release_file import ReleaseFile
+from .source_build_file import SourceBuildFile
+from .source_file import SourceFile
 
 ### index information
 

@@ -1,14 +1,17 @@
-import urllib2
+try:
+    from urllib2 import urlopen
+except ImportError:
+    from urllib.request import urlopen
 
 
 class AptDistro:
     def __init__(self, ubuntudistro, arch, shadow=True):
         if shadow:
             url = 'http://packages.ros.org/ros-shadow-fixed/ubuntu/dists/{0}/main/binary-{1}/Packages'
-            url = urllib2.urlopen(url.format(ubuntudistro, arch))
+            url = urlopen(url.format(ubuntudistro, arch))
         else:
             url = 'http://packages.ros.org/ros/ubuntu/dists/{0}/main/binary-{1}/Packages'
-            url = urllib2.urlopen(url.format(ubuntudistro, arch))
+            url = urlopen(url.format(ubuntudistro, arch))
         self.dep = {}
         package = None
         for l in url.read().split('\n'):
