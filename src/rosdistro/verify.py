@@ -122,6 +122,7 @@ def _check_file_identical(dist_file, yaml_url, file_type):
     dist_file_data = dist_file.get_data()
     dist_file_lines = _to_yaml(dist_file_data).splitlines()
     dist_file_lines[0:0] = _yaml_header_lines(file_type)
+
     if yaml_lines != dist_file_lines:
         diff = difflib.unified_diff(
             yaml_lines, dist_file_lines,

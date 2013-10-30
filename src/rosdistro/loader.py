@@ -57,4 +57,9 @@ def load_url(url, retry=2, retry_period=1, timeout=10):
             time.sleep(retry_period)
             return load_url(url, retry=retry - 1, retry_period=retry_period, timeout=timeout)
         raise URLError(str(e) + ' (%s)' % url)
-    return fh.read()
+    # Python 2/3 Compatibility
+    contents = fh.read()
+    if isinstance(contents, str):
+        return contents
+    else:
+        return contents.decode('utf-8')
