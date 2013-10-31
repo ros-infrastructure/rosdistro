@@ -42,9 +42,9 @@ import gzip
 import logging
 import os
 try:
-    from io import BytesIO as StringIO
-except ImportError:
     from cStringIO import StringIO
+except ImportError:
+    from io import StringIO
 import yaml
 
 logger = logging.getLogger('rosdistro')
