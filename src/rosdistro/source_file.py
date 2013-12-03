@@ -53,6 +53,7 @@ class SourceFile(object):
             for repo_name in data['repositories']:
                 repo_data = data['repositories'][repo_name]
                 try:
+                    assert 'version' in repo_data, "Repository '%s' lacks required version information" % repo_name
                     repo = Repository(repo_name, repo_data)
                 except AssertionError as e:
                     e.args = [("Source file '%s': %s" % (self.name, a) if i == 0 else a) for i, a in enumerate(e.args)]
