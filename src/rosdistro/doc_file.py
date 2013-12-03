@@ -49,7 +49,7 @@ class DocFile(object):
         self.repositories = {}
         self.repository_dependencies = {}
         if 'repositories' in data:
-            for repo_name in data['repositories']:
+            for repo_name in sorted(data['repositories']):
                 repo_data = data['repositories'][repo_name]
                 try:
                     repo = Repository(repo_name, repo_data)

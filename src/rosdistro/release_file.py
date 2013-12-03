@@ -52,7 +52,7 @@ class ReleaseFile(object):
         self.repositories = {}
         self.packages = {}
         if 'repositories' in data:
-            for repo_name in data['repositories'].keys():
+            for repo_name in sorted(data['repositories'].keys()):
                 repo_data = data['repositories'][repo_name]
                 try:
                     repo = ReleaseRepository(repo_name, repo_data)

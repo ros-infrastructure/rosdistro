@@ -50,7 +50,7 @@ class SourceFile(object):
 
         self.repositories = {}
         if 'repositories' in data:
-            for repo_name in data['repositories']:
+            for repo_name in sorted(data['repositories']):
                 repo_data = data['repositories'][repo_name]
                 try:
                     assert 'version' in repo_data, "Repository '%s' lacks required version information" % repo_name
