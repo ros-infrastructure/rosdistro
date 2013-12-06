@@ -15,12 +15,12 @@ class AptDistro:
         self.dep = {}
         package = None
         for l in url.read().split('\n'):
-            if 'Package: ' in l:
-                package = l.split('Package: ')[1]
-            if 'Depends: ' in l:
+            if l.startswith('Package: '):
+                package = l[len('Package: '):]
+            if l.startswith('Depends: '):
                 if not package:
-                    raise RuntimeError("Found 'depends' but not 'package' while parsing the apt repository index file")
-                self.dep[package] = [d.split(' ')[0] for d in (l.split('Depends: ')[1].split(', '))]
+                    raise RuntimeError("Found 'Depends: ' but not 'Package: ' while parsing the apt repository index file")
+                self.dep[package] = [d.split(' ')[0] for d in (l[len('Depends: '):].split(', '))]
                 package = None
 
     def has_package(self, package):
