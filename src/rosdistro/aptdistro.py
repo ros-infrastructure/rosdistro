@@ -15,9 +15,9 @@ class AptDistro:
         self.dep = {}
         package = None
         for l in url.read().split('\n'):
-            if 'Package: ' in l:
+            if l.find('Package: ') == 0:
                 package = l.split('Package: ')[1]
-            if 'Depends: ' in l:
+            if l.find('Depends: ') == 0:
                 if not package:
                     raise RuntimeError("Found 'depends' but not 'package' while parsing the apt repository index file")
                 self.dep[package] = [d.split(' ')[0] for d in (l.split('Depends: ')[1].split(', '))]
