@@ -43,7 +43,7 @@ except ImportError:
     from urllib2 import URLError
 
 
-def load_url(url, retry=2, retry_period=1, timeout=10):
+def load_url(url, retry=2, retry_period=1, timeout=10, skip_decode=False):
     try:
         fh = urlopen(url, timeout=timeout)
     except HTTPError as e:
@@ -59,7 +59,7 @@ def load_url(url, retry=2, retry_period=1, timeout=10):
         raise URLError(str(e) + ' (%s)' % url)
     # Python 2/3 Compatibility
     contents = fh.read()
-    if isinstance(contents, str):
+    if isinstance(contents, str) or skip_decode:
         return contents
     else:
         return contents.decode('utf-8')
