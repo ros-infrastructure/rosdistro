@@ -44,7 +44,7 @@ import os
 try:
     from cStringIO import StringIO
 except ImportError:
-    from io import StringIO
+    from io import BytesIO as StringIO
 import yaml
 
 logger = logging.getLogger('rosdistro')
@@ -151,10 +151,12 @@ def get_release_cache(index, dist_name):
     if url.endswith('.yaml'):
         yaml_str = load_url(url)
     elif url.endswith('.yaml.gz'):
-        yaml_gz_str = load_url(url)
+        yaml_gz_str = load_url(url, skip_decode=True)
         yaml_gz_stream = StringIO(yaml_gz_str)
         f = gzip.GzipFile(fileobj=yaml_gz_stream, mode='rb')
         yaml_str = f.read()
+        if not isinstance(yaml_str, str):
+            yaml_str = yaml_str.decode('utf-8')
         f.close()
     else:
         raise NotImplementedError('The url of the cache must end with either ".yaml" or ".yaml.gz"')
