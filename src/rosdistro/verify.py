@@ -37,12 +37,12 @@ import difflib
 import sys
 import yaml
 
-from . import get_doc_build_files, get_doc_file, get_index, get_release_build_files, get_release_file, get_source_build_files, get_source_file
+from . import get_distribution_file, get_doc_build_files, get_doc_file, get_index, get_release_build_files, get_release_file, get_source_build_files, get_source_file
 from .loader import load_url
 
 
 def verify_files_parsable(index_url):
-    return verify_files(index_url, _check_files_parsable)
+    return verify_files(index_url, _check_files_parsable, include_deprecated=True)
 
 
 def _check_files_parsable(index, dist_name, loader_function, _yaml_url, _file_type):
@@ -62,23 +62,29 @@ def verify_files_identical(index_url):
     return verify_files(index_url, _check_files_identical)
 
 
-def verify_files(index_url, callback):
+def verify_files(index_url, callback, include_deprecated=False):
     identical = True
     index = get_index(index_url)
     for dist_name in sorted(index.distributions.keys()):
         dist = index.distributions[dist_name]
+        providers = [get_distribution_file]
+        if include_deprecated:
+            providers.extend([get_release_file, get_source_file, get_doc_file])
         file_providers = {
-            'release': (get_release_file, 'release'),
+            'distribution': (providers, 'distribution'),
             'release_builds': (get_release_build_files, 'release-build'),
-            'source': (get_source_file, 'source'),
             'source_builds': (get_source_build_files, 'source-build'),
-            'doc': (get_doc_file, 'doc'),
             'doc_builds': (get_doc_build_files, 'doc-build')
         }
         for key in sorted(file_providers.keys()):
-            file_provider, file_type = file_providers[key]
+            provider, file_type = file_providers[key]
             yaml_url = dist[key]
-            identical &= callback(index, dist_name, file_provider, yaml_url, file_type)
+            if isinstance(provider, list):
+                for p in provider:
+                    identical &= callback(index, dist_name, p, yaml_url, file_type)
+            else:
+                identical &= callback(index, dist_name, provider, yaml_url, file_type)
+
     return identical
 
 
@@ -145,6 +151,6 @@ def _yaml_header_lines(file_type):
     return [
         '%YAML 1.1',
         '# ROS %s file' % file_type,
-        '# see REP 137: http://ros.org/reps/rep-0137.html',
+        '# see REP 141: http://ros.org/reps/rep-0141.html',
         '---'
     ]

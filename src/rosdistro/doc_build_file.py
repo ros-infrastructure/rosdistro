@@ -33,7 +33,7 @@
 
 import copy
 
-from .repository import Repository
+from .repository_specification import RepositorySpecification
 
 
 class DocBuildFile(object):
@@ -47,7 +47,7 @@ class DocBuildFile(object):
         assert data['type'] == DocBuildFile._type, "Expected file type is '%s', not '%s'" % (DocBuildFile._type, data['type'])
 
         assert 'version' in data, "Doc build file for '%s' lacks required version information" % self.name
-        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (DocBuildFile._type, int(data['version']))
+        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (DocBuildFile._type, int(data['version']))
         self.version = int(data['version'])
 
         self.repository_whitelist = []
@@ -94,7 +94,7 @@ class DocBuildFile(object):
 
         assert 'doc_tag_index_repository' in data
         try:
-            self.doc_tag_index_repository = Repository('doc_tag_index', data['doc_tag_index_repository'])
+            self.doc_tag_index_repository = RepositorySpecification('doc_tag_index', data['doc_tag_index_repository'])
         except AssertionError as e:
             e.args = [("Doc build file '%s': %s" % (self.name, a) if i == 0 else a) for i, a in enumerate(e.args)]
             raise e

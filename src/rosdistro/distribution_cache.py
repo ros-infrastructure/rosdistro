@@ -32,46 +32,40 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
-from .release_file import ReleaseFile
+from .distribution_file import DistributionFile
 
 
-class ReleaseCache(object):
+class DistributionCache(object):
 
     _type = 'cache'
 
     def __init__(self, name, data=None, distribution_file_data=None):
         assert data or distribution_file_data
         if data:
-            assert 'type' in data, "Expected file type is '%s'" % ReleaseCache._type
-            assert data['type'] == ReleaseCache._type, "Expected file type is '%s', not '%s'" % (ReleaseCache._type, data['type'])
+            assert 'type' in data, "Expected file type is '%s'" % DistributionCache._type
+            assert data['type'] == DistributionCache._type, "Expected file type is '%s', not '%s'" % (DistributionCache._type, data['type'])
 
-            assert 'version' in data, "Release cache file for '%s' lacks required version information" % name
+            assert 'version' in data, "Distribution cache file for '%s' lacks required version information" % name
             self.version = int(data['version'])
-            assert self.version > 1, "Unable to handle '%s' format version '%d' anymore, please update your '%s' file to version '2'" % (ReleaseCache._type, self.version, ReleaseCache._type)
-            assert self.version == 2, "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (ReleaseCache._type, self.version)
+            assert self.version > 1, "Unable to handle '%s' format version '%d' anymore, please update your '%s' file to version '2'" % (DistributionCache._type, self.version, DistributionCache._type)
+            assert self.version == 2, "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (DistributionCache._type, self.version)
 
-            assert 'name' in data, "Release cache file for '%s' lacks required name information" % name
-            assert data['name'] == name, "Release cache file for '%s' does not match the name '%s'" % (name, data['name'])
+            assert 'name' in data, "Distribution cache file for '%s' lacks required name information" % name
+            assert data['name'] == name, "Distribution cache file for '%s' does not match the name '%s'" % (name, data['name'])
         else:
             self.version = 2
 
         self._distribution_file_data = data['distribution_file'] if data else distribution_file_data
-        self.release_file = ReleaseFile(name, self._distribution_file_data)
-        self.package_xmls = data['release_package_xmls'] if data else {}
-
-    # for backward compatibility only
-    def __getattr__(self, name):
-        if name == 'release_package_xmls':
-            return self.package_xmls
-        raise AttributeError
+        self.distribution_file = DistributionFile(name, self._distribution_file_data)
+        self.release_package_xmls = data['release_package_xmls'] if data else {}
 
     def get_data(self):
         data = {}
         data['type'] = 'cache'
         data['version'] = 2
-        data['name'] = self.release_file.name
+        data['name'] = self.distribution_file.name
         data['distribution_file'] = self._distribution_file_data
-        data['package_xmls'] = self.package_xmls
+        data['release_package_xmls'] = self.release_package_xmls
         return data
 
     def update_distribution(self, distribution_file_data):
@@ -79,26 +73,26 @@ class ReleaseCache(object):
         self._remove_obsolete_entries()
 
         self._distribution_file_data = distribution_file_data
-        rel_file = ReleaseFile(self.distribution_file.name, self._distribution_file_data)
+        dist_file = DistributionFile(self.distribution_file.name, self._distribution_file_data)
 
         # remove all package xmls if repository information has changed
-        for pkg_name in sorted(rel_file.packages.keys()):
-            if pkg_name not in self.release_file.packages:
+        for pkg_name in sorted(dist_file.release_packages.keys()):
+            if pkg_name not in self.distribution_file.release_packages:
                 continue
-            if pkg_name in self.package_xmls and self._get_repo_info(rel_file, pkg_name) != self._get_repo_info(self.release_file, pkg_name):
-                del self.package_xmls[pkg_name]
+            if pkg_name in self.release_package_xmls and self._get_repo_info(dist_file, pkg_name) != self._get_repo_info(self.distribution_file, pkg_name):
+                del self.release_package_xmls[pkg_name]
 
-        self.release_file = rel_file
+        self.distribution_file = dist_file
         # remove packages which are not in the new distribution file
         self._remove_obsolete_entries()
 
     def _get_repo_info(self, dist_file, pkg_name):
-        pkg = dist_file.packages[pkg_name]
+        pkg = dist_file.distributiond_packages[pkg_name]
         repo = dist_file.repositories[pkg.repository_name]
         return (repo.version, repo.url)
 
     def _remove_obsolete_entries(self):
-        for pkg_name in self.package_xmls.keys():
-            if pkg_name not in self.release_file.packages:
+        for pkg_name in self.release_package_xmls.keys():
+            if pkg_name not in self.distribution_file.release_packages:
                 print('- REMOVE', pkg_name)
-                del self.package_xmls[pkg_name]
+                del self.release_package_xmls[pkg_name]

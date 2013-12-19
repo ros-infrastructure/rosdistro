@@ -31,41 +31,35 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .repository import Repository
+from .repository_specification import RepositorySpecification
 
 
 class SourceFile(object):
 
-    _type = 'source'
+    _type = 'distribution'
 
     def __init__(self, name, data):
         self.name = name
 
+        assert 'type' in data and data['type'] != 'source', "Unable to handle 'source' format anymore, please update your 'source' file to the latest specification"
         assert 'type' in data, "Expected file type is '%s'" % SourceFile._type
         assert data['type'] == SourceFile._type, "Expected file type is '%s', not '%s'" % (SourceFile._type, data['type'])
 
         assert 'version' in data, "Source file for '%s' lacks required version information" % self.name
-        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (SourceFile._type, int(data['version']))
+        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (SourceFile._type, int(data['version']))
         self.version = int(data['version'])
 
         self.repositories = {}
         if 'repositories' in data:
             for repo_name in sorted(data['repositories']):
                 repo_data = data['repositories'][repo_name]
+                if 'source' not in repo_data:
+                    continue
+                repo_data = repo_data['source']
                 try:
                     assert 'version' in repo_data, "Repository '%s' lacks required version information" % repo_name
-                    repo = Repository(repo_name, repo_data)
+                    repo = RepositorySpecification(repo_name, repo_data)
                 except AssertionError as e:
                     e.args = [("Source file '%s': %s" % (self.name, a) if i == 0 else a) for i, a in enumerate(e.args)]
                     raise e
                 self.repositories[repo_name] = repo
-
-    def get_data(self):
-        data = {}
-        data['type'] = SourceFile._type
-        data['version'] = self.version
-        data['repositories'] = {}
-        for repo_name in sorted(self.repositories):
-            repo = self.repositories[repo_name]
-            data['repositories'][repo_name] = repo.get_data()
-        return data

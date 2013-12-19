@@ -31,14 +31,28 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
-
-from .verify import _to_yaml, _yaml_header_lines
+from .repository_specification import RepositorySpecification
 
 
-def yaml_from_distribution_file(distribution_file):
-    return '\n'.join(_yaml_header_lines(distribution_file._type)) + '\n' + _to_yaml(distribution_file.get_data())
+class DocRepositorySpecification(RepositorySpecification):
 
-# for backward compatibility only
-def yaml_from_release_file(release_file):
-    raise NotImplementedError
+    def __init__(self, name, data):
+        super(DocRepositorySpecification, self).__init__(name, data)
+
+        self.blacklist_packages = []
+        if 'blacklist_packages' in data and data['blacklist_packages']:
+            self.blacklist_packages = sorted(data['blacklist_packages'])
+            assert isinstance(self.blacklist_packages, list)
+
+        self.depends = []
+        if 'depends' in data and data['depends']:
+            self.depends = sorted(data['depends'])
+            assert isinstance(self.depends, list)
+
+    def get_data(self):
+        data = self._get_data(skip_git_type=False)
+        if self.blacklist_packages:
+            data['blacklist_packages'] = sorted(self.blacklist_packages)
+        if self.depends:
+            data['depends'] = sorted(self.depends)
+        return data

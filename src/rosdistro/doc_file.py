@@ -31,19 +31,20 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .repository import Repository
+from .doc_repository_specification import DocRepositorySpecification
 
 
 class DocFile(object):
 
-    _type = 'doc'
+    _type = 'distribution'
 
     def __init__(self, name, data):
         self.name = name
 
+        assert 'type' in data and data['type'] != 'doc', "Unable to handle 'doc' format anymore, please update your 'doc' file to the latest specification"
         assert 'type' in data and data['type'] == DocFile._type
         assert 'version' in data
-        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (DocFile._type, int(data['version']))
+        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (DocFile._type, int(data['version']))
         self.version = data['version']
 
         self.repositories = {}
@@ -51,28 +52,15 @@ class DocFile(object):
         if 'repositories' in data:
             for repo_name in sorted(data['repositories']):
                 repo_data = data['repositories'][repo_name]
+                if 'doc' not in repo_data:
+                    continue
+                repo_data = repo_data['doc']
                 try:
-                    repo = Repository(repo_name, repo_data)
+                    repo = DocRepositorySpecification(repo_name, repo_data)
                 except AssertionError as e:
                     e.args = [("Doc file '%s': %s" % (self.name, a) if i == 0 else a) for i, a in enumerate(e.args)]
                     raise e
                 self.repositories[repo_name] = repo
-                self.repository_dependencies[repo_name] = []
-                if 'depends' in repo_data:
-                    for dep in repo_data['depends']:
-                        self.repository_dependencies[repo_name].append(dep)
-        for repo_name in self.repositories:
-            for dep_name in self.repository_dependencies[repo_name]:
-                assert dep_name in self.repositories
-
-    def get_data(self):
-        data = {}
-        data['type'] = DocFile._type
-        data['version'] = 1
-        data['repositories'] = {}
-        for repo_name in sorted(self.repositories):
-            repo = self.repositories[repo_name]
-            data['repositories'][repo_name] = repo.get_data()
-            if self.repository_dependencies[repo_name]:
-                data['repositories'][repo_name]['depends'] = self.repository_dependencies[repo_name]
-        return data
+                self.repository_dependencies[repo_name] = repo.depends
+                for dep_name in self.repository_dependencies[repo_name]:
+                    assert dep_name in data['repositories']

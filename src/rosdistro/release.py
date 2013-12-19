@@ -49,6 +49,14 @@ class Release(object):
         self._package_xmls = {}
 
     def __getattr__(self, name):
+        # for backward compatibility only
+        if name == 'get_release_package_xml':
+            return self.get_package_xml
+        if name == 'release_packages':
+            name = 'packages'
+        if name == 'release_platforms':
+            name = 'platforms'
+
         return getattr(self._rel_file, name)
 
     def get_package_xml(self, pkg_name):

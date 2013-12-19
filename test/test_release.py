@@ -9,7 +9,7 @@ FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file
 
 
 def test_release_file():
-    url = 'file://' + FILES_DIR + '/foo/release.yaml'
+    url = 'file://' + FILES_DIR + '/foo/distribution.yaml'
     yaml_str = load_url(url)
     data = yaml.load(yaml_str)
     rel_file = ReleaseFile('foo', data)
@@ -28,15 +28,9 @@ def _validate_rel_file(rel_file):
     repo = rel_file.repositories['bar_repo']
     assert repo.package_names == ['bar_repo']
     assert 'bar_repo' in rel_file.packages
-    pkg = rel_file.packages['bar_repo']
-    assert pkg.subfolder == '.'
 
     assert'baz-repo' in rel_file.repositories
     repo = rel_file.repositories['baz-repo']
     assert set(repo.package_names) == set(['baz_pkg1', 'baz_pkg2'])
     assert 'baz_pkg1' in rel_file.packages
-    pkg = rel_file.packages['baz_pkg1']
-    assert pkg.subfolder == 'baz_pkg1'
     assert 'baz_pkg2' in rel_file.packages
-    pkg = rel_file.packages['baz_pkg2']
-    assert pkg.subfolder == 'here/is/pkg2'

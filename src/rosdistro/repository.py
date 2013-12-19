@@ -31,24 +31,66 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from .doc_repository_specification import DocRepositorySpecification
+from .release_repository_specification import ReleaseRepositorySpecification
+from .repository_specification import RepositorySpecification
+from .status import valid_statuses
+
 
 class Repository(object):
 
-    def __init__(self, name, data):
+    def __init__(self, name, doc_data, release_data, source_data, status_data):
         self.name = name
-        self.type = data.get('type', 'git')
-        assert 'url' in data and data['url'], "Repository '%s' lacks required URL information" % name
-        self.url = data['url']
-        self.version = data.get('version', None)
+
+        self.doc_repository = DocRepositorySpecification(self.name, doc_data) if doc_data else None
+        self.release_repository = ReleaseRepositorySpecification(self.name, release_data) if release_data else None
+        self.source_repository = RepositorySpecification(self.name, source_data) if source_data else None
+
+        self.status = status_data.get('status', None)
+        if self.status is not None:
+            assert self.status in valid_statuses
+        self.status_description = status_data.get('status_description', None)
+
+        self.status_per_package = {}
+        for pkg_name in status_data.get('status_per_package', {}):
+            data = {}
+            status = status_data.get('status_per_package')[pkg_name].get('status', None)
+            if status:
+                assert status in valid_statuses
+                data['status'] = status
+            status_description = status_data.get('status_per_package')[pkg_name].get('status_description', None)
+            if status_description:
+                data['status_description'] = status_description
+            if data:
+                self.status_per_package[pkg_name] = data
 
     def get_data(self):
-        return self._get_data()
-
-    def _get_data(self, skip_git_type=False):
         data = {}
-        if self.type != 'git' or not skip_git_type:
-            data['type'] = str(self.type)
-        data['url'] = str(self.url)
-        if self.version is not None:
-            data['version'] = self.version
+
+        if self.doc_repository:
+            data['doc'] = self.doc_repository.get_data()
+        if self.release_repository:
+            data['release'] = self.release_repository.get_data()
+        if self.source_repository:
+            data['source'] = self.source_repository.get_data()
+
+        if self.status:
+            data['status'] = self.status
+        if self.status_description:
+            data['status_description'] = self.status_description
+
+        if self.status_per_package:
+            data['status_per_package'] = {}
+            for pkg_name in sorted(self.status_per_package.keys()):
+                pkg_status = self.status_per_package[pkg_name]
+                pkg_data = {}
+                status = pkg_status.get('status', None)
+                if status:
+                    pkg_data['status'] = status
+                status_description = pkg_status.get('status_description', None)
+                if status_description:
+                    pkg_data['status_description'] = status_description
+                if pkg_data:
+                    data['status_per_package'][pkg_name] = pkg_data
+
         return data

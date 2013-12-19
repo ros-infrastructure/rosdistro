@@ -47,7 +47,8 @@ class Index(object):
         assert data['type'] == Index._type, "Expected file type is '%s', not '%s'" % (Index._type, data['type'])
 
         assert 'version' in data, 'Index file lacks required version information'
-        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro" % (Index._type, int(data['version']))
+        assert int(data['version']) > 1, "Unable to handle '%s' format version '%d' anymore, please update your '%s' file to version '2'" % (Index._type, int(data['version']), Index._type)
+        assert int(data['version']) == 2, "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (Index._type, int(data['version']))
         self.version = int(data['version'])
 
         self.distributions = {}
@@ -60,7 +61,7 @@ class Index(object):
                 self.distributions[distro_name] = {}
                 distro_data = data['distributions'][distro_name]
                 for key in distro_data:
-                    if key in ['release', 'release_cache', 'source', 'doc']:
+                    if key in ['distribution', 'distribution_cache']:
                         list_value = False
                     elif key in ['release_builds', 'source_builds', 'doc_builds']:
                         list_value = True
@@ -81,3 +82,7 @@ class Index(object):
                         self.distributions[distro_name][key].append(v)
                     if not list_value:
                         self.distributions[distro_name][key] = self.distributions[distro_name][key][0]
+
+                    # for backward compatibility only
+                    if key == 'distribution':
+                        self.distributions[distro_name]['release'] = self.distributions[distro_name][key]

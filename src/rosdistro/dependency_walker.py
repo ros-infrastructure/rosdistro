@@ -36,16 +36,16 @@ from catkin_pkg.package import InvalidPackage, parse_package_string
 
 class DependencyWalker(object):
 
-    def __init__(self, release_instance):
-        self._release_instance = release_instance
+    def __init__(self, distribution_instance):
+        self._distribution_instance = distribution_instance
         self._packages = {}
 
     def _get_package(self, pkg_name):
         if pkg_name not in self._packages:
-            repo = self._release_instance.repositories[self._release_instance.packages[pkg_name].repository_name]
-            assert repo.version is not None, "Package '%s' in repository '%s' has no version set" % (pkg_name, repo.name)
+            repo = self._distribution_instance.repositories[self._distribution_instance.release_packages[pkg_name].repository_name].release_repository
+            assert repo is not None and repo.version is not None, "Package '%s' in repository '%s' has no version set" % (pkg_name, repo.name)
             assert 'release' in repo.tags, "Package '%s' in repository '%s' has no 'release' tag set" % (pkg_name, repo.name)
-            pkg_xml = self._release_instance.get_package_xml(pkg_name)
+            pkg_xml = self._distribution_instance.get_release_package_xml(pkg_name)
             try:
                 pkg = parse_package_string(pkg_xml)
             except InvalidPackage as e:
@@ -57,7 +57,7 @@ class DependencyWalker(object):
         '''Return a set of package names which the package depends on.'''
         deps = self._get_dependencies(pkg_name, depend_type)
         if ros_packages_only:
-            deps &= set(self._release_instance.packages.keys())
+            deps &= set(self._distribution_instance.release_packages.keys())
         return deps
 
     def get_recursive_depends(self, pkg_name, depend_types, ros_packages_only=False, ignore_pkgs=None):
@@ -81,12 +81,12 @@ class DependencyWalker(object):
         '''Return a set of package names which depend on the package.'''
         ignore_pkgs = ignore_pkgs or []
         depends_on = set([])
-        for name in self._release_instance.packages.keys():
+        for name in self._distribution_instance.release_packages.keys():
             if name in ignore_pkgs:
                 continue
-            pkg = self._release_instance.packages[name]
-            repo = self._release_instance.repositories[pkg.repository_name]
-            if repo.version is None:
+            pkg = self._distribution_instance.release_packages[name]
+            repo = self._distribution_instance.repositories[pkg.repository_name].release_repository
+            if repo is None or repo.version is None:
                 continue
             deps = self._get_dependencies(name, depend_type)
             if pkg_name in deps:

@@ -31,14 +31,13 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .repository import Repository
-from .status import valid_statuses
+from .repository_specification import RepositorySpecification
 
 
-class ReleaseRepository(Repository):
+class ReleaseRepositorySpecification(RepositorySpecification):
 
     def __init__(self, name, data):
-        super(ReleaseRepository, self).__init__(name, data)
+        super(ReleaseRepositorySpecification, self).__init__(name, data)
         assert self.type == 'git'
 
         self.tags = {}
@@ -50,17 +49,15 @@ class ReleaseRepository(Repository):
                 tag_data = data['tags'][tag_type]
                 self.tags[tag_type] = str(tag_data)
 
-        self.status = data.get('status', None)
-        if self.status is not None:
-            assert self.status in valid_statuses
-        self.status_description = data.get('status_description', None)
-
         self.package_names = []
         if 'packages' in data and data['packages']:
-            self.package_names = sorted(data['packages'].keys())
+            self.package_names = sorted(data['packages'])
         else:
-            # no package means a single package
+            # no packages means a single package
             self.package_names = [self.name]
+
+        # for backward compatibility only
+        self.release_repository = self
 
     def get_data(self):
         data = self._get_data(skip_git_type=True)
@@ -68,8 +65,6 @@ class ReleaseRepository(Repository):
             data['tags'] = {}
             for tag in self.tags:
                 data['tags'][tag] = str(self.tags[tag])
-        if self.status is not None:
-            data['status'] = str(self.status)
-        if self.status_description is not None:
-            data['status_description'] = str(self.status_description)
+        if len(self.package_names) > 1 or (len(self.package_names) == 1 and self.package_names[0] != self.name):
+            data['packages'] = sorted(self.package_names)
         return data
