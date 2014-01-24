@@ -42,7 +42,7 @@ class CachedManifestProvider(object):
 
     def __call__(self, dist_name, repo, pkg_name):
         assert repo.version
-        if pkg_name not in self._distribution_cache.package_xmls:
+        if pkg_name not in self._distribution_cache.release_package_xmls:
             # use manifest providers to lazy load
             package_xml = None
             for mp in self._manifest_providers or []:
@@ -54,7 +54,7 @@ class CachedManifestProvider(object):
                     logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
             if package_xml is None:
                 return None
-            self._distribution_cache.package_xmls[pkg_name] = package_xml
+            self._distribution_cache.release_package_xmls[pkg_name] = package_xml
         else:
             logger.debug('Load package.xml file for package "%s" from cache' % pkg_name)
-        return self._distribution_cache.package_xmls[pkg_name]
+        return self._distribution_cache.release_package_xmls[pkg_name]

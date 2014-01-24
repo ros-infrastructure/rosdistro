@@ -42,14 +42,14 @@ import sys
 import yaml
 
 from rosdistro import logger
-from rosdistro.release_cache_generator import generate_release_caches
+from rosdistro.distribution_cache_generator import generate_distribution_caches
 
 logging.basicConfig(level=logging.INFO)
 
 
 def parse_args(args=sys.argv[1:]):
     parser = argparse.ArgumentParser(
-        description='Build the cache for rosdistro release distributions.'
+        description='Build the cache for rosdistro distributions.'
     )
     add = parser.add_argument
     add('index',
@@ -74,12 +74,14 @@ def main():
         logger.level = logging.DEBUG
 
     try:
-        caches = generate_release_caches(args.index, preclean=args.preclean, debug=args.debug)
+        caches = generate_distribution_caches(args.index, dist_names=args.dist_names, preclean=args.preclean, debug=args.debug)
     except RuntimeError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
 
     for dist_name, cache in caches.items():
+        if args.dist_names and dist_name not in args.dist_names:
+            continue
         # write the cache
         data = yaml.dump(cache.get_data())
         with open('%s-cache.yaml' % dist_name, 'w') as f:

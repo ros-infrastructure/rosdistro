@@ -31,14 +31,43 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
+from .manifest_provider.git import git_manifest_provider
+from .manifest_provider.github import github_manifest_provider
 
-from .verify import _to_yaml, _yaml_header_lines
 
+class Distribution(object):
 
-def yaml_from_distribution_file(distribution_file):
-    return '\n'.join(_yaml_header_lines(distribution_file._type)) + '\n' + _to_yaml(distribution_file.get_data())
+    default_manifest_providers = [github_manifest_provider, git_manifest_provider]
 
-# for backward compatibility only
-def yaml_from_release_file(release_file):
-    raise NotImplementedError
+    def __init__(self, distribution_file, manifest_providers=None):
+        self._distribution_file = distribution_file
+        # Use default
+        self._manifest_providers = Distribution.default_manifest_providers
+        # Override default if given
+        if manifest_providers is not None:
+            self._manifest_providers = manifest_providers
+        self._release_package_xmls = {}
+
+    def __getattr__(self, name):
+        return getattr(self._distribution_file, name)
+
+    def get_release_package_xml(self, pkg_name):
+        if pkg_name not in self._release_package_xmls:
+            pkg = self._distribution_file.release_packages[pkg_name]
+            repo_name = pkg.repository_name
+            repo = self._distribution_file.repositories[repo_name]
+            if repo.release_repository is None:
+                return None
+            repo = repo.release_repository
+            if repo.version is None:
+                return None
+            package_xml = None
+            for mp in self._manifest_providers:
+                #try:
+                package_xml = mp(self._distribution_file.name, repo, pkg_name)
+                #except:
+                #    pass
+                if package_xml is not None:
+                    break
+            self._release_package_xmls[pkg_name] = package_xml
+        return self._release_package_xmls[pkg_name]

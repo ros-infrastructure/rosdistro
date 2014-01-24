@@ -9,7 +9,7 @@ FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file
 
 
 def test_source_file():
-    url = 'file://' + FILES_DIR + '/foo/source.yaml'
+    url = 'file://' + FILES_DIR + '/foo/distribution.yaml'
     yaml_str = load_url(url)
     data = yaml.load(yaml_str)
     src_file = SourceFile('foo', data)

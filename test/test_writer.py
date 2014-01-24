@@ -1,9 +1,9 @@
 import difflib
 import os
 
-from rosdistro import get_index, get_release_file
+from rosdistro import get_distribution_file, get_index
 
-from rosdistro.writer import yaml_from_release_file
+from rosdistro.writer import yaml_from_distribution_file
 
 FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'files'))
 
@@ -32,8 +32,8 @@ def get_diff(expected, actual):
 def test_verify_files_parsable():
     url = 'file://' + FILES_DIR + '/index.yaml'
     index = get_index(url)
-    release_file = get_release_file(index, 'foo')
-    data = yaml_from_release_file(release_file)
-    with open(os.path.join(FILES_DIR, 'foo', 'release.yaml'), 'r') as f:
+    distribution_file = get_distribution_file(index, 'foo')
+    data = yaml_from_distribution_file(distribution_file)
+    with open(os.path.join(FILES_DIR, 'foo', 'distribution.yaml'), 'r') as f:
         expected = f.read()
     assert data == expected, get_diff(expected, data)

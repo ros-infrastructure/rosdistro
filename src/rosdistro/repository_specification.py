@@ -31,14 +31,28 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
 
-from .verify import _to_yaml, _yaml_header_lines
+class RepositorySpecification(object):
 
+    def __init__(self, name, data):
+        self.name = name
+        self.type = data.get('type', 'git')
+        assert 'url' in data and data['url'], "Repository '%s' lacks required URL information" % name
+        self.url = data['url']
+        self.version = data.get('version', None)
 
-def yaml_from_distribution_file(distribution_file):
-    return '\n'.join(_yaml_header_lines(distribution_file._type)) + '\n' + _to_yaml(distribution_file.get_data())
+        # for backward compatibility only
+        self.status = None
+        self.status_description = None
 
-# for backward compatibility only
-def yaml_from_release_file(release_file):
-    raise NotImplementedError
+    def get_data(self):
+        return self._get_data()
+
+    def _get_data(self, skip_git_type=False):
+        data = {}
+        if self.type != 'git' or not skip_git_type:
+            data['type'] = str(self.type)
+        data['url'] = str(self.url)
+        if self.version is not None:
+            data['version'] = self.version
+        return data

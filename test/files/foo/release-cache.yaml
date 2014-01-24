@@ -1,30 +1,53 @@
-release_file:
-  platforms: 
-    ubuntu: [precise, quantal, raring]
+distribution_file:
+  release_platforms:
+    debian:
+    - wheezy
+    ubuntu:
+    - precise
+    - quantal
+    - raring
   repositories:
-    catkin: 
-      tags:
-        release: release/foo/{package}/{version}
-      url: 'https://github.com/ros-gbp/catkin-release.git'
-      version: 0.5.63-0
-    common_msgs:
-      packages: {actionlib_msgs: null, common_msgs: null, diagnostic_msgs: null}
-      tags:
-        release: release/foo/{package}/{version}
-      url: https://github.com/ros-gbp/common_msgs-release.git
-      version: 1.9.14-0
-    control_msgs:
-      packages:
-        control: {subfolder: compatibility/control}
-        control_msgs: null
-      tags:
-        release: release/foo/{package}/{version}
-      url: https://github.com/ros-gbp/control_msgs-release.git
-      version: 1.1.6-0
-  type: release
+    bar_repo:
+      doc:
+        type: git
+        url: https://github.com/example-test/bar_repo.git
+        version: master
+      release:
+        tags:
+          release: release/foo/{package}/{version}
+        url: https://github.com/example-release/bar_repo.git
+        version: 0.1.2
+      source:
+        type: git
+        url: https://github.com/example-test/bar_repo.git
+        version: master
+    baz-repo:
+      doc:
+        type: hg
+        url: https://bitbucket.org/baz-test/baz-repo
+        version: default
+      release:
+        packages:
+        - baz_pkg1
+        - baz_pkg2
+        tags:
+          release: release/foo/{package}/{version}
+        url: https://example.com/release/baz-repo.git
+        version: 7.7.7-7
+      source:
+        type: hg
+        url: https://bitbucket.org/baz-test/baz-repo
+        version: default
+      status: maintained
+      status_description: With a lot of passion
+      status_per_package:
+        baz_pkg2:
+          status: end-of-life
+          status_description: The package has not been updated since 1995
+  type: distribution
   version: 1
 name: foo
-package_xmls: {actionlib_msgs: "<package>\n  <name>actionlib_msgs</name>\n  <version>1.9.14</version>\n\
+release_package_xmls: {actionlib_msgs: "<package>\n  <name>actionlib_msgs</name>\n  <version>1.9.14</version>\n\
     \  <description>\n     actionlib_msgs defines the common messages to interact\
     \ with an\n     action server and an action client.  For full documentation of\n\
     \     the actionlib API see\n     the <a href=\"http://www.ros.org/wiki/actionlib\"\
@@ -96,4 +119,4 @@ package_xmls: {actionlib_msgs: "<package>\n  <name>actionlib_msgs</name>\n  <ver
     \  <build_depend>std_msgs</build_depend>\n\n  <run_depend>message_runtime</run_depend>\n\
     \  <run_depend>std_msgs</run_depend>\n</package>\n"}
 type: cache
-version: '1'
+version: 2

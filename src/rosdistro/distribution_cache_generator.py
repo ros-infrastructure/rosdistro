@@ -41,11 +41,11 @@ import yaml
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
 
-from . import _get_dist_file_data, get_cached_release, get_index, get_release_cache
-from .release_cache import ReleaseCache
+from . import _get_dist_file_data, get_cached_distribution, get_index, get_distribution_cache
+from .distribution_cache import DistributionCache
 
 
-def generate_release_caches(index, dist_names=None, preclean=False, debug=False):
+def generate_distribution_caches(index, dist_names=None, preclean=False, debug=False):
     if os.path.isfile(index):
         index = 'file://' + os.path.abspath(index)
     index = get_index(index)
@@ -57,7 +57,7 @@ def generate_release_caches(index, dist_names=None, preclean=False, debug=False)
     caches = {}
     for dist_name in dist_names:
         try:
-            cache = generate_release_cache(index, dist_name, preclean, debug)
+            cache = generate_distribution_cache(index, dist_name, preclean, debug)
         except RuntimeError as e:
             errors.append(str(e))
             continue
@@ -67,13 +67,13 @@ def generate_release_caches(index, dist_names=None, preclean=False, debug=False)
     return caches
 
 
-def generate_release_cache(index, dist_name, preclean=False, debug=False):
-    dist, cache = _get_cached_release(index, dist_name, preclean)
+def generate_distribution_cache(index, dist_name, preclean=False, debug=False):
+    dist, cache = _get_cached_distribution(index, dist_name, preclean)
     # fetch all manifests
     print('- fetch missing manifests')
     errors = []
-    for pkg_name in sorted(dist.packages.keys()):
-        repo = dist.repositories[dist.packages[pkg_name].repository_name]
+    for pkg_name in sorted(dist.release_packages.keys()):
+        repo = dist.repositories[dist.release_packages[pkg_name].repository_name].release_repository
         if repo.version is None:
             if debug:
                 print('  - skip "%s" since it has no version' % pkg_name)
@@ -84,7 +84,7 @@ def generate_release_cache(index, dist_name, preclean=False, debug=False):
             sys.stdout.write('.')
             sys.stdout.flush()
         # check that package.xml is fetchable
-        package_xml = dist.get_package_xml(pkg_name)
+        package_xml = dist.get_release_package_xml(pkg_name)
         if not package_xml:
             errors.append('%s: missing package.xml file for package "%s"' % (dist_name, pkg_name))
             continue
@@ -107,7 +107,7 @@ def generate_release_cache(index, dist_name, preclean=False, debug=False):
     return cache
 
 
-def _get_cached_release(index, dist_name, preclean=False):
+def _get_cached_distribution(index, dist_name, preclean=False):
     print('Build cache for "%s"' % dist_name)
     cache = None
     try:
@@ -124,14 +124,14 @@ def _get_cached_release(index, dist_name, preclean=False):
                     yaml_str = f.read()
             if yaml_str is not None:
                 data = yaml.load(yaml_str)
-                cache = ReleaseCache(dist_name, data)
+                cache = DistributionCache(dist_name, data)
             if not cache:
                 print('- trying to fetch cache')
-                # get release cache
-                cache = get_release_cache(index, dist_name)
-            # get current release file
-            rel_file_data = _get_dist_file_data(index, dist_name, 'release')
-            # update cache with current release file
+                # get distribution cache
+                cache = get_distribution_cache(index, dist_name)
+            # get current distribution file
+            rel_file_data = _get_dist_file_data(index, dist_name, 'distribution')
+            # update cache with current distribution file
             cache.update_distribution(rel_file_data)
     except:
         print('- failed to fetch old cache')
@@ -141,7 +141,7 @@ def _get_cached_release(index, dist_name, preclean=False):
         print('- build cache from scratch')
         # get empty cache with distribution file
         distribution_file_data = _get_dist_file_data(index, dist_name, 'distribution')
-        cache = ReleaseCache(dist_name, distribution_file_data=distribution_file_data)
+        cache = DistributionCache(dist_name, distribution_file_data=distribution_file_data)
 
     # get distribution
-    return get_cached_release(index, dist_name, cache=cache, allow_lazy_load=True), cache
+    return get_cached_distribution(index, dist_name, cache=cache, allow_lazy_load=True), cache

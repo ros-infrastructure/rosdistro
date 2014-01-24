@@ -31,6 +31,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import print_function
+
 # legacy imports
 from . import common
 from .rosdistro import walks
@@ -45,11 +47,15 @@ try:
     from cStringIO import StringIO
 except ImportError:
     from io import BytesIO as StringIO
+import sys
 import yaml
 
 logger = logging.getLogger('rosdistro')
 
 from ._version import __version__
+from .distribution import Distribution
+from .distribution_cache import DistributionCache
+from .distribution_file import DistributionFile
 from .doc_build_file import DocBuildFile
 from .doc_file import DocFile
 from .external.appdirs import user_config_dir, site_config_dir
@@ -109,10 +115,66 @@ def get_index(url):
     return Index(data, base_url)
 
 
+### distribution information
+
+
+def get_distribution(index, dist_name):
+    dist_file = get_distribution_file(index, dist_name)
+    return Distribution(dist_file)
+
+
+def get_distribution_file(index, dist_name):
+    data = _get_dist_file_data(index, dist_name, 'distribution')
+    return DistributionFile(dist_name, data)
+
+
+def get_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False):
+    if cache is None:
+        try:
+            cache = get_distribution_cache(index, dist_name)
+        except Exception:
+            if not allow_lazy_load:
+                raise
+            # create empty cache instance
+            dist_file_data = _get_dist_file_data(index, dist_name, 'distribution')
+            cache = DistributionCache(dist_name, distribution_file_data=dist_file_data)
+    dist = Distribution(
+        cache.distribution_file,
+        [CachedManifestProvider(cache, Distribution.default_manifest_providers if allow_lazy_load else None)])
+    assert cache.distribution_file.name == dist_name
+    return dist
+
+
+def get_distribution_cache(index, dist_name):
+    if dist_name not in index.distributions.keys():
+        raise RuntimeError("Unknown distribution: '{0}'. Valid distribution names are: {1}".format(dist_name, ', '.join(["'%s'" % d for d in index.distributions.keys()])))
+    dist = index.distributions[dist_name]
+    if 'distribution_cache' not in dist.keys():
+        raise RuntimeError("Distribution has no cache: '{0}'".format(dist_name))
+    url = dist['distribution_cache']
+
+    logger.debug('Load cache from "%s"' % url)
+    if url.endswith('.yaml'):
+        yaml_str = load_url(url)
+    elif url.endswith('.yaml.gz'):
+        yaml_gz_str = load_url(url, skip_decode=True)
+        yaml_gz_stream = StringIO(yaml_gz_str)
+        f = gzip.GzipFile(fileobj=yaml_gz_stream, mode='rb')
+        yaml_str = f.read()
+        if not isinstance(yaml_str, str):
+            yaml_str = yaml_str.decode('utf-8')
+        f.close()
+    else:
+        raise NotImplementedError('The url of the cache must end with either ".yaml" or ".yaml.gz"')
+    data = yaml.load(yaml_str)
+    return DistributionCache(dist_name, data)
+
+
 ### release information
 
 
 def get_cached_release(index, dist_name, cache=None, allow_lazy_load=False):
+    print('# rosdistro.get_cached_release() has been deprecated in favor of the new function rosdistro.get_cached_distribution() - please check that you have the latest versions of the Python tools (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-bloom python-rosdep python-rosinstall python-rosinstall-generator)', file=sys.stderr)
     if cache is None:
         try:
             cache = get_release_cache(index, dist_name)
@@ -130,22 +192,25 @@ def get_cached_release(index, dist_name, cache=None, allow_lazy_load=False):
 
 
 def get_release(index, dist_name):
+    print('# rosdistro.get_cached_release() has been deprecated in favor of the new function rosdistro.get_cached_distribution() - please check that you have the latest versions of the Python tools (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-bloom python-rosdep python-rosinstall python-rosinstall-generator)', file=sys.stderr)
     rel_file = get_release_file(index, dist_name)
     return Release(rel_file)
 
 
 def get_release_file(index, dist_name):
-    data = _get_dist_file_data(index, dist_name, 'release')
+    print('# rosdistro.get_cached_release() has been deprecated in favor of the new function rosdistro.get_distribution_file() - please check that you have the latest versions of the Python tools (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-bloom python-rosdep python-rosinstall python-rosinstall-generator)', file=sys.stderr)
+    data = _get_dist_file_data(index, dist_name, 'distribution')
     return ReleaseFile(dist_name, data)
 
 
 def get_release_cache(index, dist_name):
+    print('# rosdistro.get_release_cache() has been deprecated in favor of the new function rosdistro.get_distribution_cache() - please check that you have the latest versions of the Python tools (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-bloom python-rosdep python-rosinstall python-rosinstall-generator)', file=sys.stderr)
     if dist_name not in index.distributions.keys():
         raise RuntimeError("Unknown release: '{0}'. Valid release names are: {1}".format(dist_name, ', '.join(["'%s'" % d for d in index.distributions.keys()])))
     dist = index.distributions[dist_name]
-    if 'release_cache' not in dist.keys():
+    if 'distribution_cache' not in dist.keys():
         raise RuntimeError("Release has no cache: '{0}'".format(dist_name))
-    url = dist['release_cache']
+    url = dist['distribution_cache']
 
     logger.debug('Load cache from "%s"' % url)
     if url.endswith('.yaml'):
@@ -184,7 +249,8 @@ def get_release_build_files(index, dist_name):
 
 
 def get_source_file(index, dist_name):
-    data = _get_dist_file_data(index, dist_name, 'source')
+    print('# rosdistro.get_source_file() has been deprecated in favor of the new function rosdistro.get_distribution_file() - please check that you have the latest versions of the Python tools (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-bloom python-rosdep python-rosinstall python-rosinstall-generator)', file=sys.stderr)
+    data = _get_dist_file_data(index, dist_name, 'distribution')
     return SourceFile(dist_name, data)
 
 
@@ -200,7 +266,8 @@ def get_source_build_files(index, dist_name):
 
 
 def get_doc_file(index, dist_name):
-    data = _get_dist_file_data(index, dist_name, 'doc')
+    print('# rosdistro.get_doc_file() has been deprecated in favor of the new function rosdistro.get_distribution_file() - please check that you have the latest versions of the Python tools (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-bloom python-rosdep python-rosinstall python-rosinstall-generator)', file=sys.stderr)
+    data = _get_dist_file_data(index, dist_name, 'distribution')
     return DocFile(dist_name, data)
 
 

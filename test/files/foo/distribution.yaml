@@ -1,0 +1,61 @@
+%YAML 1.1
+# ROS distribution file
+# see REP 141: http://ros.org/reps/rep-0141.html
+---
+release_platforms:
+  debian:
+  - wheezy
+  ubuntu:
+  - precise
+  - quantal
+  - raring
+repositories:
+  bar_repo:
+    doc:
+      type: git
+      url: https://github.com/example-test/bar_repo.git
+      version: master
+    release:
+      tags:
+        release: release/foo/{package}/{version}
+      url: https://github.com/example-release/bar_repo.git
+      version: 0.1.2
+    source:
+      type: git
+      url: https://github.com/example-test/bar_repo.git
+      version: master
+  baz-repo:
+    doc:
+      blacklist_packages:
+      - baz_pkg2
+      depends:
+      - bar_repo
+      type: hg
+      url: https://bitbucket.org/baz-test/baz-repo
+      version: default
+    release:
+      packages:
+      - baz_pkg1
+      - baz_pkg2
+      tags:
+        release: release/foo/{package}/{version}
+      url: https://example.com/release/baz-repo.git
+      version: 7.7.7-7
+    source:
+      type: hg
+      url: https://bitbucket.org/baz-test/baz-repo
+      version: default
+    status: maintained
+    status_description: With a lot of passion
+    status_per_package:
+      baz_pkg2:
+        status: end-of-life
+        status_description: The package has not been updated since 1995
+  release_only_repo:
+    release:
+      tags:
+        release: release/foo/{package}/{version}
+      url: https://github.com/example-release/release_only_repo.git
+      version: 1.2.3
+type: distribution
+version: 1
