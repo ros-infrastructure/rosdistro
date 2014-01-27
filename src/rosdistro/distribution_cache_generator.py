@@ -92,7 +92,7 @@ def generate_distribution_cache(index, dist_name, preclean=False, debug=False):
         try:
             pkg = parse_package_string(package_xml)
         except InvalidPackage as e:
-            errors.append('%s: invalid package.xml file for package "%s"' % (dist_name, pkg_name))
+            errors.append('%s: invalid package.xml file for package "%s": %s' % (dist_name, pkg_name, e))
             continue
         # check that version numbers match (at least without deb inc)
         if not re.match('^%s-\d+$' % re.escape(pkg.version), repo.version):
@@ -133,8 +133,8 @@ def _get_cached_distribution(index, dist_name, preclean=False):
             rel_file_data = _get_dist_file_data(index, dist_name, 'distribution')
             # update cache with current distribution file
             cache.update_distribution(rel_file_data)
-    except:
-        print('- failed to fetch old cache')
+    except Exception as e:
+        print('- failed to fetch old cache: %s' % e)
     if cache:
         print('- update cache')
     else:

@@ -87,8 +87,8 @@ class DistributionCache(object):
         self._remove_obsolete_entries()
 
     def _get_repo_info(self, dist_file, pkg_name):
-        pkg = dist_file.distributiond_packages[pkg_name]
-        repo = dist_file.repositories[pkg.repository_name]
+        pkg = dist_file.release_packages[pkg_name]
+        repo = dist_file.repositories[pkg.repository_name].release_repository
         return (repo.version, repo.url)
 
     def _remove_obsolete_entries(self):
