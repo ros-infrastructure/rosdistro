@@ -45,7 +45,7 @@ from . import _get_dist_file_data, get_cached_distribution, get_index, get_distr
 from .distribution_cache import DistributionCache
 
 
-def generate_distribution_caches(index, dist_names=None, preclean=False, debug=False):
+def generate_distribution_caches(index, dist_names=None, preclean=False, ignore_local=False, debug=False):
     if os.path.isfile(index):
         index = 'file://' + os.path.abspath(index)
     index = get_index(index)
@@ -57,7 +57,7 @@ def generate_distribution_caches(index, dist_names=None, preclean=False, debug=F
     caches = {}
     for dist_name in dist_names:
         try:
-            cache = generate_distribution_cache(index, dist_name, preclean, debug)
+            cache = generate_distribution_cache(index, dist_name, preclean=preclean, ignore_local=ignore_local, debug=debug)
         except RuntimeError as e:
             errors.append(str(e))
             continue
@@ -67,8 +67,8 @@ def generate_distribution_caches(index, dist_names=None, preclean=False, debug=F
     return caches
 
 
-def generate_distribution_cache(index, dist_name, preclean=False, debug=False):
-    dist, cache = _get_cached_distribution(index, dist_name, preclean)
+def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=False, debug=False):
+    dist, cache = _get_cached_distribution(index, dist_name, preclean=preclean, ignore_local=ignore_local)
     # fetch all manifests
     print('- fetch missing manifests')
     errors = []
@@ -107,24 +107,25 @@ def generate_distribution_cache(index, dist_name, preclean=False, debug=False):
     return cache
 
 
-def _get_cached_distribution(index, dist_name, preclean=False):
+def _get_cached_distribution(index, dist_name, preclean=False, ignore_local=False):
     print('Build cache for "%s"' % dist_name)
     cache = None
     try:
         if not preclean:
-            print('- trying to use local cache')
-            yaml_str = None
-            if os.path.exists('%s-cache.yaml.gz' % dist_name):
-                print('- use local file "%s-cache.yaml.gz"' % dist_name)
-                with gzip.open('%s-cache.yaml.gz' % dist_name, 'rb') as f:
-                    yaml_str = f.read()
-            elif os.path.exists('%s-cache.yaml' % dist_name):
-                print('- use local file "%s-cache.yaml"' % dist_name)
-                with open('%s-cache.yaml' % dist_name, 'r') as f:
-                    yaml_str = f.read()
-            if yaml_str is not None:
-                data = yaml.load(yaml_str)
-                cache = DistributionCache(dist_name, data)
+            if not ignore_local:
+                print('- trying to use local cache')
+                yaml_str = None
+                if os.path.exists('%s-cache.yaml.gz' % dist_name):
+                    print('- use local file "%s-cache.yaml.gz"' % dist_name)
+                    with gzip.open('%s-cache.yaml.gz' % dist_name, 'rb') as f:
+                        yaml_str = f.read()
+                elif os.path.exists('%s-cache.yaml' % dist_name):
+                    print('- use local file "%s-cache.yaml"' % dist_name)
+                    with open('%s-cache.yaml' % dist_name, 'r') as f:
+                        yaml_str = f.read()
+                if yaml_str is not None:
+                    data = yaml.load(yaml_str)
+                    cache = DistributionCache(dist_name, data)
             if not cache:
                 print('- trying to fetch cache')
                 # get distribution cache

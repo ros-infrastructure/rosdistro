@@ -64,6 +64,9 @@ def parse_args(args=sys.argv[1:]):
     add('--preclean', action='store_true', default=False,
         help='Build the cache from scratch instead of reusing cached data'
     )
+    add('--ignore-local', action='store_true', default=False,
+        help='Ignore locally available cache'
+    )
     return parser.parse_args(args)
 
 
@@ -74,7 +77,7 @@ def main():
         logger.level = logging.DEBUG
 
     try:
-        caches = generate_distribution_caches(args.index, dist_names=args.dist_names, preclean=args.preclean, debug=args.debug)
+        caches = generate_distribution_caches(args.index, dist_names=args.dist_names, preclean=args.preclean, ignore_local=args.ignore_local, debug=args.debug)
     except RuntimeError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
