@@ -51,7 +51,7 @@ class DistributionFile(object):
 
         self.repositories = {}
         self.release_packages = {}
-        if 'repositories' in data:
+        if 'repositories' in data and data['repositories']:
             for repo_name in sorted(data['repositories'].keys()):
                 repo_data = data['repositories'][repo_name]
                 repo = Repository(repo_name, repo_data.get('doc', None), repo_data.get('release', None), repo_data.get('source', None), repo_data)
@@ -66,7 +66,7 @@ class DistributionFile(object):
                         assert dep in data['repositories'].keys(), "Doc repository '%s' depends on non-existing repository '%s'" % (repo_name, dep)
 
         self.release_platforms = {}
-        if 'release_platforms' in data:
+        if 'release_platforms' in data and data['release_platforms']:
             for os_name in data['release_platforms'].keys():
                 self.release_platforms[os_name] = []
                 for os_code_name in data['release_platforms'][os_name]:
