@@ -60,20 +60,26 @@ class DependencyWalker(object):
             deps &= set(self._distribution_instance.release_packages.keys())
         return deps
 
-    def get_recursive_depends(self, pkg_name, depend_types, ros_packages_only=False, ignore_pkgs=None):
+    def get_recursive_depends(self, pkg_name, depend_types, ros_packages_only=False, ignore_pkgs=None, limit_depth=None):
         '''Return a set of package names which the package (transitively) depends on.'''
         ignore_pkgs = set(ignore_pkgs or [])
         depends = set([])
-        pkgs_to_check = set([pkg_name])
+        # mapping from the scheduled pkg names to their dependency level
+        pkgs_to_check = {pkg_name: 0}
         while pkgs_to_check:
-            next_pkg_to_check = pkgs_to_check.pop()
-            if next_pkg_to_check in ignore_pkgs:
+            next_pkg_to_check = sorted(pkgs_to_check.keys())[0]
+            current_level = pkgs_to_check.pop(next_pkg_to_check)
+            if next_pkg_to_check in ignore_pkgs or (limit_depth is not None and current_level >= limit_depth):
                 continue
             for depend_type in depend_types:
                 deps = self.get_depends(next_pkg_to_check, depend_type, ros_packages_only=ros_packages_only)
                 deps -= ignore_pkgs
                 new_deps = deps - depends
-                pkgs_to_check |= new_deps
+                for new_dep in new_deps:
+                    if new_dep not in pkgs_to_check:
+                        pkgs_to_check[new_dep] = current_level + 1
+                    else:
+                        pkgs_to_check[new_dep] = min(pkgs_to_check[new_dep], current_level + 1)
                 depends |= new_deps
         return depends
 
