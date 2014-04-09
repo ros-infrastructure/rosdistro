@@ -8,7 +8,7 @@ exec(open(os.path.join(os.path.dirname(__file__), 'src', 'rosdistro', '_version.
 setup(
     name='rosdistro',
     version=__version__,
-    install_requires=['argparse', 'catkin_pkg', 'distribute', 'rospkg', 'PyYAML'],
+    install_requires=['argparse', 'catkin_pkg', 'rospkg', 'PyYAML', 'setuptools'],
     packages=find_packages('src'),
     package_dir={'': 'src'},
     scripts=[
