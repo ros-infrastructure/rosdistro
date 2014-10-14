@@ -17,7 +17,7 @@ def test_release_file():
 
 
 def test_get_release_file():
-    url = 'file://' + FILES_DIR + '/index.yaml'
+    url = 'file://' + FILES_DIR + '/index_v2.yaml'
     i = get_index(url)
     rel_file = get_release_file(i, 'foo')
     _validate_rel_file(rel_file)

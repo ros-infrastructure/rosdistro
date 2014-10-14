@@ -30,7 +30,7 @@ def get_diff(expected, actual):
 
 
 def test_verify_files_parsable():
-    url = 'file://' + FILES_DIR + '/index.yaml'
+    url = 'file://' + FILES_DIR + '/index_v2.yaml'
     index = get_index(url)
     distribution_file = get_distribution_file(index, 'foo')
     data = yaml_from_distribution_file(distribution_file)

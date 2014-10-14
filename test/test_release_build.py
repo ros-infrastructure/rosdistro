@@ -16,13 +16,13 @@ def test_release_build_file():
 
 
 def test_get_release_build_files():
-    url = 'file://' + FILES_DIR + '/index.yaml'
+    url = 'file://' + FILES_DIR + '/index_v2.yaml'
     i = get_index(url)
     get_release_build_files(i, 'foo')
 
 
 def test_get_release_builds():
-    url = 'file://' + FILES_DIR + '/index.yaml'
+    url = 'file://' + FILES_DIR + '/index_v2.yaml'
     i = get_index(url)
     d = get_release(i, 'foo')
     builds = get_release_builds(i, d)

@@ -17,7 +17,7 @@ def test_distribution_file():
 
 
 def test_get_distribution_file():
-    url = 'file://' + FILES_DIR + '/index.yaml'
+    url = 'file://' + FILES_DIR + '/index_v2.yaml'
     i = get_index(url)
     dist_file = get_distribution_file(i, 'foo')
     _validate_dist_file(dist_file)
