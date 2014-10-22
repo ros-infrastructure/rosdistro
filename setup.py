@@ -2,13 +2,18 @@
 
 import os
 from setuptools import setup, find_packages
+import sys
 
 exec(open(os.path.join(os.path.dirname(__file__), 'src', 'rosdistro', '_version.py')).read())
+
+install_requires = ['catkin_pkg', 'rospkg', 'PyYAML', 'setuptools']
+if sys.version_info[0] == 2 and sys.version_info[1] < 7:
+    install_requires.append('argparse')
 
 setup(
     name='rosdistro',
     version=__version__,
-    install_requires=['argparse', 'catkin_pkg', 'rospkg', 'PyYAML', 'setuptools'],
+    install_requires=install_requires,
     packages=find_packages('src'),
     package_dir={'': 'src'},
     scripts=[
