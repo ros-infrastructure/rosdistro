@@ -37,7 +37,7 @@ from .verify import _to_yaml, _yaml_header_lines
 
 
 def yaml_from_distribution_file(distribution_file):
-    return '\n'.join(_yaml_header_lines(distribution_file._type)) + '\n' + _to_yaml(distribution_file.get_data())
+    return '\n'.join(_yaml_header_lines(distribution_file._type, distribution_file.version)) + '\n' + _to_yaml(distribution_file.get_data())
 
 # for backward compatibility only
 def yaml_from_release_file(release_file):

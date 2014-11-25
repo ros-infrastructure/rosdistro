@@ -250,6 +250,7 @@ def get_release_cache(index, dist_name):
 
 
 def get_release_builds(index, release_file):
+    print("# rosdistro.get_release_builds() has been deprecated and its functionality is now handled by the 'ros_buildfarm.config' module", file=sys.stderr)
     build_files = get_release_build_files(index, release_file.name)
     builds = []
     for build_file in build_files:
@@ -258,6 +259,7 @@ def get_release_builds(index, release_file):
 
 
 def get_release_build_files(index, dist_name):
+    print("# rosdistro.get_release_builds() has been deprecated and its functionality is now handled by the 'ros_buildfarm.config' module", file=sys.stderr)
     data = _get_dist_file_data(index, dist_name, 'release_builds')
     build_files = []
     for d in data:
@@ -275,6 +277,7 @@ def get_source_file(index, dist_name):
 
 
 def get_source_build_files(index, dist_name):
+    print("# rosdistro.get_release_builds() has been deprecated and its functionality is now handled by the 'ros_buildfarm.config' module", file=sys.stderr)
     data = _get_dist_file_data(index, dist_name, 'source_builds')
     build_files = []
     for d in data:
@@ -292,6 +295,7 @@ def get_doc_file(index, dist_name):
 
 
 def get_doc_build_files(index, dist_name):
+    print("# rosdistro.get_release_builds() has been deprecated and its functionality is now handled by the 'ros_buildfarm.config' module", file=sys.stderr)
     data = _get_dist_file_data(index, dist_name, 'doc_builds')
     build_files = []
     for d in data:
