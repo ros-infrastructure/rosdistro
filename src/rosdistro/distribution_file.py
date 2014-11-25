@@ -73,6 +73,23 @@ class DistributionFile(object):
                     assert os_code_name not in self.release_platforms[os_name], "Distribution '%s' specifies the os_code_name '%s' multiple times for the os_name '%s'" % (self.name, os_code_name, os_name)
                     self.release_platforms[os_name].append(os_code_name)
 
+    def merge(self, other_dist_file):
+        assert self.name == other_dist_file.name
+        assert self.version == other_dist_file.version
+        assert self.release_platforms == other_dist_file.release_platforms
+        for repo_name, other_repo in other_dist_file.repositories.items():
+            # remove existing repo before adding other
+            if repo_name in self.repositories:
+                self_repo = self.repositories[repo_name]
+                # remove corresponding release packages
+                for pkg_name in self_repo.release_repository.package_names:
+                    del self.release_packages[pkg_name]
+            self.repositories[repo_name] = other_repo
+            for pkg_name in other_repo.release_repository.package_names:
+                # add corresponding release packages
+                self.release_packages[pkg_name] = \
+                    other_repo.release_packages[pkg_name]
+
     def _add_package(self, pkg_name, repo):
         assert pkg_name not in self.release_packages, "Duplicate package name '%s' exists in repository '%s' as well as in repository '%s'" % (pkg_name, repo.name, self.release_packages[pkg_name].repository_name)
         self.release_packages[pkg_name] = Package(pkg_name, repo.name)
