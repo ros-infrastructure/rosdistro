@@ -1,7 +1,7 @@
 import os
 import yaml
 
-from rosdistro import get_index, get_distribution_file
+from rosdistro import get_index, get_distribution_file, get_distribution_files
 from rosdistro.distribution_file import DistributionFile
 from rosdistro.loader import load_url
 
@@ -21,6 +21,9 @@ def test_get_distribution_file():
     i = get_index(url)
     dist_file = get_distribution_file(i, 'foo')
     _validate_dist_file(dist_file)
+
+    dist_files = get_distribution_files(i, 'foo')
+    assert len(dist_files) == 1
 
 
 def _validate_dist_file(dist_file):
