@@ -93,7 +93,7 @@ class DistributionCache(object):
         return (repo.version, repo.url)
 
     def _remove_obsolete_entries(self):
-        for pkg_name in self.release_package_xmls.keys():
+        for pkg_name in list(self.release_package_xmls.keys()):
             if pkg_name not in self.distribution_file.release_packages:
                 print('- REMOVE', pkg_name)
                 del self.release_package_xmls[pkg_name]
