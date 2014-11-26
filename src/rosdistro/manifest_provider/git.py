@@ -57,6 +57,7 @@ def _get_package_xml(url, tag):
     base = tempfile.mkdtemp('rosdistro')
     try:
         # git 1.7.9 does not support cloning a tag directly, so doing it in two steps
+        assert _git_client_executable is not None, "'git not found"
         cmd = [_git_client_executable, 'clone', url, base]
         result = _run_command(cmd, base)
         if result['returncode'] != 0:
@@ -90,6 +91,7 @@ def _get_package_xml(url, tag):
 def check_remote_tag_exists(url, tag):
     base = tempfile.mkdtemp('rosdistro')
     try:
+        assert _git_client_executable is not None, "'git not found"
         cmd = [_git_client_executable, 'ls-remote', '--tags', url]
         result = _run_command(cmd, base)
         if result['returncode'] != 0:
