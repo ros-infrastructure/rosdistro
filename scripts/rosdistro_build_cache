@@ -92,7 +92,7 @@ def main():
             f.write(data)
         with gzip.open('%s-cache.yaml.gz' % dist_name, 'wb') as f:
             print('- write compressed cache file "%s-cache.yaml.gz"' % dist_name)
-            f.write(data)
+            f.write(data.encode('utf-8'))
 
 
 if __name__ == '__main__':

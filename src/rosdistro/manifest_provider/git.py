@@ -80,6 +80,8 @@ def _get_package_xml(url, tag):
             raise RuntimeError('Could not find package.xml in repository "%s"' % url)
         with open(filename, 'r') as f:
             package_xml = f.read()
+            if not isinstance(package_xml, str):
+                package_xml = package_xml.decode('utf-8')
             return package_xml
     finally:
         shutil.rmtree(base)
@@ -112,6 +114,8 @@ def _run_command(cmd, cwd, env=None):
     except subprocess.CalledProcessError as e:
         result['output'] = e.output
         result['returncode'] = e.returncode
+    if not isinstance(result['output'], str):
+        result['output'] = result['output'].decode('utf-8')
     return result
 
 
