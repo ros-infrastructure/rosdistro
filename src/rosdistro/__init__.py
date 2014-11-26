@@ -126,21 +126,18 @@ def get_distribution(index, dist_name):
 
 def get_distribution_file(index, dist_name):
     data = _get_dist_file_data(index, dist_name, 'distribution')
-    if not isinstance(data, list):
-        return DistributionFile(dist_name, data)
-    combined_dist_file = None
-    for d in data:
-        dist_file = DistributionFile(dist_name, d)
-        if combined_dist_file is None:
-            combined_dist_file = dist_file
-        else:
-            combined_dist_file.merge(dist_file)
-    return combined_dist_file
+    return create_distribution_file(dist_name, data)
 
 
 def get_distribution_files(index, dist_name):
     data = _get_dist_file_data(index, dist_name, 'distribution')
-    return create_distribution_file(dist_name, data)
+    if not isinstance(data, list):
+        data = [data]
+    dist_files = []
+    for d in data:
+        dist_file = DistributionFile(dist_name, d)
+        dist_files.append(dist_file)
+    return dist_files
 
 
 def get_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False):
