@@ -81,8 +81,6 @@ def _get_package_xml(url, tag):
             raise RuntimeError('Could not find package.xml in repository "%s"' % url)
         with open(filename, 'r') as f:
             package_xml = f.read()
-            if not isinstance(package_xml, str):
-                package_xml = package_xml.decode('utf-8')
             return package_xml
     finally:
         shutil.rmtree(base)
