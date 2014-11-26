@@ -104,3 +104,16 @@ class DistributionFile(object):
             data['repositories'][repo_name] = repo.get_data()
         data['release_platforms'] = self.release_platforms
         return data
+
+
+def create_distribution_file(dist_name, data):
+    if not isinstance(data, list):
+        return DistributionFile(dist_name, data)
+    combined_dist_file = None
+    for d in data:
+        dist_file = DistributionFile(dist_name, d)
+        if combined_dist_file is None:
+            combined_dist_file = dist_file
+        else:
+            combined_dist_file.merge(dist_file)
+    return combined_dist_file

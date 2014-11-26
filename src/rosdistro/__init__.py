@@ -55,6 +55,7 @@ logger = logging.getLogger('rosdistro')
 from ._version import __version__
 from .distribution import Distribution
 from .distribution_cache import DistributionCache
+from .distribution_file import create_distribution_file
 from .distribution_file import DistributionFile
 from .doc_build_file import DocBuildFile
 from .doc_file import DocFile
@@ -139,13 +140,7 @@ def get_distribution_file(index, dist_name):
 
 def get_distribution_files(index, dist_name):
     data = _get_dist_file_data(index, dist_name, 'distribution')
-    if not isinstance(data, list):
-        data = [data]
-    dist_files = []
-    for d in data:
-        dist_file = DistributionFile(dist_name, d)
-        dist_files.append(dist_file)
-    return dist_files
+    return create_distribution_file(dist_name, data)
 
 
 def get_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False):

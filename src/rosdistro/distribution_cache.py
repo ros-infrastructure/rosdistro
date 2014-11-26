@@ -31,8 +31,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-
-from .distribution_file import DistributionFile
+from .distribution_file import create_distribution_file
 
 
 class DistributionCache(object):
@@ -56,7 +55,7 @@ class DistributionCache(object):
             self.version = 2
 
         self._distribution_file_data = data['distribution_file'] if data else distribution_file_data
-        self.distribution_file = DistributionFile(name, self._distribution_file_data)
+        self.distribution_file = create_distribution_file(name, self._distribution_file_data)
         self.release_package_xmls = data['release_package_xmls'] if data else {}
 
     def get_data(self):
@@ -73,7 +72,7 @@ class DistributionCache(object):
         self._remove_obsolete_entries()
 
         self._distribution_file_data = distribution_file_data
-        dist_file = DistributionFile(self.distribution_file.name, self._distribution_file_data)
+        dist_file = create_distribution_file(self.distribution_file.name, self._distribution_file_data)
 
         # remove all package xmls if repository information has changed
         for pkg_name in sorted(dist_file.release_packages.keys()):
