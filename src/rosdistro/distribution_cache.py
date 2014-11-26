@@ -60,6 +60,11 @@ class DistributionCache(object):
         self.distribution_file = create_distribution_file(name, self._distribution_file_data)
         self.release_package_xmls = data['release_package_xmls'] if data else {}
 
+        # ensure that xml is not unicode in Python 2
+        for k, v in self.release_package_xmls.items():
+            if not isinstance(v, str) and not isinstance(v, bytes):
+                self.release_package_xmls[k] = v.encode('utf-8')
+
     def get_data(self):
         data = {}
         data['type'] = 'cache'
