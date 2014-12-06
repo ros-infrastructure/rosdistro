@@ -94,7 +94,7 @@ class DistributionFile(object):
                 # add corresponding release packages
                 self.release_packages[pkg_name] = \
                     other_repo.release_packages[pkg_name]
-        for tag in other_repo.tags:
+        for tag in other_dist_file.tags:
             if tag not in self.tags:
                 self.tags.append(tag)
 
