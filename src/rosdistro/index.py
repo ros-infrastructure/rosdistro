@@ -47,8 +47,8 @@ class Index(object):
         assert data['type'] == Index._type, "Expected file type is '%s', not '%s'" % (Index._type, data['type'])
 
         assert 'version' in data, 'Index file lacks required version information'
-        assert int(data['version']) > 1, "Unable to handle '%s' format version '%d' anymore, please update your '%s' file to version '2'" % (Index._type, int(data['version']), Index._type)
-        assert int(data['version']) == 2, "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (Index._type, int(data['version']))
+        assert int(data['version']) > 1, "Unable to handle '%s' format version '%d' anymore, please update your '%s' file to version '2' or '3'" % (Index._type, int(data['version']), Index._type)
+        assert int(data['version']) in [2, 3], "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (Index._type, int(data['version']))
         self.version = int(data['version'])
 
         self.distributions = {}
@@ -61,10 +61,22 @@ class Index(object):
                 self.distributions[distro_name] = {}
                 distro_data = data['distributions'][distro_name]
                 for key in distro_data:
-                    if key in ['distribution', 'distribution_cache']:
+                    if key in ['distribution']:
+                        if self.version == 2:
+                            list_value = False
+                        elif self.version == 3:
+                            list_value = True
+                        else:
+                            assert False
+                    elif key in ['distribution_cache']:
                         list_value = False
                     elif key in ['release_builds', 'source_builds', 'doc_builds']:
-                        list_value = True
+                        if self.version == 2:
+                            list_value = True
+                        elif self.version == 3:
+                            assert False, "'%s' format version '3' does not allow a '%s' entry anymore" % (Index._type, key)
+                        else:
+                            assert False
                     else:
                         assert False, 'unknown key "%s"' % key
 
@@ -86,3 +98,8 @@ class Index(object):
                     # for backward compatibility only
                     if key == 'distribution':
                         self.distributions[distro_name]['release'] = self.distributions[distro_name][key]
+
+                # for backward compatibility only
+                for key in ['release_builds', 'source_builds', 'doc_builds']:
+                    if key not in self.distributions[distro_name]:
+                        self.distributions[distro_name][key] = []

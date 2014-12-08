@@ -1,6 +1,6 @@
 # Software License Agreement (BSD License)
 #
-# Copyright (c) 2013, Open Source Robotics Foundation, Inc.
+# Copyright (c) 2014, Open Source Robotics Foundation, Inc.
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -31,14 +31,26 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
-
-from .verify import _to_yaml, _yaml_header_lines
+from .repository_specification import RepositorySpecification
 
 
-def yaml_from_distribution_file(distribution_file):
-    return '\n'.join(_yaml_header_lines(distribution_file._type, distribution_file.version)) + '\n' + _to_yaml(distribution_file.get_data())
+class SourceRepositorySpecification(RepositorySpecification):
 
-# for backward compatibility only
-def yaml_from_release_file(release_file):
-    raise NotImplementedError
+    def __init__(self, name, data):
+        super(SourceRepositorySpecification, self).__init__(name, data)
+
+        self.test_commits = None
+        if 'test_commits' in data:
+            self.test_commits = bool(data['test_commits'])
+
+        self.test_pull_requests = None
+        if 'test_pull_requests' in data:
+            self.test_pull_requests = bool(data['test_pull_requests'])
+
+    def get_data(self):
+        data = self._get_data(skip_git_type=False)
+        if self.test_commits is not None:
+            data['test_commits'] = self.test_commits
+        if self.test_pull_requests is not None:
+            data['test_pull_requests'] = self.test_pull_requests
+        return data

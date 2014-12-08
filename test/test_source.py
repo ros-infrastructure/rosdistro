@@ -17,7 +17,7 @@ def test_source_file():
 
 
 def test_get_source_file():
-    url = 'file://' + FILES_DIR + '/index.yaml'
+    url = 'file://' + FILES_DIR + '/index_v2.yaml'
     i = get_index(url)
     src_file = get_source_file(i, 'foo')
     _validate_src_file(src_file)

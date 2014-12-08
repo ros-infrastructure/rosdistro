@@ -37,7 +37,7 @@ import difflib
 import sys
 import yaml
 
-from . import get_distribution_file, get_doc_build_files, get_doc_file, get_index, get_release_build_files, get_release_file, get_source_build_files, get_source_file
+from . import get_distribution_file, get_distribution_files, get_doc_build_files, get_doc_file, get_index, get_release_build_files, get_release_file, get_source_build_files, get_source_file
 from .loader import load_url
 
 
@@ -67,7 +67,10 @@ def verify_files(index_url, callback, include_deprecated=False):
     index = get_index(index_url)
     for dist_name in sorted(index.distributions.keys()):
         dist = index.distributions[dist_name]
-        providers = [get_distribution_file]
+        if index.version < 3:
+            providers = [get_distribution_file]
+        else:
+            providers = [get_distribution_files]
         if include_deprecated:
             providers.extend([get_release_file, get_source_file, get_doc_file])
         file_providers = {
@@ -104,8 +107,9 @@ def _reformat_files(index, dist_name, loader_function, yaml_url, file_type):
             print('Skipping identical file: %s' % path)
             continue
         print('Updating file: %s' % path)
-        dist_file_data = _to_yaml(f.get_data())
-        dist_file_data = '\n'.join(_yaml_header_lines(file_type)) + '\n' + dist_file_data
+        data = f.get_data()
+        dist_file_data = _to_yaml(data)
+        dist_file_data = '\n'.join(_yaml_header_lines(file_type, data['version'])) + '\n' + dist_file_data
         with open(path, 'w') as f:
             f.write(dist_file_data)
     return True
@@ -127,7 +131,7 @@ def _check_file_identical(dist_file, yaml_url, file_type):
     yaml_lines = yaml_str.splitlines()
     dist_file_data = dist_file.get_data()
     dist_file_lines = _to_yaml(dist_file_data).splitlines()
-    dist_file_lines[0:0] = _yaml_header_lines(file_type)
+    dist_file_lines[0:0] = _yaml_header_lines(file_type, dist_file_data['version'])
 
     if yaml_lines != dist_file_lines:
         diff = difflib.unified_diff(
@@ -147,10 +151,13 @@ def _to_yaml(data):
     return yaml_str
 
 
-def _yaml_header_lines(file_type):
+def _yaml_header_lines(file_type, version):
+    rep = '141'
+    if file_type == 'index' and version == 3:
+        rep = '143'
     return [
         '%YAML 1.1',
         '# ROS %s file' % file_type,
-        '# see REP 141: http://ros.org/reps/rep-0141.html',
+        '# see REP %s: http://ros.org/reps/rep-0%s.html' % (rep, rep),
         '---'
     ]

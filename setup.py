@@ -22,6 +22,7 @@ setup(
 #        'scripts/rosdistro_convert',
 #        'scripts/rosdistro_generate_cache',
         'scripts/rosdistro_migrate_to_rep_141',
+        'scripts/rosdistro_migrate_to_rep_143',
         'scripts/rosdistro_reformat'
     ],
     author='Wim Meeussen, Dirk Thomas',

@@ -17,7 +17,7 @@ def test_doc_file():
 
 
 def test_get_doc_file():
-    url = 'file://' + FILES_DIR + '/index.yaml'
+    url = 'file://' + FILES_DIR + '/index_v2.yaml'
     i = get_index(url)
     doc_file = get_doc_file(i, 'foo')
     _validate_doc_file(doc_file)

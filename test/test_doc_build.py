@@ -16,7 +16,7 @@ def test_doc_build_file():
 
 
 def test_get_doc_build_files():
-    url = 'file://' + FILES_DIR + '/index.yaml'
+    url = 'file://' + FILES_DIR + '/index_v2.yaml'
     i = get_index(url)
     files = get_doc_build_files(i, 'foo')
     assert len(files) == 1

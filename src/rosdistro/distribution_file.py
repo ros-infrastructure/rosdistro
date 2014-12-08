@@ -46,7 +46,7 @@ class DistributionFile(object):
         assert data['type'] == DistributionFile._type, "Expected file type is '%s', not '%s'" % (DistributionFile._type, data['type'])
 
         assert 'version' in data, "Source file for '%s' lacks required version information" % self.name
-        assert int(data['version']) == 1, "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (DistributionFile._type, int(data['version']))
+        assert int(data['version']) in [1, 2], "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (DistributionFile._type, int(data['version']))
         self.version = int(data['version'])
 
         self.repositories = {}
@@ -73,6 +73,31 @@ class DistributionFile(object):
                     assert os_code_name not in self.release_platforms[os_name], "Distribution '%s' specifies the os_code_name '%s' multiple times for the os_name '%s'" % (self.name, os_code_name, os_name)
                     self.release_platforms[os_name].append(os_code_name)
 
+        self.tags = []
+        if 'tags' in data and data['tags']:
+            for tag in data['tags']:
+                self.tags.append(tag)
+
+    def merge(self, other_dist_file):
+        assert self.name == other_dist_file.name
+        assert self.version == other_dist_file.version
+        assert self.release_platforms == other_dist_file.release_platforms
+        for repo_name, other_repo in other_dist_file.repositories.items():
+            # remove existing repo before adding other
+            if repo_name in self.repositories:
+                self_repo = self.repositories[repo_name]
+                # remove corresponding release packages
+                for pkg_name in self_repo.release_repository.package_names:
+                    del self.release_packages[pkg_name]
+            self.repositories[repo_name] = other_repo
+            for pkg_name in other_repo.release_repository.package_names:
+                # add corresponding release packages
+                self.release_packages[pkg_name] = \
+                    other_dist_file.release_packages[pkg_name]
+        for tag in other_dist_file.tags:
+            if tag not in self.tags:
+                self.tags.append(tag)
+
     def _add_package(self, pkg_name, repo):
         assert pkg_name not in self.release_packages, "Duplicate package name '%s' exists in repository '%s' as well as in repository '%s'" % (pkg_name, repo.name, self.release_packages[pkg_name].repository_name)
         self.release_packages[pkg_name] = Package(pkg_name, repo.name)
@@ -86,4 +111,19 @@ class DistributionFile(object):
             repo = self.repositories[repo_name]
             data['repositories'][repo_name] = repo.get_data()
         data['release_platforms'] = self.release_platforms
+        if self.tags:
+            data['tags'] = self.tags
         return data
+
+
+def create_distribution_file(dist_name, data):
+    if not isinstance(data, list):
+        return DistributionFile(dist_name, data)
+    combined_dist_file = None
+    for d in data:
+        dist_file = DistributionFile(dist_name, d)
+        if combined_dist_file is None:
+            combined_dist_file = dist_file
+        else:
+            combined_dist_file.merge(dist_file)
+    return combined_dist_file

@@ -55,6 +55,7 @@ logger = logging.getLogger('rosdistro')
 from ._version import __version__
 from .distribution import Distribution
 from .distribution_cache import DistributionCache
+from .distribution_file import create_distribution_file
 from .distribution_file import DistributionFile
 from .doc_build_file import DocBuildFile
 from .doc_file import DocFile
@@ -125,7 +126,18 @@ def get_distribution(index, dist_name):
 
 def get_distribution_file(index, dist_name):
     data = _get_dist_file_data(index, dist_name, 'distribution')
-    return DistributionFile(dist_name, data)
+    return create_distribution_file(dist_name, data)
+
+
+def get_distribution_files(index, dist_name):
+    data = _get_dist_file_data(index, dist_name, 'distribution')
+    if not isinstance(data, list):
+        data = [data]
+    dist_files = []
+    for d in data:
+        dist_file = DistributionFile(dist_name, d)
+        dist_files.append(dist_file)
+    return dist_files
 
 
 def get_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False):
@@ -192,13 +204,13 @@ def get_cached_release(index, dist_name, cache=None, allow_lazy_load=False):
 
 
 def get_release(index, dist_name):
-    print('# rosdistro.get_cached_release() has been deprecated in favor of the new function rosdistro.get_cached_distribution() - please check that you have the latest versions of the Python tools (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-bloom python-rosdep python-rosinstall python-rosinstall-generator)', file=sys.stderr)
+    print('# rosdistro.get_release() has been deprecated in favor of the new function rosdistro.get_cached_distribution() - please check that you have the latest versions of the Python tools (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-bloom python-rosdep python-rosinstall python-rosinstall-generator)', file=sys.stderr)
     rel_file = get_release_file(index, dist_name)
     return Release(rel_file)
 
 
 def get_release_file(index, dist_name):
-    print('# rosdistro.get_cached_release() has been deprecated in favor of the new function rosdistro.get_distribution_file() - please check that you have the latest versions of the Python tools (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-bloom python-rosdep python-rosinstall python-rosinstall-generator)', file=sys.stderr)
+    print('# rosdistro.get_release_file() has been deprecated in favor of the new function rosdistro.get_distribution_file() - please check that you have the latest versions of the Python tools (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-bloom python-rosdep python-rosinstall python-rosinstall-generator)', file=sys.stderr)
     data = _get_dist_file_data(index, dist_name, 'distribution')
     return ReleaseFile(dist_name, data)
 
@@ -230,6 +242,7 @@ def get_release_cache(index, dist_name):
 
 
 def get_release_builds(index, release_file):
+    print("# rosdistro.get_release_builds() has been deprecated and its functionality is now handled by the 'ros_buildfarm.config' module", file=sys.stderr)
     build_files = get_release_build_files(index, release_file.name)
     builds = []
     for build_file in build_files:
@@ -238,6 +251,7 @@ def get_release_builds(index, release_file):
 
 
 def get_release_build_files(index, dist_name):
+    print("# rosdistro.get_release_build_files() has been deprecated and its functionality is now handled by the 'ros_buildfarm.config' module", file=sys.stderr)
     data = _get_dist_file_data(index, dist_name, 'release_builds')
     build_files = []
     for d in data:
@@ -255,6 +269,7 @@ def get_source_file(index, dist_name):
 
 
 def get_source_build_files(index, dist_name):
+    print("# rosdistro.get_source_build_files() has been deprecated and its functionality is now handled by the 'ros_buildfarm.config' module", file=sys.stderr)
     data = _get_dist_file_data(index, dist_name, 'source_builds')
     build_files = []
     for d in data:
@@ -272,6 +287,7 @@ def get_doc_file(index, dist_name):
 
 
 def get_doc_build_files(index, dist_name):
+    print("# rosdistro.get_doc_build_files() has been deprecated and its functionality is now handled by the 'ros_buildfarm.config' module", file=sys.stderr)
     data = _get_dist_file_data(index, dist_name, 'doc_builds')
     build_files = []
     for d in data:

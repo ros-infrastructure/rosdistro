@@ -33,7 +33,7 @@
 
 from .doc_repository_specification import DocRepositorySpecification
 from .release_repository_specification import ReleaseRepositorySpecification
-from .repository_specification import RepositorySpecification
+from .source_repository_specification import SourceRepositorySpecification
 from .status import valid_statuses
 
 
@@ -44,7 +44,7 @@ class Repository(object):
 
         self.doc_repository = DocRepositorySpecification(self.name, doc_data) if doc_data else None
         self.release_repository = ReleaseRepositorySpecification(self.name, release_data) if release_data else None
-        self.source_repository = RepositorySpecification(self.name, source_data) if source_data else None
+        self.source_repository = SourceRepositorySpecification(self.name, source_data) if source_data else None
 
         self.status = status_data.get('status', None)
         if self.status is not None:

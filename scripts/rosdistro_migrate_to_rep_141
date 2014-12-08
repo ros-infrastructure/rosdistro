@@ -45,7 +45,7 @@ def migrate(index_yaml):
         update_cache(index_yaml, distro_name, cache_url, cache_file, distribution_file)
 
     data = index_to_yaml(data)
-    data = '\n'.join(_yaml_header_lines('index')) + '\n' + data
+    data = '\n'.join(_yaml_header_lines('index', data['version'])) + '\n' + data
     with open(index_yaml + '.new', 'w') as f:
         f.write(data)
 
@@ -120,7 +120,7 @@ def generate_repos_url(repos_url, doc_url, release_url, source_url):
         data['repositories'][repo_name]['source'] = get_dict_parts(source_repo_data, ['type', 'url', 'version'])
 
     data = _to_yaml(data)
-    data = '\n'.join(_yaml_header_lines('distribution')) + '\n' + data
+    data = '\n'.join(_yaml_header_lines('distribution', data['version'])) + '\n' + data
     with open(repos_url, 'w') as f:
         f.write(data)
 
@@ -147,7 +147,7 @@ def update_cache(index_yaml, distro_name, cache_url, cache_file, distribution_fi
     cache_data['version'] = 2
 
     data = _to_yaml(cache_data)
-    data = '\n'.join(_yaml_header_lines('cache')) + '\n' + data
+    data = '\n'.join(_yaml_header_lines('cache'), cache_data['version']) + '\n' + data
     with open(cache_file, 'w') as f:
         f.write(data)
 
@@ -164,7 +164,7 @@ def get_dict_parts(d, keys):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Migrate the distros to the new spec.')
+    parser = argparse.ArgumentParser(description='Migrate the distros from REP 137 to REP 141.')
     parser.add_argument('index', help='The index.yaml file to migrate')
     args = parser.parse_args()
 
