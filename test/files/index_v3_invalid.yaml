@@ -4,7 +4,7 @@
 ---
 distributions:
   foo:
-    distribution: [foo/distribution.yaml, foo/distribution2.yaml]
+    distribution: [foo/distribution.yaml, foo/distribution3.yaml]
     distribution_cache: foo/release-cache.yaml
 type: index
 version: 3

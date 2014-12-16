@@ -1,0 +1,10 @@
+%YAML 1.1
+# ROS distribution file
+# see REP 141: http://ros.org/reps/rep-0141.html
+---
+release_platforms:
+  ubuntu:
+  - precise
+repositories:
+type: distribution
+version: 1
