@@ -81,7 +81,14 @@ class DistributionFile(object):
     def merge(self, other_dist_file):
         assert self.name == other_dist_file.name
         assert self.version == other_dist_file.version
-        assert self.release_platforms == other_dist_file.release_platforms
+        # assert that the release platforms of the other dist file are a subset
+        for os_name, os_code_names in \
+                other_dist_file.release_platforms.items():
+            assert os_name in self.release_platforms.keys()
+            for os_code_name in os_code_names:
+                assert os_code_name in self.release_platforms[os_name]
+        self.release_platforms = dict(other_dist_file.release_platforms)
+
         for repo_name, other_repo in other_dist_file.repositories.items():
             # remove existing repo before adding other
             if repo_name in self.repositories:
