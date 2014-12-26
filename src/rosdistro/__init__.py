@@ -74,7 +74,7 @@ from .source_file import SourceFile
 ### index information
 
 
-DEFAULT_INDEX_URL = 'https://raw.github.com/ros/rosdistro/master/index.yaml'
+DEFAULT_INDEX_URL = 'https://raw.githubusercontent.com/ros/rosdistro/master/index.yaml'
 
 
 def get_index_url():
