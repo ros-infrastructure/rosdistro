@@ -94,13 +94,15 @@ class DistributionFile(object):
             if repo_name in self.repositories:
                 self_repo = self.repositories[repo_name]
                 # remove corresponding release packages
-                for pkg_name in self_repo.release_repository.package_names:
-                    del self.release_packages[pkg_name]
+                if self_repo.release_repository:
+                    for pkg_name in self_repo.release_repository.package_names:
+                        del self.release_packages[pkg_name]
             self.repositories[repo_name] = other_repo
-            for pkg_name in other_repo.release_repository.package_names:
-                # add corresponding release packages
-                self.release_packages[pkg_name] = \
-                    other_dist_file.release_packages[pkg_name]
+            if other_repo.release_repository:
+                for pkg_name in other_repo.release_repository.package_names:
+                    # add corresponding release packages
+                    self.release_packages[pkg_name] = \
+                        other_dist_file.release_packages[pkg_name]
         for tag in other_dist_file.tags:
             if tag not in self.tags:
                 self.tags.append(tag)
