@@ -38,6 +38,7 @@ import os
 import sys
 
 from rosdistro.verify import reformat_files
+from rosdistro.verify import verify_files_identical
 
 
 def parse_args(args=sys.argv[1:]):
@@ -48,6 +49,9 @@ def parse_args(args=sys.argv[1:]):
     add('index',
         help='The path or url of the index.yaml file (must be either a local file or a file:// url)'
     )
+    add('-n', '--dry-run', action='store_true',
+        help="Don't actually overwrite any files, just show what would be done."
+    )
     return parser.parse_args(args)
 
 
@@ -56,5 +60,8 @@ if __name__ == '__main__':
     index = args.index
     if os.path.isfile(index):
         index = 'file://' + os.path.abspath(index)
-    success = reformat_files(index)
+    if args.dry_run:
+        success = verify_files_identical(index)
+    else:
+        success = reformat_files(index)
     sys.exit(0 if success else 1)
