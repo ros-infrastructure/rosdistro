@@ -92,6 +92,7 @@ def verify_files(index_url, callback, include_deprecated=False):
 
 
 def _reformat_files(index, dist_name, loader_function, yaml_url, file_type):
+    all_identical = True
     files = loader_function(index, dist_name)
     if not isinstance(files, list):
         files = [files]
@@ -102,6 +103,7 @@ def _reformat_files(index, dist_name, loader_function, yaml_url, file_type):
             print('Skipping non-file url: %s' % url)
             continue
         identical = _check_file_identical(f, yaml_url[i], file_type)
+        all_identical &= identical
         path = url[7:]
         if identical:
             print('Skipping identical file: %s' % path)
@@ -112,7 +114,7 @@ def _reformat_files(index, dist_name, loader_function, yaml_url, file_type):
         dist_file_data = '\n'.join(_yaml_header_lines(file_type, data['version'])) + '\n' + dist_file_data
         with open(path, 'w') as f:
             f.write(dist_file_data)
-    return True
+    return all_identical
 
 
 def _check_files_identical(index, dist_name, loader_function, yaml_url, file_type):
