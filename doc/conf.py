@@ -217,11 +217,11 @@ latex_documents = [
 #latex_use_modindex = True
 
 intersphinx_mapping = {
-    'genmsg': ('http://ros.org/doc/api/genmsg/html', None),
-    'vcstools': ('http://ros.org/doc/api/vcstools/html', None),
-    'rosinstall': ('http://ros.org/doc/api/rosinstall/html', None),
-    'rospkg': ('http://ros.org/doc/api/rospkg/html', None),
-    'rosdep2': ('http://ros.org/doc/api/rosdep2/html', None),
+    'genmsg': ('http://docs.ros.org/api/genmsg/html', None),
+    'vcstools': ('http://docs.ros.org/independent/api/vcstools/html', None),
+    'rosinstall': ('http://docs.ros.org/independent/api/rosinstall/html', None),
+    'rospkg': ('http://docs.ros.org/independent/api/rospkg/html', None),
+    'rosdep2': ('http://docs.ros.org/independent/api/rosdep/html', None),
     }
 
 rst_epilog = """
