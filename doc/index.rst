@@ -6,7 +6,7 @@ rosdistro
 .. _catkin: https://github.com/ros-infrastructure/rosdistro
 
 How do I install rosdistro?
------------------------
+---------------------------
 
 On Ubuntu the recommend method is to use apt::
 
@@ -14,7 +14,7 @@ On Ubuntu the recommend method is to use apt::
 
 
 How do I release something with rosdistro?
----------------------------------------
+------------------------------------------
 
 It depends on your use case:
 
