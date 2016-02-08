@@ -157,6 +157,8 @@ def _yaml_header_lines(file_type, version):
     rep = '141'
     if file_type == 'index' and version == 3:
         rep = '143'
+    if file_type == 'distribution' and version == 2:
+        rep = '143'
     return [
         '%YAML 1.1',
         '# ROS %s file' % file_type,
