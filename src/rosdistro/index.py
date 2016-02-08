@@ -42,7 +42,7 @@ class Index(object):
 
     _type = 'index'
 
-    def __init__(self, data, base_url):
+    def __init__(self, data, base_url, url_query=''):
         assert 'type' in data, "Expected file type is '%s'" % Index._type
         assert data['type'] == Index._type, "Expected file type is '%s', not '%s'" % (Index._type, data['type'])
 
@@ -91,6 +91,8 @@ class Index(object):
                         parts = urlparse(v)
                         if not parts[0]:  # schema
                             v = base_url + '/' + v
+                            if url_query:
+                                v += '?' + url_query
                         self.distributions[distro_name][key].append(v)
                     if not list_value:
                         self.distributions[distro_name][key] = self.distributions[distro_name][key][0]

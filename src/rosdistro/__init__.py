@@ -48,6 +48,10 @@ try:
 except ImportError:
     from io import BytesIO as StringIO
 import sys
+try:
+    from urllib.parse import urlparse
+except ImportError:
+    from urlparse import urlparse
 import yaml
 
 logger = logging.getLogger('rosdistro')
@@ -113,7 +117,8 @@ def get_index(url):
     yaml_str = load_url(url)
     data = yaml.load(yaml_str)
     base_url = os.path.dirname(url)
-    return Index(data, base_url)
+    url_parts = urlparse(url)
+    return Index(data, base_url, url_query=url_parts.query)
 
 
 ### distribution information
