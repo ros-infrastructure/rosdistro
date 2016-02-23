@@ -95,7 +95,7 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
             errors.append('%s: invalid package.xml file for package "%s": %s' % (dist_name, pkg_name, e))
             continue
         # check that version numbers match (at least without deb inc)
-        if not re.match('^%s-[\dA-z~\+\.]+$' % re.escape(pkg.version), repo.version):
+        if not re.match('^%s(-[\dA-z~\+\.]+)?$' % re.escape(pkg.version), repo.version):
             errors.append('%s: different version in package.xml (%s) for package "%s" than for the repository (%s) (after removing the debian increment)' % (dist_name, pkg.version, pkg_name, repo.version))
 
     if not debug:
