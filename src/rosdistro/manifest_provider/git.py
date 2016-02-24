@@ -31,6 +31,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import distutils.version
 import os
 import shutil
 import subprocess
@@ -53,35 +54,52 @@ def git_manifest_provider(_dist_name, repo, pkg_name):
         raise RuntimeError('Unable to fetch package.xml: %s' % e)
 
 
+def _git_version_gte(version):
+    global _git_client_version
+    if not _git_client_version:
+        cmd = [_git_client_executable, '--version']
+        result = _run_command(cmd)
+        _git_client_version = result['output'].split()[-1]
+    return distutils.version.StrictVersion(_git_client_version) >= distutils.version.StrictVersion(version)
+
+
 def _get_package_xml(url, tag):
     base = tempfile.mkdtemp('rosdistro')
     try:
-        # git 1.7.9 does not support cloning a tag directly, so doing it in two steps
         assert _git_client_executable is not None, "'git' not found"
-        cmd = [_git_client_executable, 'clone', url, base]
-        result = _run_command(cmd, base)
-        if result['returncode'] != 0:
-            raise RuntimeError('Could not clone repository "%s"' % url)
+        if _git_version_gte('1.8.0'):
+            # Directly clone the required tag with least amount of additional history. This behaviour
+            # has been available since git 1.8.0:
+            # https://git.kernel.org/cgit/git/git.git/tree/Documentation/git-clone.txt?h=v1.8.0#n158
+            cmd = [_git_client_executable, 'clone', url, base, '--depth', '1', '--branch', tag]
+            result = _run_command(cmd, base)
+            if result['returncode'] != 0:
+                raise RuntimeError('Could not clone repository "%s" at tag "%s"' % (url, tag))
+        else:
+            # Old git doesn't support cloning a tag directly, so check it out after a full clone.
+            cmd = [_git_client_executable, 'clone', url, base]
+            result = _run_command(cmd, base)
+            if result['returncode'] != 0:
+                raise RuntimeError('Could not clone repository "%s"' % url)
 
-        cmd = [_git_client_executable, 'tag', '-l']
-        result = _run_command(cmd, base)
-        if result['returncode'] != 0:
-            raise RuntimeError('Could not get tags of repository "%s"' % url)
+            cmd = [_git_client_executable, 'tag', '-l']
+            result = _run_command(cmd, base)
+            if result['returncode'] != 0:
+                raise RuntimeError('Could not get tags of repository "%s"' % url)
 
-        if tag not in result['output'].splitlines():
-            raise RuntimeError('Specified tag "%s" is not a git tag of repository "%s"' % (tag, url))
+            if tag not in result['output'].splitlines():
+                raise RuntimeError('Specified tag "%s" is not a git tag of repository "%s"' % (tag, url))
 
-        cmd = [_git_client_executable, 'checkout', tag]
-        result = _run_command(cmd, base)
-        if result['returncode'] != 0:
-            raise RuntimeError('Could not checkout tag "%s" of repository "%s"' % (tag, url))
+            cmd = [_git_client_executable, 'checkout', tag]
+            result = _run_command(cmd, base)
+            if result['returncode'] != 0:
+                raise RuntimeError('Could not checkout tag "%s" of repository "%s"' % (tag, url))
 
         filename = os.path.join(base, 'package.xml')
         if not os.path.exists(filename):
             raise RuntimeError('Could not find package.xml in repository "%s"' % url)
         with open(filename, 'r') as f:
-            package_xml = f.read()
-            return package_xml
+            return f.read()
     finally:
         shutil.rmtree(base)
 
@@ -104,7 +122,7 @@ def check_remote_tag_exists(url, tag):
     return False
 
 
-def _run_command(cmd, cwd, env=None):
+def _run_command(cmd, cwd=None, env=None):
     result = {'cmd': ' '.join(cmd), 'cwd': cwd}
     try:
         proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
@@ -127,3 +145,4 @@ def _find_executable(file_name):
     return None
 
 _git_client_executable = _find_executable('git')
+_git_client_version = None
