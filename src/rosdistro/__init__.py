@@ -164,7 +164,7 @@ def get_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False)
 
 def get_distribution_cache(index, dist_name):
     if dist_name not in index.distributions.keys():
-        raise RuntimeError("Unknown distribution: '{0}'. Valid distribution names are: {1}".format(dist_name, ', '.join(["'%s'" % d for d in index.distributions.keys()])))
+        raise RuntimeError("Unknown distribution: '{0}'. Valid distribution names are: {1}".format(dist_name, ', '.join(sorted(index.distributions.keys()))))
     dist = index.distributions[dist_name]
     if 'distribution_cache' not in dist.keys():
         raise RuntimeError("Distribution has no cache: '{0}'".format(dist_name))
@@ -223,7 +223,7 @@ def get_release_file(index, dist_name):
 def get_release_cache(index, dist_name):
     print('# rosdistro.get_release_cache() has been deprecated in favor of the new function rosdistro.get_distribution_cache() - please check that you have the latest versions of the Python tools (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-bloom python-rosdep python-rosinstall python-rosinstall-generator)', file=sys.stderr)
     if dist_name not in index.distributions.keys():
-        raise RuntimeError("Unknown release: '{0}'. Valid release names are: {1}".format(dist_name, ', '.join(["'%s'" % d for d in index.distributions.keys()])))
+        raise RuntimeError("Unknown release: '{0}'. Valid release names are: {1}".format(dist_name, ', '.join(sorted(index.distributions.keys()))))
     dist = index.distributions[dist_name]
     if 'distribution_cache' not in dist.keys():
         raise RuntimeError("Release has no cache: '{0}'".format(dist_name))
@@ -305,7 +305,7 @@ def get_doc_build_files(index, dist_name):
 
 def _get_dist_file_data(index, dist_name, type_):
     if dist_name not in index.distributions.keys():
-        raise RuntimeError("Unknown release: '{0}'. Valid release names are: {1}".format(dist_name, ', '.join(["'%s'" % d for d in index.distributions.keys()])))
+        raise RuntimeError("Unknown release: '{0}'. Valid release names are: {1}".format(dist_name, ', '.join(sorted(index.distributions.keys()))))
     dist = index.distributions[dist_name]
     if type_ not in dist.keys():
         raise RuntimeError('unknown release type "%s"' % type_)
