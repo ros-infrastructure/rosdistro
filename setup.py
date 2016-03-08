@@ -19,6 +19,7 @@ setup(
     scripts=[
 #        'scripts/rosdistro',
         'scripts/rosdistro_build_cache',
+        'scripts/rosdistro_freeze_source',
 #        'scripts/rosdistro_convert',
 #        'scripts/rosdistro_generate_cache',
         'scripts/rosdistro_migrate_to_rep_141',
