@@ -78,6 +78,21 @@ class DistributionCache(object):
         # remove packages which are not in the old distribution file
         self._remove_obsolete_entries()
 
+        # determine differences in doc and source entries
+        if len(distribution_file_data) == len(self._distribution_file_data):
+            for old_data, new_data in zip(self._distribution_file_data, distribution_file_data):
+                for repo_name in sorted(new_data['repositories'].keys()):
+                    repo = new_data['repositories'][repo_name]
+                    for section in ['doc', 'source']:
+                        if section not in repo:
+                            continue
+                        if repo_name in old_data['repositories'] and \
+                                section in old_data['repositories'][repo_name] and \
+                                old_data['repositories'][repo_name][section] == repo[section]:
+                            continue
+                        # section is either different or does't exist before
+                        print("  - updated '%s' entry for repository '%s'" % (section, repo_name))
+
         self._distribution_file_data = distribution_file_data
         dist_file = create_distribution_file(self.distribution_file.name, self._distribution_file_data)
 
