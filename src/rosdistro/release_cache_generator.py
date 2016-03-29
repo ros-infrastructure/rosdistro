@@ -136,6 +136,9 @@ def _get_cached_release(index, dist_name, preclean=False):
         print('- update cache')
         # get current release file
         rel_file_data = _get_dist_file_data(index, dist_name, 'release')
+        # since format 2 of the index file might contain a single value rather then a list
+        if not isinstance(rel_file_data, list):
+            rel_file_data = [rel_file_data]
         # update cache with current release file
         cache.update_distribution(rel_file_data)
     else:
