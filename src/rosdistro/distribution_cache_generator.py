@@ -136,14 +136,18 @@ def _get_cached_distribution(index, dist_name, preclean=False, ignore_local=Fals
                 print('- trying to fetch cache')
                 # get distribution cache
                 cache = get_distribution_cache(index, dist_name)
-            # get current distribution file
-            rel_file_data = _get_dist_file_data(index, dist_name, 'distribution')
-            # update cache with current distribution file
-            cache.update_distribution(rel_file_data)
     except Exception as e:
         print('- failed to fetch old cache: %s' % e)
+
     if cache:
         print('- update cache')
+        # get current distribution file
+        rel_file_data = _get_dist_file_data(index, dist_name, 'distribution')
+        # since format 2 of the index file might contain a single value rather then a list
+        if not isinstance(rel_file_data, list):
+            rel_file_data = [rel_file_data]
+        # update cache with current distribution file
+        cache.update_distribution(rel_file_data)
     else:
         print('- build cache from scratch')
         # get empty cache with distribution file
