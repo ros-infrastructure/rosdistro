@@ -31,7 +31,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import distutils.version
+from distutils.version import LooseVersion
 import os
 import shutil
 import subprocess
@@ -60,7 +60,7 @@ def _git_version_gte(version):
         cmd = [_git_client_executable, '--version']
         result = _run_command(cmd)
         _git_client_version = result['output'].split()[-1]
-    return distutils.version.StrictVersion(_git_client_version) >= distutils.version.StrictVersion(version)
+    return LooseVersion(_git_client_version) >= LooseVersion(version)
 
 
 def _get_package_xml(url, tag):
