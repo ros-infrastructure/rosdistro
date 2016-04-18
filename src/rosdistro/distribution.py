@@ -31,13 +31,14 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from .manifest_provider.bitbucket import bitbucket_manifest_provider
 from .manifest_provider.git import git_manifest_provider
 from .manifest_provider.github import github_manifest_provider
 
 
 class Distribution(object):
 
-    default_manifest_providers = [github_manifest_provider, git_manifest_provider]
+    default_manifest_providers = [github_manifest_provider, bitbucket_manifest_provider, git_manifest_provider]
 
     def __init__(self, distribution_file, manifest_providers=None):
         self._distribution_file = distribution_file
