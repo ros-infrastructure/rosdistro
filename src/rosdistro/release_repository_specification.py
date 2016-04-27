@@ -59,6 +59,18 @@ class ReleaseRepositorySpecification(RepositorySpecification):
         # for backward compatibility only
         self.release_repository = self
 
+    def get_release_tag(self, pkg_name):
+        data = {
+            'package': pkg_name
+        }
+        if self.version:
+            data['version'] = self.version
+            data['upstream_version'] = self.version.split('-')[0]
+        release_tag = self.tags['release']
+        for k, v in data.items():
+            release_tag = release_tag.replace('{%s}' % k, v)
+        return release_tag
+
     def get_data(self):
         data = self._get_data(skip_git_type=True)
         if self.tags:

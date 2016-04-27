@@ -31,14 +31,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from distutils.version import LooseVersion
 import os
 import shutil
-import subprocess
 import tempfile
 
 from rosdistro import logger
-from rosdistro.manifest_provider import get_release_tag
+from rosdistro.vcs import Git
 
 
 workspace_base = '/tmp/rosdistro-workspace'
@@ -47,51 +45,39 @@ workspace_base = '/tmp/rosdistro-workspace'
 def git_manifest_provider(_dist_name, repo, pkg_name):
     assert repo.version
     try:
-        release_tag = get_release_tag(repo, pkg_name)
+        release_tag = repo.get_release_tag(pkg_name)
         package_xml = _get_package_xml(repo.url, release_tag)
         return package_xml
     except Exception as e:
         raise RuntimeError('Unable to fetch package.xml: %s' % e)
 
 
-def _git_version_gte(version):
-    global _git_client_version
-    if not _git_client_version:
-        cmd = [_git_client_executable, '--version']
-        result = _run_command(cmd)
-        _git_client_version = result['output'].split()[-1]
-    return LooseVersion(_git_client_version) >= LooseVersion(version)
-
-
 def _get_package_xml(url, tag):
     base = tempfile.mkdtemp('rosdistro')
     try:
-        assert _git_client_executable is not None, "'git' not found"
-        if _git_version_gte('1.8.0'):
+        git = Git(base)
+        if git.version_gte('1.8.0'):
             # Directly clone the required tag with least amount of additional history. This behaviour
             # has been available since git 1.8.0:
             # https://git.kernel.org/cgit/git/git.git/tree/Documentation/git-clone.txt?h=v1.8.0#n158
-            cmd = [_git_client_executable, 'clone', url, base, '--depth', '1', '--branch', tag]
-            result = _run_command(cmd, base)
+            result = git.command('clone', url, base, '--depth', '1', '--branch', tag)
             if result['returncode'] != 0:
                 raise RuntimeError('Could not clone repository "%s" at tag "%s"' % (url, tag))
         else:
             # Old git doesn't support cloning a tag directly, so check it out after a full clone.
-            cmd = [_git_client_executable, 'clone', url, base]
-            result = _run_command(cmd, base)
+            git = Git(base)
+            result = git.command('clone', url, base)
             if result['returncode'] != 0:
                 raise RuntimeError('Could not clone repository "%s"' % url)
 
-            cmd = [_git_client_executable, 'tag', '-l']
-            result = _run_command(cmd, base)
+            result = git.command('tag', '-l')
             if result['returncode'] != 0:
                 raise RuntimeError('Could not get tags of repository "%s"' % url)
 
             if tag not in result['output'].splitlines():
                 raise RuntimeError('Specified tag "%s" is not a git tag of repository "%s"' % (tag, url))
 
-            cmd = [_git_client_executable, 'checkout', tag]
-            result = _run_command(cmd, base)
+            result = git.command('checkout', tag)
             if result['returncode'] != 0:
                 raise RuntimeError('Could not checkout tag "%s" of repository "%s"' % (tag, url))
 
@@ -102,47 +88,3 @@ def _get_package_xml(url, tag):
             return f.read()
     finally:
         shutil.rmtree(base)
-
-
-def check_remote_tag_exists(url, tag):
-    base = tempfile.mkdtemp('rosdistro')
-    try:
-        assert _git_client_executable is not None, "'git' not found"
-        cmd = [_git_client_executable, 'ls-remote', '--tags', url]
-        result = _run_command(cmd, base)
-        if result['returncode'] != 0:
-            logger.debug('Could not list remote tags of repository "%s": %s' % (url, result['output']))
-        else:
-            suffix = '\trefs/tags/%s' % tag
-            for line in result['output'].splitlines():
-                if line.endswith(suffix):
-                    return True
-    finally:
-        shutil.rmtree(base)
-    return False
-
-
-def _run_command(cmd, cwd=None, env=None):
-    result = {'cmd': ' '.join(cmd), 'cwd': cwd}
-    try:
-        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
-        output, _ = proc.communicate()
-        result['output'] = output.rstrip()
-        result['returncode'] = proc.returncode
-    except subprocess.CalledProcessError as e:
-        result['output'] = e.output
-        result['returncode'] = e.returncode
-    if not isinstance(result['output'], str):
-        result['output'] = result['output'].decode('utf-8')
-    return result
-
-
-def _find_executable(file_name):
-    for path in os.getenv('PATH').split(os.path.pathsep):
-        file_path = os.path.join(path, file_name)
-        if os.path.isfile(file_path) and os.access(file_path, os.X_OK):
-            return file_path
-    return None
-
-_git_client_executable = _find_executable('git')
-_git_client_version = None

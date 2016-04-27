@@ -31,8 +31,13 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import re
+from .vcs import Git
+
 
 class RepositorySpecification(object):
+    # Match groups are server and path on server.
+    VCS_REGEX = re.compile('(?:https?:\/\/|ssh:\/\/|git:\/\/|git@)([\w.-]+)[:/]([\w/-]*)(?:\.git)?$')
 
     def __init__(self, name, data):
         self.name = name
@@ -40,6 +45,7 @@ class RepositorySpecification(object):
         assert 'url' in data and data['url'], "Repository '%s' lacks required URL information" % name
         self.url = data['url']
         self.version = data.get('version', None)
+        self._remote_refs = None
 
         # for backward compatibility only
         self.status = None
@@ -47,6 +53,34 @@ class RepositorySpecification(object):
 
     def get_data(self):
         return self._get_data()
+
+    def get_url_parts(self):
+        """ Returns a tuple for the server and path.
+            Example ('github.com', 'ros/catkin') """
+        match = self.VCS_REGEX.match(self.url)
+        if not match:
+            raise RuntimeError('VCS url "%s" does not match expected format.' % self.url)
+        return match.groups()
+
+    @property
+    def remote_refs(self):
+        if not self._remote_refs:
+            result = Git().command('ls-remote', self.url)
+            if result['returncode'] != 0:
+                raise RuntimeError('Could not git ls-remote repository "%s"' % self.url)
+            self._remote_refs = {}
+            for row in result['output'].strip().splitlines():
+                sha, name = row.split('\t')
+                self._remote_refs[name] = sha
+        return self._remote_refs
+
+    @property
+    def remote_tags(self):
+        result = {}
+        for name, sha in self.remote_refs.items():
+            if name.startswith('refs/tags/'):
+                result[name.split('refs/tags/')[1]] = sha
+        return result
 
     def _get_data(self, skip_git_type=False):
         data = {}
