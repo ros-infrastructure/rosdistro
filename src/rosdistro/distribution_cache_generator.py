@@ -45,7 +45,8 @@ from . import _get_dist_file_data, get_cached_distribution, get_index, get_distr
 from .distribution_cache import DistributionCache
 
 
-def generate_distribution_caches(index, dist_names=None, preclean=False, ignore_local=False, debug=False):
+def generate_distribution_caches(index, dist_names=None, preclean=False,
+    ignore_local=False, include_source=False, debug=False):
     if os.path.isfile(index):
         index = 'file://' + os.path.abspath(index)
     index = get_index(index)
@@ -57,7 +58,8 @@ def generate_distribution_caches(index, dist_names=None, preclean=False, ignore_
     caches = {}
     for dist_name in dist_names:
         try:
-            cache = generate_distribution_cache(index, dist_name, preclean=preclean, ignore_local=ignore_local, debug=debug)
+            cache = generate_distribution_cache(index, dist_name, preclean=preclean,
+                ignore_local=ignore_local, include_source=include_source, debug=debug)
         except RuntimeError as e:
             errors.append(str(e))
             continue
@@ -67,10 +69,11 @@ def generate_distribution_caches(index, dist_names=None, preclean=False, ignore_
     return caches
 
 
-def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=False, debug=False):
+def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=False,
+                                include_source=False, debug=False):
     dist, cache = _get_cached_distribution(index, dist_name, preclean=preclean, ignore_local=ignore_local)
-    # fetch all manifests
-    print('- fetch missing manifests')
+
+    print('- fetch missing release manifests')
     errors = []
     for pkg_name in sorted(dist.release_packages.keys()):
         repo = dist.repositories[dist.release_packages[pkg_name].repository_name].release_repository
@@ -103,6 +106,25 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
 
         if package_xml != old_package_xml:
             print("  - updated manifest of package '%s' to version '%s'" % (pkg_name, pkg.version))
+
+    if not debug:
+        print('')
+
+    if include_source:
+        print('- fetch source repository manifests')
+        for repo_name in sorted(dist.repositories.keys()):
+            if dist.repositories[repo_name].source_repository:
+                source_repo_cache = dist.get_source_repo_package_xmls(
+                    dist.repositories[repo_name].source_repository)
+                if debug:
+                    print('  - fetch "%s"' % repo_name)
+                else:
+                    sys.stdout.write('.')
+                    sys.stdout.flush()
+            else:
+                if debug:
+                    print('  - skip "%s" since it has no source entry.' % repo_name)
+                continue
 
     if not debug:
         print('')

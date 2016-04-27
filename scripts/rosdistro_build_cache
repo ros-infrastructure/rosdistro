@@ -67,6 +67,9 @@ def parse_args(args=sys.argv[1:]):
     add('--ignore-local', action='store_true', default=False,
         help='Ignore locally available cache'
     )
+    add('--include-source', action='store_true', default=False,
+        help='Also include source branch package XMLs in the cache'
+    )
     return parser.parse_args(args)
 
 
@@ -77,7 +80,8 @@ def main():
         logger.level = logging.DEBUG
 
     try:
-        caches = generate_distribution_caches(args.index, dist_names=args.dist_names, preclean=args.preclean, ignore_local=args.ignore_local, debug=args.debug)
+        caches = generate_distribution_caches(args.index, dist_names=args.dist_names, preclean=args.preclean,
+            ignore_local=args.ignore_local, include_source=args.include_source, debug=args.debug)
     except RuntimeError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)

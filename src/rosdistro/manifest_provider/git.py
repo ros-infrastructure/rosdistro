@@ -57,6 +57,39 @@ def git_manifest_provider(_dist_name, repo, pkg_name):
         raise RuntimeError('Unable to fetch package.xml: %s' % e)
 
 
+def git_source_manifest_provider(repo):
+    try:
+        with _temp_git_clone(repo.url, repo.version) as git_repo_path:
+            # Include the git hash in our cache dictionary.
+            result = Git(git_repo_path).command('rev-parse', 'HEAD')
+            cache = { '_ref': result['output'] }
+
+            for path, dirnames, filenames in os.walk(git_repo_path):
+                # Don't recurse into hidden folders.
+                if os.path.basename(path)[0] == '.':
+                    dirnames[:] = []
+                    continue
+
+                if 'package.xml' in filenames:
+                    filename = os.path.join(path, 'package.xml')
+                    with open(filename, 'r') as f:
+                        package_xml = f.read()
+
+                    try:
+                        name = parse_package_string(package_xml).name
+                    except InvalidPackage:
+                        raise RuntimeError('Unable to parse package.xml file found in %s' % repo.url)
+                    cache[name] = [ path[len(git_repo_path)+1:], package_xml ]
+
+                    # Prevent further recursion down this tree.
+                    dirnames[:] = []
+
+    except Exception as e:
+        raise RuntimeError('Unable to fetch source package.xml files: %s' % e)
+
+    return cache
+
+
 @contextmanager
 def _temp_git_clone(url, ref):
     base = tempfile.mkdtemp('rosdistro')

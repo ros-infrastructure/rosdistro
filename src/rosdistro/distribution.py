@@ -32,22 +32,30 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from .manifest_provider.bitbucket import bitbucket_manifest_provider
-from .manifest_provider.git import git_manifest_provider
-from .manifest_provider.github import github_manifest_provider
+from .manifest_provider.git import git_manifest_provider, git_source_manifest_provider
+from .manifest_provider.github import github_manifest_provider, github_source_manifest_provider
 
 
 class Distribution(object):
 
     default_manifest_providers = [github_manifest_provider, bitbucket_manifest_provider, git_manifest_provider]
+    default_source_manifest_providers = [github_source_manifest_provider, git_source_manifest_provider]
 
-    def __init__(self, distribution_file, manifest_providers=None):
+    def __init__(self, distribution_file, manifest_providers=None, source_manifest_providers=None):
         self._distribution_file = distribution_file
+
         # Use default
         self._manifest_providers = Distribution.default_manifest_providers
+        self._source_manifest_providers = Distribution.default_source_manifest_providers
+
         # Override default if given
         if manifest_providers is not None:
             self._manifest_providers = manifest_providers
+        if source_manifest_providers is not None:
+            self._source_manifest_providers = source_manifest_providers
+
         self._release_package_xmls = {}
+        self._source_repo_package_xmls = {}
 
     def __getattr__(self, name):
         return getattr(self._distribution_file, name)
@@ -64,11 +72,18 @@ class Distribution(object):
                 return None
             package_xml = None
             for mp in self._manifest_providers:
-                #try:
                 package_xml = mp(self._distribution_file.name, repo, pkg_name)
-                #except:
-                #    pass
                 if package_xml is not None:
                     break
             self._release_package_xmls[pkg_name] = package_xml
         return self._release_package_xmls[pkg_name]
+
+    def get_source_repo_package_xmls(self, repo):
+        """ Expects a SourceRepositorySpecification object. """
+        if not self._source_repo_package_xmls.get(repo.name, None):
+            for mp in self._source_manifest_providers:
+                result = mp(repo)
+                if result is not None:
+                    break
+            self._source_repo_package_xmls[repo.name] = result
+        return self._source_repo_package_xmls[repo.name]
