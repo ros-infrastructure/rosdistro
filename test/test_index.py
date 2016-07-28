@@ -55,7 +55,7 @@ def test_get_index_from_http_with_query_parameters():
     else:
         proc = subprocess.Popen([sys.executable, '-m', 'http.server', '9876'],
                                 cwd=FILES_DIR)
-    time.sleep(0.1)
+    time.sleep(0.5)
     try:
         i = get_index(url)
         assert len(i.distributions.keys()) == 1
