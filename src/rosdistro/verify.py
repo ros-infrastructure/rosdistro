@@ -42,7 +42,7 @@ from .loader import load_url
 
 
 def verify_files_parsable(index_url):
-    return verify_files(index_url, _check_files_parsable, include_deprecated=True)
+    return verify_files(index_url, _check_files_parsable, include_deprecated=False)
 
 
 def _check_files_parsable(index, dist_name, loader_function, _yaml_url, _file_type):
@@ -75,10 +75,13 @@ def verify_files(index_url, callback, include_deprecated=False):
             providers.extend([get_release_file, get_source_file, get_doc_file])
         file_providers = {
             'distribution': (providers, 'distribution'),
-            'release_builds': (get_release_build_files, 'release-build'),
-            'source_builds': (get_source_build_files, 'source-build'),
-            'doc_builds': (get_doc_build_files, 'doc-build')
         }
+        if index.version < 3:
+            file_providers.update({
+                'release_builds': (get_release_build_files, 'release-build'),
+                'source_builds': (get_source_build_files, 'source-build'),
+                'doc_builds': (get_doc_build_files, 'doc-build')
+            })
         for key in sorted(file_providers.keys()):
             provider, file_type = file_providers[key]
             yaml_url = dist[key]
