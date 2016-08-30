@@ -32,6 +32,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+# This function remains here as a compatibility shim because there
+# is code in rosinstall_generator which uses it in this location.
 def get_release_tag(repo, pkg_name):
-    """ Compatibility shim. """
     return repo.get_release_tag(pkg_name)
