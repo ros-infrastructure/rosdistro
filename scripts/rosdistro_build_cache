@@ -92,14 +92,13 @@ def main():
             print('- write cache file "%s-cache.yaml"' % dist_name)
             f.write(data)
         with gzip.open('%s-cache.yaml.gz' % dist_name, 'wb') as f:
+            # On Python 3, we must encode the unicode yaml str prior to gzipping it,
+            # whereas for Python 2, the yaml output is a str which cannot be further
+            # encoded (compared with a unicode object).
+            if sys.version_info[0] >= 3:
+                data = data.encode('utf-8')
             print('- write compressed cache file "%s-cache.yaml.gz"' % dist_name)
-            try:
-                # Python 2 gzip module requires encoded data.
-                unicode
-                f.write(data)
-            except NameError:
-                f.write(data.encode('utf-8'))
-
+            f.write(data)
 
 if __name__ == '__main__':
     main()
