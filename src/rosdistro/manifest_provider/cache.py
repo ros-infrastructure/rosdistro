@@ -56,11 +56,18 @@ def sanitize_xml(xml_string):
         # Python 2. The minidom module parses as ascii, so we have to pre-encode.
         if isinstance(xml_string, unicode):
             xml_string = xml_string.encode('utf-8')
-        # Returns an encoded str.
-        return _squash(minidom.parseString(xml_string)).toxml('utf-8')
     except NameError:
-        # Python 3 returns a unicode str.
-        return _squash(minidom.parseString(xml_string)).toxml()
+        # Python 3. Strings are native unicode.
+        pass
+
+    xml_node = _squash(minidom.parseString(xml_string))
+    try:
+        # Python 2. Encode the resultant XML as a str.
+        unicode
+        return xml_node.toxml('utf-8')
+    except NameError:
+        # Python 3. Don't encode; return a native unicode XML string.
+        return xml_node.toxml()
 
 
 class CachedManifestProvider(object):
