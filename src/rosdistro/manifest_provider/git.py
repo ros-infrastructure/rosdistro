@@ -55,7 +55,7 @@ def git_manifest_provider(_dist_name, repo, pkg_name):
 def _get_package_xml(url, tag):
     base = tempfile.mkdtemp('rosdistro')
     try:
-        git = Git(base)
+        git = Git(cwd=base)
         if git.version_gte('1.8.0'):
             # Directly clone the required tag with least amount of additional history. This behaviour
             # has been available since git 1.8.0:
