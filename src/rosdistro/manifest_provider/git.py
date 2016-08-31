@@ -63,9 +63,8 @@ def git_manifest_provider(_dist_name, repo, pkg_name):
 @contextmanager
 def _temp_git_clone(url, ref):
     base = tempfile.mkdtemp('rosdistro')
-    git = Git(base)
+    git = Git(cwd=base)
     try:
-        git = Git(cwd=base)
         if git.version_gte('1.8.0') and not _ref_is_hash(ref):
             # Directly clone the required ref with least amount of additional history. This behaviour
             # has been available since git 1.8.0, but only works for tags and branches, not hashes:
