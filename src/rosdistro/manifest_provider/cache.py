@@ -37,8 +37,9 @@ from xml.dom import minidom
 
 def sanitize_xml(xml_string):
     """ Returns a version of the supplied XML string with comments and all whitespace stripped,
-        including runs of spaces internal to text nodes. The returned string will be encoded,
-        so str (Python 2) or bytes (Python 3). """
+    including runs of spaces internal to text nodes. The returned string will be encoded,
+    so str (Python 2) or bytes (Python 3).
+    """
     def _squash(node):
         drop_nodes = []
         for x in node.childNodes:
@@ -66,7 +67,7 @@ def sanitize_xml(xml_string):
         unicode
         return xml_node.toxml('utf-8')
     except NameError:
-        # Python 3. Don't encode; return a native unicode XML string.
+        # Python 3. Return native bytes.
         return xml_node.toxml()
 
 
