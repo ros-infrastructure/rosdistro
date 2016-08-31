@@ -111,8 +111,8 @@ def github_source_manifest_provider(repo):
 
     cache = { '_ref': tree_json['sha'] }
     for package_xml_path in package_xml_paths:
-        url = 'https://raw.githubusercontent.com/%s/%s/%s/package.xml' % \
-            (path, cache['_ref'], package_xml_path)
+        url = 'https://raw.githubusercontent.com/%s/%s/%s' % \
+            (path, cache['_ref'], package_xml_path + '/package.xml' if package_xml_path else 'package.xml')
         logger.debug('- load package.xml from %s' % url)
         package_xml = urlopen(url).read()
         name = parse_package_string(package_xml).name
