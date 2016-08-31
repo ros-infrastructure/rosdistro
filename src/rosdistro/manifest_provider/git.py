@@ -31,6 +31,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from catkin_pkg.package import InvalidPackage, parse_package_string
+from catkin_pkg.packages import find_package_paths
 from contextlib import contextmanager
 import os
 import re
@@ -64,25 +66,15 @@ def git_source_manifest_provider(repo):
             result = Git(git_repo_path).command('rev-parse', 'HEAD')
             cache = { '_ref': result['output'] }
 
-            for path, dirnames, filenames in os.walk(git_repo_path):
-                # Don't recurse into hidden folders.
-                if os.path.basename(path)[0] == '.':
-                    dirnames[:] = []
-                    continue
-
-                if 'package.xml' in filenames:
-                    filename = os.path.join(path, 'package.xml')
-                    with open(filename, 'r') as f:
-                        package_xml = f.read()
-
-                    try:
-                        name = parse_package_string(package_xml).name
-                    except InvalidPackage:
-                        raise RuntimeError('Unable to parse package.xml file found in %s' % repo.url)
-                    cache[name] = [ path[len(git_repo_path)+1:], package_xml ]
-
-                    # Prevent further recursion down this tree.
-                    dirnames[:] = []
+            # Find package.xml files inside the repo.
+            for package_path in catkin_pkg.packages.find_package_paths(git_repo_path):
+                with open(os.path.join(git_repo_path, package_path, 'package.xml'), 'r') as f:
+                    package_xml = f.read()
+                try:
+                    name = parse_package_string(package_xml).name
+                except InvalidPackage:
+                    raise RuntimeError('Unable to parse package.xml file found in %s' % repo.url)
+                cache[name] = [ path[len(git_repo_path)+1:], package_xml ]
 
     except Exception as e:
         raise RuntimeError('Unable to fetch source package.xml files: %s' % e)
