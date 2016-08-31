@@ -114,9 +114,14 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
 
 
 class CacheYamlDumper(yaml.SafeDumper):
+    """ A yaml dumper specific to dumping the serialized rosdistro cache file.
+
+    Allows long lines and direct unicode representation. This avoids writing escape
+    sequences, line continuations, and other noise into the cache file. Also permits
+    long strings to alias each other (by default only objects do).
+    """
+
     def __init__(self, *args, **kwargs):
-        """ Allow long lines and direct unicode representation. This avoids writing escape sequences,
-            line continuations, and other noise into the cache file. """
         kwargs['width'] = 10000
         kwargs['allow_unicode'] = True
         super(CacheYamlDumper, self).__init__(*args, **kwargs)
