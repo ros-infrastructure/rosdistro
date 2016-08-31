@@ -40,7 +40,6 @@ except ImportError:
 
 import base64
 import os
-import re
 
 from rosdistro import logger
 

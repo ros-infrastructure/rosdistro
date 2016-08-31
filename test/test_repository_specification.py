@@ -1,12 +1,11 @@
-import os
-
 from rosdistro.repository_specification import RepositorySpecification
 
+
 def test_repository_specification():
-    data = { 'type': 'git', 'url': 'https://github.com/ros/catkin.git' }
+    data = {'type': 'git', 'url': 'https://github.com/ros/catkin.git'}
     r = RepositorySpecification("test", data)
     assert r.get_data() == data
-    assert r.version == None
+    assert r.version is None
     assert r.get_url_parts() == ('github.com', 'ros/catkin')
 
     r.url = 'http://github.com/ros/catkin'

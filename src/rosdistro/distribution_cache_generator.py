@@ -138,7 +138,7 @@ class CacheYamlDumper(yaml.SafeDumper):
     def represent_mapping(self, tag, mapping, flow_style=False):
         """ Gives compact representation for the distribution_file section, while allowing the package
             XML cache sections room to breathe."""
-        if any([ x in mapping for x in ('source', 'release', 'doc')]):
+        if any([x in mapping for x in ('source', 'release', 'doc')]):
             flow_style = True
         return yaml.SafeDumper.represent_mapping(self, tag, mapping, flow_style)
 
