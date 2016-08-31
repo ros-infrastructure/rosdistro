@@ -65,7 +65,6 @@ def _get_package_xml(url, tag):
                 raise RuntimeError('Could not clone repository "%s" at tag "%s"' % (url, tag))
         else:
             # Old git doesn't support cloning a tag directly, so check it out after a full clone.
-            git = Git(base)
             result = git.command('clone', url, base)
             if result['returncode'] != 0:
                 raise RuntimeError('Could not clone repository "%s"' % url)
