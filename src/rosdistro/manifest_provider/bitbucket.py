@@ -65,7 +65,7 @@ def bitbucket_manifest_provider(_dist_name, repo, pkg_name):
 
     release_tag = repo.get_release_tag(pkg_name)
 
-    if release_tag not in repo.remote_tags:
+    if not repo.has_remote_tag(release_tag):
         raise RuntimeError('specified tag "%s" is not a git tag' % release_tag)
 
     url = 'https://bitbucket.org/%s/raw/%s/package.xml' % (path, release_tag)

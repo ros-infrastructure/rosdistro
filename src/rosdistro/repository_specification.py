@@ -55,12 +55,14 @@ class RepositorySpecification(object):
         return self._get_data()
 
     def get_url_parts(self):
-        """ Returns a tuple for the server and path.
-            Example ('github.com', 'ros/catkin') """
+        """ Returns a tuple for the server and path, eg ('github.com', 'ros/catkin') """
         match = self.VCS_REGEX.match(self.url)
         if not match:
             raise RuntimeError('VCS url "%s" does not match expected format.' % self.url)
         return match.groups()
+
+    def has_remote_tag(self, tag):
+        return tag in self.remote_tags
 
     @property
     def remote_refs(self):
