@@ -107,7 +107,7 @@ class CachedSourceManifestProvider(object):
         self._source_manifest_providers = source_manifest_providers
 
     def __call__(self, repo):
-        assert repo.url and repo.version
+        assert repo.url
         repo_cache = self._distribution_cache.source_repo_package_xmls.get(repo.name, None)
         if not repo_cache:
             # Use manifest providers to lazy load

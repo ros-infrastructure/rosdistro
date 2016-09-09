@@ -78,12 +78,25 @@ class Distribution(object):
             self._release_package_xmls[pkg_name] = package_xml
         return self._release_package_xmls[pkg_name]
 
-    def get_source_repo_package_xmls(self, repo):
-        """ Expects a SourceRepositorySpecification object. """
-        if not self._source_repo_package_xmls.get(repo.name, None):
+    def get_source_package_xml(self, pkg_name):
+        repo_name = self._distribution_file.source_packages[pkg_name].repository_name
+        repo_cache = self.get_source_repo_package_xmls(repo_name)
+        if repo_cache:
+            return repo_cache[pkg_name][1]
+        else:
+            return None
+
+    def get_source_repo_package_xmls(self, repo_name):
+        if repo_name in self._source_repo_package_xmls:
+            return self._source_repo_package_xmls[repo_name]
+        else:
             for mp in self._source_manifest_providers:
-                result = mp(repo)
-                if result is not None:
-                    break
-            self._source_repo_package_xmls[repo.name] = result
-        return self._source_repo_package_xmls[repo.name]
+                repo_cache = mp(self.repositories[repo_name].source_repository)
+                if repo_cache is not None:
+                    # Update map of package XMLs, and also list of known package names.
+                    self._source_repo_package_xmls[repo_name] = repo_cache
+                    for pkg_name in repo_cache:
+                        if pkg_name[0] != '_':
+                            self._distribution_file.source_packages[pkg_name] = Package(pkg_name, repo_name)
+                    return self._source_repo_package_xmls[repo_name]
+        return None
