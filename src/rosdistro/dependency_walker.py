@@ -53,11 +53,14 @@ class DependencyWalker(object):
             self._packages[pkg_name] = pkg
         return self._packages[pkg_name]
 
+    def _get_package_names(self):
+        return self._distribution_instance.release_packages.keys()
+
     def get_depends(self, pkg_name, depend_type, ros_packages_only=False):
         '''Return a set of package names which the package depends on.'''
         deps = self._get_dependencies(pkg_name, depend_type)
         if ros_packages_only:
-            deps &= set(self._distribution_instance.release_packages.keys())
+            deps &= set(self._get_package_names())
         return deps
 
     def get_recursive_depends(self, pkg_name, depend_types, ros_packages_only=False, ignore_pkgs=None, limit_depth=None):
@@ -87,10 +90,10 @@ class DependencyWalker(object):
         '''Return a set of package names which depend on the package.'''
         ignore_pkgs = ignore_pkgs or []
         depends_on = set([])
-        for name in self._distribution_instance.release_packages.keys():
+        for name in self._get_package_names():
             if name in ignore_pkgs:
                 continue
-            pkg = self._distribution_instance.release_packages[name]
+            pkg = self._get_package(name)
             repo = self._distribution_instance.repositories[pkg.repository_name].release_repository
             if repo is None or repo.version is None:
                 continue
@@ -122,3 +125,20 @@ class DependencyWalker(object):
             'test': pkg.test_depends
         }
         return set([d.name for d in deps[dep_type]])
+
+
+class SourceDependencyWalker(DependencyWalker):
+    def _get_package(self, pkg_name):
+        if pkg_name not in self._packages:
+            repo = self._distribution_instance.repositories[self._distribution_instance.source_packages[pkg_name].repository_name].source_repository
+            assert repo is not None, "Package '%s' in repository '%s' is missing a source entry." % (pkg_name, repo.name)
+            pkg_xml = self._distribution_instance.get_source_package_xml(pkg_name)
+            try:
+                pkg = parse_package_string(pkg_xml)
+            except InvalidPackage as e:
+                raise InvalidPackage(pkg_name + ': %s' % str(e))
+            self._packages[pkg_name] = pkg
+        return self._packages[pkg_name]
+
+    def _get_package_names(self):
+        return self._distribution_instance.source_packages.keys()

@@ -71,7 +71,8 @@ def generate_distribution_caches(index, dist_names=None, preclean=False,
 
 def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=False,
                                 include_source=False, debug=False):
-    dist, cache = _get_cached_distribution(index, dist_name, preclean=preclean, ignore_local=ignore_local)
+    dist, cache = _get_cached_distribution(index, dist_name, preclean=preclean, ignore_local=ignore_local,
+                                           include_source=include_source)
 
     print('- fetch missing release manifests')
     errors = []
@@ -114,8 +115,7 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
         print('- fetch source repository manifests')
         for repo_name in sorted(dist.repositories.keys()):
             if dist.repositories[repo_name].source_repository:
-                source_repo_cache = dist.get_source_repo_package_xmls(
-                    dist.repositories[repo_name].source_repository)
+                source_repo_cache = dist.get_source_repo_package_xmls(repo_name)
                 if debug:
                     print('  - fetch "%s"' % repo_name)
                 else:
@@ -165,7 +165,7 @@ class CacheYamlDumper(yaml.SafeDumper):
         return yaml.SafeDumper.represent_mapping(self, tag, mapping, flow_style)
 
 
-def _get_cached_distribution(index, dist_name, preclean=False, ignore_local=False):
+def _get_cached_distribution(index, dist_name, preclean=False, ignore_local=False, include_source=False):
     print('Build cache for "%s"' % dist_name)
     cache = None
     try:
@@ -198,7 +198,11 @@ def _get_cached_distribution(index, dist_name, preclean=False, ignore_local=Fals
         # since format 2 of the index file might contain a single value rather then a list
         if not isinstance(rel_file_data, list):
             rel_file_data = [rel_file_data]
-        # update cache with current distribution file
+        # if we're not including the source portion of the cache, strip it out of the existing cache
+        # in order to skip the potentially lengthy cache invalidation process.
+        if not include_source:
+            cache.source_repo_package_xmls = {}
+        # update cache with current distribution file, which filters existing cache by validity.
         cache.update_distribution(rel_file_data)
     else:
         print('- build cache from scratch')

@@ -51,6 +51,7 @@ class DistributionFile(object):
 
         self.repositories = {}
         self.release_packages = {}
+        self.source_packages = {}
         if 'repositories' in data and data['repositories']:
             for repo_name in sorted(data['repositories'].keys()):
                 repo_data = data['repositories'][repo_name]

@@ -34,6 +34,7 @@
 from .manifest_provider.bitbucket import bitbucket_manifest_provider
 from .manifest_provider.git import git_manifest_provider, git_source_manifest_provider
 from .manifest_provider.github import github_manifest_provider, github_source_manifest_provider
+from .package import Package
 
 
 class Distribution(object):

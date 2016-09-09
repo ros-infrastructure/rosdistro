@@ -39,10 +39,8 @@ import re
 import shutil
 import tempfile
 
-from rosdistro.vcs import Git
-
-
-workspace_base = '/tmp/rosdistro-workspace'
+from rosdistro import logger
+from rosdistro.vcs import Git, ref_is_hash
 
 
 def git_manifest_provider(_dist_name, repo, pkg_name):
@@ -87,7 +85,7 @@ def _temp_git_clone(url, ref):
     base = tempfile.mkdtemp('rosdistro')
     git = Git(cwd=base)
     try:
-        if git.version_gte('1.8.0') and not _ref_is_hash(ref):
+        if git.version_gte('1.8.0') and not ref_is_hash(ref):
             # Directly clone the required ref with least amount of additional history.
             # Available since git 1.8.0, but only works for tags and branches, not hashes:
             # https://git.kernel.org/cgit/git/git.git/tree/Documentation/git-clone.txt?h=v1.8.0#n158
@@ -107,7 +105,3 @@ def _temp_git_clone(url, ref):
         yield base
     finally:
         shutil.rmtree(base)
-
-
-def _ref_is_hash(ref):
-    return re.match('^[0-9a-f]{40}$', ref) is not None
