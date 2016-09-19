@@ -91,11 +91,11 @@ def _worker(work_queue):
             ls_remote_lines = subprocess.check_output(cmd).splitlines()
             for line in ls_remote_lines:
                 hash, ref = line.split('\t', 1)
-                if ref.endswith(freeze_version):
-                    if freeze_to_tag and ref.startswith('refs/tags/'):
-                        source_repo.version = ref.split('refs/tags/')[1]
-                    else:
-                        source_repo.version = hash
+                if freeze_to_tag and ref == 'refs/tags/%s' % freeze_version:
+                    source_repo.version = ref.split('refs/tags/')[1]
+                    break
+                elif ref in ('refs/heads/%s' % freeze_version, 'refs/tags/%s' % freeze_version):
+                    source_repo.version = hash
                     break
 
             work_queue.task_done()
