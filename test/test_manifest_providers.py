@@ -18,7 +18,7 @@ def test_cached():
         def __init__(self):
             self.release_package_xmls = {}
     dc = FakeDistributionCache()
-    cache = CachedManifestProvider(dc, [ github_manifest_provider ])
+    cache = CachedManifestProvider(dc, [github_manifest_provider])
     assert '</package>' in cache('kinetic', _genmsg_repo(), 'genmsg')
 
 
@@ -39,17 +39,15 @@ def test_github():
 def _genmsg_repo():
     return ReleaseRepositorySpecification('genmsg', {
         'url': 'https://github.com/ros-gbp/genmsg-release.git',
-        'tags': { 'release': 'release/kinetic/{package}/{version}' },
+        'tags': {'release': 'release/kinetic/{package}/{version}'},
         'version': '0.5.7-1'
     })
 
 
 def _rospeex_repo():
     return ReleaseRepositorySpecification('rospeex', {
-        'packages': [ 'rospeex', 'rospeex_msgs' ],
-        'tags': { 'release': 'release/indigo/{package}/{version}' },
+        'packages': ['rospeex', 'rospeex_msgs'],
+        'tags': {'release': 'release/indigo/{package}/{version}'},
         'url': 'https://bitbucket.org/rospeex/rospeex-release.git',
         'version': '2.14.7-0'
     })
-
-

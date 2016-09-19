@@ -31,15 +31,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from catkin_pkg.package import InvalidPackage, parse_package_string
 from contextlib import contextmanager
-from distutils.version import LooseVersion
 import os
 import re
 import shutil
 import tempfile
 
-from rosdistro import logger
 from rosdistro.vcs import Git
 
 
@@ -66,14 +63,14 @@ def _temp_git_clone(url, ref):
     git = Git(cwd=base)
     try:
         if git.version_gte('1.8.0') and not _ref_is_hash(ref):
-            # Directly clone the required ref with least amount of additional history. This behaviour
-            # has been available since git 1.8.0, but only works for tags and branches, not hashes:
+            # Directly clone the required ref with least amount of additional history.
+            # Available since git 1.8.0, but only works for tags and branches, not hashes:
             # https://git.kernel.org/cgit/git/git.git/tree/Documentation/git-clone.txt?h=v1.8.0#n158
             result = git.command('clone', url, '.', '--depth', '1', '--branch', ref)
             if result['returncode'] != 0:
                 raise RuntimeError('Could not clone repository "%s" at reference "%s"' % (url, ref))
         else:
-            # Old git doesn't support cloning a tag/branch directly, so check it out after a full clone.
+            # Old git doesn't support cloning a tag/branch directly, so full clone and checkout.
             result = git.command('clone', url, '.')
             if result['returncode'] != 0:
                 raise RuntimeError('Could not clone repository "%s"' % url)
@@ -88,4 +85,4 @@ def _temp_git_clone(url, ref):
 
 
 def _ref_is_hash(ref):
-    return re.match('^[0-9a-f]{40}$', ref) != None
+    return re.match('^[0-9a-f]{40}$', ref) is not None
