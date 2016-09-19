@@ -32,14 +32,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+# This function remains here as a compatibility shim because there
+# is code in rosinstall_generator which uses it in this location.
 def get_release_tag(repo, pkg_name):
-    data = {
-        'package': pkg_name
-    }
-    if repo.version is not None:
-        data['version'] = repo.version
-        data['upstream_version'] = repo.version.split('-')[0]
-    release_tag = repo.tags['release']
-    for k, v in data.items():
-        release_tag = release_tag.replace('{%s}' % k, v)
-    return release_tag
+    return repo.get_release_tag(pkg_name)

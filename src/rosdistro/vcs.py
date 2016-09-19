@@ -1,6 +1,7 @@
 # Software License Agreement (BSD License)
 #
 # Copyright (c) 2013, Open Source Robotics Foundation, Inc.
+# Copyright (c) 2016, Clearpath Robotics
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -31,33 +32,50 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-try:
-    from urllib.request import urlopen
-    from urllib.error import URLError
-except ImportError:
-    from urllib2 import urlopen
-    from urllib2 import URLError
-
-from rosdistro import logger
+from distutils.version import LooseVersion
+import os
+import subprocess
 
 
-def github_manifest_provider(_dist_name, repo, pkg_name):
-    assert repo.version
-    server, path = repo.get_url_parts()
-    if server != 'github.com':
-        logger.debug('Skip non-github url "%s"' % repo.url)
-        raise RuntimeError('can not handle non github urls')
+class Git(object):
+    _client_executable = None
+    _client_version = None
 
-    release_tag = repo.get_release_tag(pkg_name)
+    def __init__(self, cwd=None):
+        self.cwd = cwd
+        if not self._client_executable:
+            self.__class__._client_executable = _find_executable('git')
 
-    if not repo.has_remote_tag(release_tag):
-        raise RuntimeError('specified tag "%s" is not a git tag' % release_tag)
+    def command(self, *args):
+        assert self._client_executable is not None, "'git' not found"
+        return _run_command((self._client_executable,) + args, self.cwd)
 
-    url = 'https://raw.githubusercontent.com/%s/%s/package.xml' % (path, release_tag)
+    @classmethod
+    def version_gte(cls, version):
+        if not cls._client_version:
+            result = cls().command('--version')
+            cls._client_version = result['output'].split()[-1]
+        return LooseVersion(cls._client_version) >= LooseVersion(version)
+
+
+def _run_command(cmd, cwd=None, env=None):
+    result = {'cmd': ' '.join(cmd), 'cwd': cwd}
     try:
-        logger.debug('Load package.xml file from url "%s"' % url)
-        package_xml = urlopen(url).read().decode('utf-8')
-        return package_xml
-    except URLError as e:
-        logger.debug('- failed (%s), trying "%s"' % (e, url))
-        raise RuntimeError()
+        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+        output, _ = proc.communicate()
+        result['output'] = output.rstrip()
+        result['returncode'] = proc.returncode
+    except subprocess.CalledProcessError as e:
+        result['output'] = e.output
+        result['returncode'] = e.returncode
+    if not isinstance(result['output'], str):
+        result['output'] = result['output'].decode('utf-8')
+    return result
+
+
+def _find_executable(file_name):
+    for path in os.getenv('PATH').split(os.path.pathsep):
+        file_path = os.path.join(path, file_name)
+        if os.path.isfile(file_path) and os.access(file_path, os.X_OK):
+            return file_path
+    return None
