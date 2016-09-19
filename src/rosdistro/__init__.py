@@ -66,7 +66,7 @@ from .doc_file import DocFile
 from .external.appdirs import user_config_dir, site_config_dir
 from .index import Index
 from .loader import load_url
-from .manifest_provider.cache import CachedManifestProvider
+from .manifest_provider.cache import CachedManifestProvider, CachedSourceManifestProvider
 from .release import Release
 from .release_build import ReleaseBuild
 from .release_build_file import ReleaseBuildFile
@@ -157,7 +157,8 @@ def get_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False)
             cache = DistributionCache(dist_name, distribution_file_data=dist_file_data)
     dist = Distribution(
         cache.distribution_file,
-        [CachedManifestProvider(cache, Distribution.default_manifest_providers if allow_lazy_load else None)])
+        [CachedManifestProvider(cache, Distribution.default_manifest_providers if allow_lazy_load else None)],
+        [CachedSourceManifestProvider(cache, Distribution.default_source_manifest_providers if allow_lazy_load else None)])
     assert cache.distribution_file.name == dist_name
     return dist
 

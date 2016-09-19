@@ -59,6 +59,7 @@ class DistributionCache(object):
         self._distribution_file_data = data['distribution_file'] if data else distribution_file_data
         self.distribution_file = create_distribution_file(name, self._distribution_file_data)
         self.release_package_xmls = data['release_package_xmls'] if data else {}
+        self.source_repo_package_xmls = data['source_repo_package_xmls'] if data and 'source_repo_package_xmls' in data else {}
 
         # if Python 2 has converted the xml to unicode, convert it back
         for k, v in self.release_package_xmls.items():
@@ -72,6 +73,7 @@ class DistributionCache(object):
         data['name'] = self.distribution_file.name
         data['distribution_file'] = self._distribution_file_data
         data['release_package_xmls'] = self.release_package_xmls
+        data['source_repo_package_xmls'] = self.source_repo_package_xmls
         return data
 
     def update_distribution(self, distribution_file_data):

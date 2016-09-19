@@ -1,7 +1,9 @@
+# -*- coding: utf-8 -*-
+
 import os
 
 from rosdistro.manifest_provider.bitbucket import bitbucket_manifest_provider
-from rosdistro.manifest_provider.cache import CachedManifestProvider
+from rosdistro.manifest_provider.cache import CachedManifestProvider, sanitize_xml
 from rosdistro.manifest_provider.git import git_manifest_provider
 from rosdistro.manifest_provider.github import github_manifest_provider
 from rosdistro.release_repository_specification import ReleaseRepositorySpecification
@@ -27,13 +29,21 @@ def test_git():
 
 
 def test_git_legacy():
-    rosdistro.vcs._git_client_version = '1.7.0'
+    rosdistro.vcs.Git._client_version = '1.7.0'
     assert '</package>' in git_manifest_provider('kinetic', _genmsg_repo(), 'genmsg')
-    rosdistro.vcs._git_client_version = None
+    rosdistro.vcs.Git._client_version = None
 
 
 def test_github():
     assert '</package>' in github_manifest_provider('kinetic', _genmsg_repo(), 'genmsg')
+
+
+def test_sanitize():
+    assert '<a>abc</a>' in sanitize_xml('<a>ab<!-- comment -->c</a>')
+    assert '<a><b></b><c>ab c</c></a>' in sanitize_xml('<a><b> </b>  <c>  ab  c  </c></a>')
+
+    # This unicode check should be valid on both Python 2 and 3.
+    assert '<a>français</a>' in sanitize_xml('<a> français  </a>')
 
 
 def _genmsg_repo():
