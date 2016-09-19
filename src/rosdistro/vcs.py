@@ -34,6 +34,7 @@
 
 from distutils.version import LooseVersion
 import os
+import re
 import subprocess
 
 
@@ -56,6 +57,10 @@ class Git(object):
             result = cls().command('--version')
             cls._client_version = result['output'].split()[-1]
         return LooseVersion(cls._client_version) >= LooseVersion(version)
+
+
+def ref_is_hash(ref):
+    return re.match('^[0-9a-f]{40}$', ref) != None
 
 
 def _run_command(cmd, cwd=None, env=None):
