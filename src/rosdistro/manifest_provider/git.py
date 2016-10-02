@@ -66,6 +66,8 @@ def git_source_manifest_provider(repo):
 
             # Find package.xml files inside the repo.
             for package_path in find_package_paths(git_repo_path):
+                if package_path == '.':
+                    package_path = ''
                 with open(os.path.join(git_repo_path, package_path, 'package.xml'), 'r') as f:
                     package_xml = f.read()
                 try:
