@@ -65,14 +65,16 @@ def git_source_manifest_provider(repo):
             cache = { '_ref': result['output'] }
 
             # Find package.xml files inside the repo.
-            for package_path in catkin_pkg.packages.find_package_paths(git_repo_path):
+            for package_path in find_package_paths(git_repo_path):
+                if package_path == '.':
+                    package_path = ''
                 with open(os.path.join(git_repo_path, package_path, 'package.xml'), 'r') as f:
                     package_xml = f.read()
                 try:
                     name = parse_package_string(package_xml).name
                 except InvalidPackage:
                     raise RuntimeError('Unable to parse package.xml file found in %s' % repo.url)
-                cache[name] = [ path[len(git_repo_path)+1:], package_xml ]
+                cache[name] = [ package_path, package_xml ]
 
     except Exception as e:
         raise RuntimeError('Unable to fetch source package.xml files: %s' % e)

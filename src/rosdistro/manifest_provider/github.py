@@ -83,7 +83,7 @@ def github_source_manifest_provider(repo):
         authheader = 'Basic %s' % base64.b64encode('%s:%s' % (GITHUB_USER, GITHUB_PASSWORD))
         req.add_header('Authorization', authheader)
     try:
-        tree_json = json.load(urlopen(req))
+        tree_json = json.loads(urlopen(req).read().decode('utf-8'))
         logger.debug('- load repo tree from %s' % tree_url)
     except URLError as e:
         raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e))
@@ -107,14 +107,14 @@ def github_source_manifest_provider(repo):
                 return False
             if parent == '':
                 return True
-    package_xml_paths = filter(package_xml_in_parent, package_xml_paths)
+    package_xml_paths = list(filter(package_xml_in_parent, package_xml_paths))
 
     cache = { '_ref': tree_json['sha'] }
     for package_xml_path in package_xml_paths:
         url = 'https://raw.githubusercontent.com/%s/%s/%s' % \
             (path, cache['_ref'], package_xml_path + '/package.xml' if package_xml_path else 'package.xml')
         logger.debug('- load package.xml from %s' % url)
-        package_xml = urlopen(url).read()
+        package_xml = urlopen(url).read().decode('utf-8')
         name = parse_package_string(package_xml).name
         cache[name] = [ package_xml_path, package_xml ]
 
