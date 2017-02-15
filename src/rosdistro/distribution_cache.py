@@ -89,6 +89,8 @@ class DistributionCache(object):
         # determine differences in doc and source entries
         if len(distribution_file_data) == len(self._distribution_file_data):
             for old_data, new_data in zip(self._distribution_file_data, distribution_file_data):
+                if not new_data['repositories']:
+                    continue
                 for repo_name in sorted(new_data['repositories'].keys()):
                     repo = new_data['repositories'][repo_name]
                     for section in ['doc', 'source']:
