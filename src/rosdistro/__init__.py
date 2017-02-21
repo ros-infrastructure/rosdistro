@@ -48,7 +48,7 @@ import yaml
 
 logger = logging.getLogger('rosdistro')
 
-__version__ = '0.5.0'  # same version as in setup.py
+__version__ = '0.6.0'  # same version as in setup.py
 
 from .distribution import Distribution
 from .distribution_cache import DistributionCache
