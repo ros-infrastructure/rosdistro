@@ -35,6 +35,7 @@ from __future__ import print_function
 
 import difflib
 import sys
+
 import yaml
 
 from . import get_distribution_file, get_distribution_files, get_doc_build_files, get_doc_file, get_index, get_release_build_files, get_release_file, get_source_build_files, get_source_file

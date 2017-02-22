@@ -1,6 +1,6 @@
 import os
 
-from rosdistro import get_index, get_distribution_cache
+from rosdistro import get_distribution_cache, get_index
 
 FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'files'))
 

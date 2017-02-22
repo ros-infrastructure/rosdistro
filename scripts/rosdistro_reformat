@@ -46,12 +46,12 @@ def parse_args(args=sys.argv[1:]):
         description='Reformat the rosdistro files by reading and overwriting each file referenced from the index.'
     )
     add = parser.add_argument
-    add('index',
-        help='The path or url of the index.yaml file (must be either a local file or a file:// url)'
-    )
-    add('-n', '--dry-run', action='store_true',
-        help="Don't actually overwrite any files, just show what would be done."
-    )
+    add(
+        'index',
+        help='The path or url of the index.yaml file (must be either a local file or a file:// url)')
+    add(
+        '-n', '--dry-run', action='store_true',
+        help="Don't actually overwrite any files, just show what would be done.")
     return parser.parse_args(args)
 
 

@@ -32,7 +32,7 @@ class AptDistro:
     def depends(self, package, res=[], one=False):
         if package in self.dep:
             for d in self.dep[package]:
-                if not d in res:
+                if d not in res:
                     res.append(d)
                 if not one:
                     self.depends(d, res, one)
@@ -44,7 +44,7 @@ class AptDistro:
     def depends_on(self, package, res=[], one=False):
         for p, dep in self.dep.iteritems():
             if package in dep:
-                if not p in res:
+                if p not in res:
                     res.append(p)
                 if not one:
                     self.depends_on(p, res, one)

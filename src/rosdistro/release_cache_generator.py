@@ -37,9 +37,10 @@ import gzip
 import os
 import re
 import sys
-import yaml
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
+
+import yaml
 
 from . import _get_dist_file_data, get_cached_release, get_index, get_release_cache
 from .release_cache import ReleaseCache
@@ -91,7 +92,7 @@ def generate_release_cache(index, dist_name, preclean=False, debug=False):
         # check that package.xml is parseable
         try:
             pkg = parse_package_string(package_xml)
-        except InvalidPackage as e:
+        except InvalidPackage:
             errors.append('%s: invalid package.xml file for package "%s"' % (dist_name, pkg_name))
             continue
         # check that version numbers match (at least without deb inc)

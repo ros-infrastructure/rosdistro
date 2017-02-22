@@ -48,6 +48,8 @@ except ImportError:
 from rosdistro.loader import load_url
 from rosdistro.release_file import ReleaseFile
 
+import yaml
+
 
 BASE_SRC_URL = 'https://raw.github.com/ros/rosdistro/master'
 
@@ -152,7 +154,7 @@ def _get_tag_template(dist_name, repo, pkg_name, last_repo=None):
 def _github_raw_url(url, tag):
     url = url.replace('.git', '/tree/%s/' % tag)
     url = url.replace('git://', 'https://')
-    #url = url.replace('https://', 'https://raw.')
+    # url = url.replace('https://', 'https://raw.')
     return url
 
 
@@ -212,7 +214,7 @@ def convert_doc(dist_name):
                 rosinstalls[name] = data
     shutil.rmtree(base)
     # currently no doc has depends in groovy and hydro
-    #assert not rosinstall_depends
+    # assert not rosinstall_depends
 
     output = {}
     output['type'] = 'doc'
