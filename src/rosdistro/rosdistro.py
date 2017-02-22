@@ -4,7 +4,6 @@ import sys
 import tarfile
 import tempfile
 import threading
-import urllib
 try:
     from urllib.request import urlopen
     from urllib.error import HTTPError
@@ -12,9 +11,11 @@ except ImportError:
     from urllib2 import urlopen
     from urllib2 import HTTPError
 
+import yaml
+
+from .common import error
 from .common import info
 from .common import warning
-from .common import error
 
 RES_DICT = {'build': [], 'buildtool': [], 'test': [], 'run': []}
 RES_TREE = {'build': {}, 'buildtool': {}, 'test': {}, 'run': {}}
@@ -103,11 +104,11 @@ class RosDistro:
 
         # merge and recurse
         for d in deps_on[dep_type]:
-            if not d in res:
+            if d not in res:
                 res.append(d)
                 if depth == 0 or curr_depth < depth:
                     for next_dep_type in dep_dict[dep_type]:
-                        self._get_depends_on_recursive(d, next_dep_type, dep_dict, res, depth, curr_depth+1)
+                        self._get_depends_on_recursive(d, next_dep_type, dep_dict, res, depth, curr_depth + 1)
 
     def _get_depends1(self, package_name):
         p = self.distro_file.packages[package_name]
@@ -128,12 +129,12 @@ class RosDistro:
 
         # merge and recurse
         for d in deps1[dep_type]:
-            if not d in res:
+            if d not in res:
                 res.append(d)
                 if depth == 0 or curr_depth < depth:
                     if d in self.get_packages():  # recurse on packages only
                         for next_dep_type in dep_dict[dep_type]:
-                            self._get_depends_recursive(d, next_dep_type, dep_dict, res, depth, curr_depth+1)
+                            self._get_depends_recursive(d, next_dep_type, dep_dict, res, depth, curr_depth + 1)
 
     def _convert_to_pkg_list(self, items):
         if type(items) != list:
@@ -142,7 +143,7 @@ class RosDistro:
         for i in items:
             if i in self.distro_file.repositories:
                 for p in self.distro_file.repositories[i].packages:
-                    if not p in pkgs:
+                    if p not in pkgs:
                         pkgs.append(p)
             elif i in self.distro_file.packages:
                 if not self.distro_file.packages[i] in pkgs:
@@ -343,9 +344,9 @@ class RosDependencies:
         data = tar.extractfile(self.file_name)
         deps = yaml.load(data.read())
         if not deps \
-           or not 'cache_version' in deps \
+           or 'cache_version' not in deps \
            or deps['cache_version'] != CACHE_VERSION \
-           or not 'repositories' in deps:
+           or 'repositories' not in deps:
             raise
         return deps['repositories']
 
@@ -355,9 +356,9 @@ class RosDependencies:
             with open(self.local_url) as f:
                 deps = yaml.safe_load(f.read())
                 if not deps \
-                   or not 'cache_version' in deps \
+                   or 'cache_version' not in deps \
                    or deps['cache_version'] != CACHE_VERSION \
-                   or not 'repositories' in deps:
+                   or 'repositories' not in deps:
                     raise
                 return deps['repositories']
         except Exception:
@@ -391,7 +392,7 @@ def get_package_dependencies(package_xml):
 
     pkg = catkin_pkg.parse_package_string(package_xml)
     depends1 = {'build': [d.name for d in pkg.build_depends],
-                'buildtool':  [d.name for d in pkg.buildtool_depends],
-                'test':  [d.name for d in pkg.test_depends],
-                'run':  [d.name for d in pkg.run_depends]}
+                'buildtool': [d.name for d in pkg.buildtool_depends],
+                'test': [d.name for d in pkg.test_depends],
+                'run': [d.name for d in pkg.run_depends]}
     return depends1

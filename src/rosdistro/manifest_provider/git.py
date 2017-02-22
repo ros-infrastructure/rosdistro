@@ -31,15 +31,15 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from catkin_pkg.package import InvalidPackage, parse_package_string
-from catkin_pkg.packages import find_package_paths
-from contextlib import contextmanager
 import os
-import re
 import shutil
 import tempfile
 
-from rosdistro import logger
+from contextlib import contextmanager
+
+from catkin_pkg.package import InvalidPackage, parse_package_string
+from catkin_pkg.packages import find_package_paths
+
 from rosdistro.vcs import Git, ref_is_hash
 
 
@@ -62,7 +62,7 @@ def git_source_manifest_provider(repo):
         with _temp_git_clone(repo.url, repo.version) as git_repo_path:
             # Include the git hash in our cache dictionary.
             result = Git(git_repo_path).command('rev-parse', 'HEAD')
-            cache = { '_ref': result['output'] }
+            cache = {'_ref': result['output']}
 
             # Find package.xml files inside the repo.
             for package_path in find_package_paths(git_repo_path):
@@ -74,7 +74,7 @@ def git_source_manifest_provider(repo):
                     name = parse_package_string(package_xml).name
                 except InvalidPackage:
                     raise RuntimeError('Unable to parse package.xml file found in %s' % repo.url)
-                cache[name] = [ package_path, package_xml ]
+                cache[name] = [package_path, package_xml]
 
     except Exception as e:
         raise RuntimeError('Unable to fetch source package.xml files: %s' % e)

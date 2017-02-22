@@ -38,12 +38,13 @@ from __future__ import print_function
 import argparse
 import os.path
 import sys
-import yaml
 
 from rosdistro import get_distribution
+from rosdistro.freeze_source import CONCURRENT_DEFAULT, freeze_distribution_sources
 from rosdistro.index import Index
-from rosdistro.freeze_source import freeze_distribution_sources, CONCURRENT_DEFAULT
 from rosdistro.writer import yaml_from_distribution_file
+
+import yaml
 
 
 def parse_args(args=sys.argv[1:]):
@@ -70,8 +71,9 @@ def parse_args(args=sys.argv[1:]):
 
 def main():
     args = parse_args()
-    index = Index(yaml.safe_load(args.index),
-            'file://%s' % os.path.dirname(os.path.abspath(args.index.name)))
+    index = Index(
+        yaml.safe_load(args.index),
+        'file://%s' % os.path.dirname(os.path.abspath(args.index.name)))
 
     if not args.dist_names:
         args.dist_names = sorted(index.distributions.keys())
@@ -86,8 +88,9 @@ def main():
             dist_url = dist_url[0]
 
         dist = get_distribution(index, dist_name)
-        freeze_distribution_sources(dist, release_version=args.release_version, release_tag=args.release_tag,
-                                    concurrent_ops=args.jobs, quiet=args.quiet)
+        freeze_distribution_sources(
+            dist, release_version=args.release_version, release_tag=args.release_tag,
+            concurrent_ops=args.jobs, quiet=args.quiet)
 
         with open(dist_url.split('://')[1], 'w') as f:
             f.write(yaml_from_distribution_file(dist))

@@ -31,8 +31,9 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from rosdistro import logger
 from xml.dom import minidom
+
+from rosdistro import logger
 
 
 def sanitize_xml(xml_string):

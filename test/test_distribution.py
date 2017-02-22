@@ -1,9 +1,10 @@
 import os
-import yaml
 
-from rosdistro import get_index, get_distribution_file, get_distribution_files
+from rosdistro import get_distribution_file, get_distribution_files, get_index
 from rosdistro.distribution_file import DistributionFile
 from rosdistro.loader import load_url
+
+import yaml
 
 FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'files'))
 

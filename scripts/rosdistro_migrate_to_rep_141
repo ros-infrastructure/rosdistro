@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
 from __future__ import print_function
+
 import argparse
 import gzip
 import os
-import yaml
 
 try:
     from cStringIO import StringIO
@@ -13,6 +13,8 @@ except ImportError:
 
 from rosdistro.loader import load_url
 from rosdistro.verify import _to_yaml, _yaml_header_lines
+
+import yaml
 
 
 def migrate(index_yaml):
@@ -90,8 +92,8 @@ def generate_repos_url(repos_url, doc_url, release_url, source_url):
                 repo_data['release']['packages'] = sorted(pkg_names)
             for pkg_name in pkgs:
                 if pkgs[pkg_name] is not None:
-                    assert not 'status' in pkgs[pkg_name]
-                    assert not 'status_description' in pkgs[pkg_name]
+                    assert 'status' not in pkgs[pkg_name]
+                    assert 'status_description' not in pkgs[pkg_name]
 
         repo_data.update(get_dict_parts(release_repo_data, ['status', 'status_description']))
 
@@ -104,7 +106,7 @@ def generate_repos_url(repos_url, doc_url, release_url, source_url):
 
     for repo_name in doc_data['repositories']:
         doc_repo_data = doc_data['repositories'][repo_name]
-        if not repo_name in data['repositories']:
+        if repo_name not in data['repositories']:
             data['repositories'][repo_name] = {}
         data['repositories'][repo_name]['doc'] = get_dict_parts(doc_repo_data, ['type', 'url', 'version'])
 
@@ -115,7 +117,7 @@ def generate_repos_url(repos_url, doc_url, release_url, source_url):
 
     for repo_name in source_data['repositories']:
         source_repo_data = source_data['repositories'][repo_name]
-        if not repo_name in data['repositories']:
+        if repo_name not in data['repositories']:
             data['repositories'][repo_name] = {}
         data['repositories'][repo_name]['source'] = get_dict_parts(source_repo_data, ['type', 'url', 'version'])
 

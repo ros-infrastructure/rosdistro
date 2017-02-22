@@ -1,9 +1,10 @@
 import os
-import yaml
 
 from rosdistro import get_index, get_source_build_files
 from rosdistro.loader import load_url
 from rosdistro.source_build_file import SourceBuildFile
+
+import yaml
 
 FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'files'))
 

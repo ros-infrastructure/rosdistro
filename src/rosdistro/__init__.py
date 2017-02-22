@@ -48,19 +48,19 @@ import yaml
 
 logger = logging.getLogger('rosdistro')
 
+from .distribution import Distribution  # noqa
+from .distribution_cache import DistributionCache  # noqa
+from .distribution_file import DistributionFile  # noqa
+from .distribution_file import create_distribution_file  # noqa
+from .external.appdirs import site_config_dir, user_config_dir  # noqa
+from .index import Index  # noqa
+from .loader import load_url  # noqa
+from .manifest_provider.cache import CachedManifestProvider, CachedSourceManifestProvider  # noqa
+
+
 __version__ = '0.6.0'  # same version as in setup.py
 
-from .distribution import Distribution
-from .distribution_cache import DistributionCache
-from .distribution_file import create_distribution_file
-from .distribution_file import DistributionFile
-from .external.appdirs import user_config_dir, site_config_dir
-from .index import Index
-from .loader import load_url
-from .manifest_provider.cache import CachedManifestProvider, CachedSourceManifestProvider
-
-### index information
-
+# index information
 
 DEFAULT_INDEX_URL = 'https://raw.githubusercontent.com/ros/rosdistro/master/index.yaml'
 
@@ -105,8 +105,7 @@ def get_index(url):
     return Index(data, base_url, url_query=url_parts.query)
 
 
-### distribution information
-
+# distribution information
 
 def get_distribution(index, dist_name):
     dist_file = get_distribution_file(index, dist_name)
@@ -172,8 +171,7 @@ def get_distribution_cache(index, dist_name):
     return DistributionCache(dist_name, data)
 
 
-### internal
-
+# internal
 
 def _get_dist_file_data(index, dist_name, type_):
     if dist_name not in index.distributions.keys():

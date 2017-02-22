@@ -37,16 +37,19 @@ import gzip
 import os
 import re
 import sys
-import yaml
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
 
-from . import _get_dist_file_data, get_cached_distribution, get_index, get_distribution_cache
+import yaml
+
+from . import _get_dist_file_data, get_cached_distribution, get_distribution_cache, get_index
 from .distribution_cache import DistributionCache
 
 
-def generate_distribution_caches(index, dist_names=None, preclean=False,
-    ignore_local=False, include_source=False, debug=False):
+def generate_distribution_caches(
+    index, dist_names=None, preclean=False,
+    ignore_local=False, include_source=False, debug=False
+):
     if os.path.isfile(index):
         index = 'file://' + os.path.abspath(index)
     index = get_index(index)
@@ -58,7 +61,8 @@ def generate_distribution_caches(index, dist_names=None, preclean=False,
     caches = {}
     for dist_name in dist_names:
         try:
-            cache = generate_distribution_cache(index, dist_name, preclean=preclean,
+            cache = generate_distribution_cache(
+                index, dist_name, preclean=preclean,
                 ignore_local=ignore_local, include_source=include_source, debug=debug)
         except RuntimeError as e:
             errors.append(str(e))
@@ -71,8 +75,9 @@ def generate_distribution_caches(index, dist_names=None, preclean=False,
 
 def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=False,
                                 include_source=False, debug=False):
-    dist, cache = _get_cached_distribution(index, dist_name, preclean=preclean, ignore_local=ignore_local,
-                                           include_source=include_source)
+    dist, cache = _get_cached_distribution(
+        index, dist_name, preclean=preclean, ignore_local=ignore_local,
+        include_source=include_source)
 
     print('- fetch missing release manifests')
     errors = []

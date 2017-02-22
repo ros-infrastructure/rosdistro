@@ -32,10 +32,11 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from distutils.version import LooseVersion
 import os
 import re
 import subprocess
+
+from distutils.version import LooseVersion
 
 
 class Git(object):
@@ -60,7 +61,7 @@ class Git(object):
 
 
 def ref_is_hash(ref):
-    return re.match('^[0-9a-f]{40}$', ref) != None
+    return re.match('^[0-9a-f]{40}$', ref) is not None
 
 
 def _run_command(cmd, cwd=None, env=None):

@@ -1,15 +1,12 @@
 # -*- coding: utf-8 -*-
 
-import os
-
+import rosdistro.vcs
 from rosdistro.manifest_provider.bitbucket import bitbucket_manifest_provider
 from rosdistro.manifest_provider.cache import CachedManifestProvider, sanitize_xml
 from rosdistro.manifest_provider.git import git_manifest_provider, git_source_manifest_provider
 from rosdistro.manifest_provider.github import github_manifest_provider, github_source_manifest_provider
 from rosdistro.release_repository_specification import ReleaseRepositorySpecification
 from rosdistro.source_repository_specification import SourceRepositorySpecification
-
-import rosdistro.vcs
 
 
 def test_bitbucket():
@@ -90,17 +87,20 @@ def _genmsg_release_repo():
         'version': '0.5.7-1'
     })
 
+
 def _genmsg_source_repo():
     return SourceRepositorySpecification('genmsg', {
         'url': 'https://github.com/ros/genmsg.git',
         'version': '0.5.7'
     })
 
+
 def _ros_source_repo():
     return SourceRepositorySpecification('ros', {
         'url': 'https://github.com/ros/ros.git',
         'version': 'kinetic-devel'
     })
+
 
 def _rospeex_release_repo():
     return ReleaseRepositorySpecification('rospeex', {

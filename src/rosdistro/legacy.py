@@ -39,6 +39,7 @@ try:
 except ImportError:
     from io import BytesIO as StringIO
 import sys
+
 import yaml
 
 from . import _get_dist_file_data
@@ -46,10 +47,10 @@ from . import logger
 
 # legacy imports
 from . import common
-from .rosdistro import walks
-from .rosdistro import RosDistro
-from .develdistro import DevelDistro
 from .aptdistro import AptDistro
+from .develdistro import DevelDistro
+from .rosdistro import RosDistro
+from .rosdistro import walks
 
 from .doc_build_file import DocBuildFile
 from .doc_file import DocFile

@@ -33,11 +33,12 @@
 
 from __future__ import print_function
 
+import sys
+
 from . import logger
 from .distribution_file import create_distribution_file
 from .package import Package
 from .vcs import Git, ref_is_hash
-import sys
 
 
 class DistributionCache(object):

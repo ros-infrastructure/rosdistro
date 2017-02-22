@@ -39,10 +39,11 @@ import argparse
 import gzip
 import logging
 import sys
-import yaml
 
 from rosdistro import logger
 from rosdistro.distribution_cache_generator import CacheYamlDumper, generate_distribution_caches
+
+import yaml
 
 logging.basicConfig(level=logging.INFO)
 
@@ -52,24 +53,24 @@ def parse_args(args=sys.argv[1:]):
         description='Build the cache for rosdistro distributions.'
     )
     add = parser.add_argument
-    add('index',
-        help='The path or url of the index.yaml file (must be either a local file or a file:// url)'
-    )
-    add('dist_names', nargs='*',
-        help='The names of the distributions (default: all)'
-    )
-    add('--debug', action='store_true', default=False,
-        help='Output debug messages'
-    )
-    add('--preclean', action='store_true', default=False,
-        help='Build the cache from scratch instead of reusing cached data'
-    )
-    add('--ignore-local', action='store_true', default=False,
-        help='Ignore locally available cache'
-    )
-    add('--include-source', action='store_true', default=False,
-        help='Also include source branch package XMLs in the cache'
-    )
+    add(
+        'index',
+        help='The path or url of the index.yaml file (must be either a local file or a file:// url)')
+    add(
+        'dist_names', nargs='*',
+        help='The names of the distributions (default: all)')
+    add(
+        '--debug', action='store_true', default=False,
+        help='Output debug messages')
+    add(
+        '--preclean', action='store_true', default=False,
+        help='Build the cache from scratch instead of reusing cached data')
+    add(
+        '--ignore-local', action='store_true', default=False,
+        help='Ignore locally available cache')
+    add(
+        '--include-source', action='store_true', default=False,
+        help='Also include source branch package XMLs in the cache')
     return parser.parse_args(args)
 
 
@@ -80,7 +81,8 @@ def main():
         logger.level = logging.DEBUG
 
     try:
-        caches = generate_distribution_caches(args.index, dist_names=args.dist_names, preclean=args.preclean,
+        caches = generate_distribution_caches(
+            args.index, dist_names=args.dist_names, preclean=args.preclean,
             ignore_local=args.ignore_local, include_source=args.include_source, debug=args.debug)
     except RuntimeError as e:
         print(str(e), file=sys.stderr)
@@ -103,6 +105,7 @@ def main():
                 data = data.encode('utf-8')
             print('- write compressed cache file "%s-cache.yaml.gz"' % dist_name)
             f.write(data)
+
 
 if __name__ == '__main__':
     main()
