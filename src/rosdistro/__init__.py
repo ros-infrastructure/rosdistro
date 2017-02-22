@@ -58,7 +58,7 @@ from .loader import load_url  # noqa
 from .manifest_provider.cache import CachedManifestProvider, CachedSourceManifestProvider  # noqa
 
 
-__version__ = '0.6.0'  # same version as in setup.py
+__version__ = '0.6.1'  # same version as in setup.py
 
 # index information
 
