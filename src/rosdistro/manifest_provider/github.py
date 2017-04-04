@@ -53,7 +53,7 @@ GITHUB_PASSWORD = os.getenv('GITHUB_PASSWORD', None)
 def github_manifest_provider(_dist_name, repo, pkg_name):
     assert repo.version
     server, path = repo.get_url_parts()
-    if server != 'github.com':
+    if not server.endswith('github.com'):
         logger.debug('Skip non-github url "%s"' % repo.url)
         raise RuntimeError('can not handle non github urls')
 
@@ -74,7 +74,7 @@ def github_manifest_provider(_dist_name, repo, pkg_name):
 
 def github_source_manifest_provider(repo):
     server, path = repo.get_url_parts()
-    if server != 'github.com':
+    if not server.endswith('github.com'):
         logger.debug('Skip non-github url "%s"' % repo.url)
         raise RuntimeError('can not handle non github urls')
 

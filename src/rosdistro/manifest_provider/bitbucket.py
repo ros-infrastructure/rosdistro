@@ -58,7 +58,7 @@ def bitbucket_manifest_provider(_dist_name, repo, pkg_name):
     assert repo.version
     server, path = repo.get_url_parts()
 
-    if server != 'bitbucket.org':
+    if not server.endswith('bitbucket.org'):
         logger.debug('Skip non-bitbucket url "%s"' % repo.url)
         raise RuntimeError('Cannot handle non bitbucket url.')
 
