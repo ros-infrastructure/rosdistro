@@ -19,3 +19,9 @@ def test_repository_specification():
 
     r.url = 'git@example.com:a/b/c/d/e.git'
     assert r.get_url_parts() == ('example.com', 'a/b/c/d/e')
+
+    r.url = 'https://1234567890abcdeABCDE1234567890abcdeABCDE@example.com:a/b/c/d/e.git'
+    parts = r.get_url_parts()
+    assert(len(parts) == 2)
+    assert(parts[0].endswith('example.com'))
+    assert(parts[1] == 'a/b/c/d/e')
