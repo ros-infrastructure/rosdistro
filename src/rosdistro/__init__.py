@@ -194,4 +194,5 @@ def _get_dist_file_data(index, dist_name, type_):
             data.append(_load_yaml_data(u))
     return data
 
-from .legacy import *
+
+from .legacy import *  # noqa

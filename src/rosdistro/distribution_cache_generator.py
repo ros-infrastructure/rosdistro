@@ -120,7 +120,7 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
         print('- fetch source repository manifests')
         for repo_name in sorted(dist.repositories.keys()):
             if dist.repositories[repo_name].source_repository:
-                source_repo_cache = dist.get_source_repo_package_xmls(repo_name)
+                dist.get_source_repo_package_xmls(repo_name)
                 if debug:
                     print('  - fetch "%s"' % repo_name)
                 else:

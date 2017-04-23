@@ -46,11 +46,11 @@ from . import _get_dist_file_data
 from . import logger
 
 # legacy imports
-from . import common
-from .aptdistro import AptDistro
-from .develdistro import DevelDistro
-from .rosdistro import RosDistro
-from .rosdistro import walks
+from . import common  # noqa
+from .aptdistro import AptDistro  # noqa
+from .develdistro import DevelDistro  # noqa
+from .rosdistro import RosDistro  # noqa
+from .rosdistro import walks  # noqa
 
 from .doc_build_file import DocBuildFile
 from .doc_file import DocFile
