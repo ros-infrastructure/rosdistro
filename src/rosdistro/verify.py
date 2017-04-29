@@ -106,7 +106,7 @@ def _reformat_files(index, dist_name, loader_function, yaml_url, file_type):
         if not url.startswith('file://'):
             print('Skipping non-file url: %s' % url)
             continue
-        identical = _check_file_identical(f, yaml_url[i], file_type)
+        identical = _check_file_identical(f, yaml_url[i], file_type, ignore_comments=True)
         all_identical &= identical
         path = url[7:]
         if identical:
@@ -128,16 +128,22 @@ def _check_files_identical(index, dist_name, loader_function, yaml_url, file_typ
         files = [files]
         yaml_url = [yaml_url]
     for i, f in enumerate(files):
-        identical &= _check_file_identical(f, yaml_url[i], file_type)
+        identical &= _check_file_identical(f, yaml_url[i], file_type, ignore_comments=True)
     return identical
 
 
-def _check_file_identical(dist_file, yaml_url, file_type):
+def _check_file_identical(dist_file, yaml_url, file_type, ignore_comments=False):
     yaml_str = load_url(yaml_url)
     yaml_lines = yaml_str.splitlines()
     dist_file_data = dist_file.get_data()
     dist_file_lines = _to_yaml(dist_file_data).splitlines()
     dist_file_lines[0:0] = _yaml_header_lines(file_type, dist_file_data['version'])
+
+    if ignore_comments:
+        yaml_header = _yaml_header_lines(file_type, dist_file_data['version'])
+        yaml_lines = [
+            line for line in yaml_lines
+            if line in yaml_header or not line.lstrip().startswith('#')]
 
     if yaml_lines != dist_file_lines:
         diff = difflib.unified_diff(
