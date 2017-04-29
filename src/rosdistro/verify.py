@@ -140,16 +140,10 @@ def _check_file_identical(dist_file, yaml_url, file_type, ignore_comments=False)
     dist_file_lines[0:0] = _yaml_header_lines(file_type, dist_file_data['version'])
 
     if ignore_comments:
-        import re
-        yaml_lines_to_remove = []
         yaml_header = _yaml_header_lines(file_type, dist_file_data['version'])
-        for yaml_line in yaml_lines:
-            if yaml_line in yaml_header:
-                continue
-            elif re.match(r'(^#| +#)', yaml_line):
-                yaml_lines_to_remove.append(yaml_line)
-        for yaml_line_to_remove in yaml_lines_to_remove:
-            yaml_lines.remove(yaml_line_to_remove)
+        yaml_lines = [
+            line for line in yaml_lines
+            if line in yaml_header or not line.lstrip().startswith('#')]
 
     if yaml_lines != dist_file_lines:
         diff = difflib.unified_diff(
