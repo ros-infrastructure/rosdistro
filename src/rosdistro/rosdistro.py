@@ -203,7 +203,6 @@ class RosPackage:
             url = url.replace('.git', '/{0}/package.xml'.format(release_tag))
             url = url.replace('git://', 'https://')
             url = url.replace('https://', 'https://raw.')
-
             try:
                 try:
                     package_xml = urlopen(url).read()
