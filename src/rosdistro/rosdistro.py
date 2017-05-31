@@ -199,10 +199,10 @@ class RosPackage:
         repo = self.repository
         if 'github.com' in repo.url:
             url = repo.url
-            release_tag = 'release/{0}/{1}/{2}/package.xml'.format(rosdistro, self.name, repo.version)
+            release_tag = 'release/{0}/{1}/{2}'.format(rosdistro, self.name, repo.version)
+            url = url.replace('.git', '/{0}/package.xml'.format(release_tag))
             url = url.replace('git://', 'https://')
             url = url.replace('https://', 'https://raw.')
-            url = url.replace('.git', release_tag)
 
             try:
                 try:
@@ -211,7 +211,7 @@ class RosPackage:
                     msg = "Failed to read package.xml file from url '{0}': {1}".format(url, e)
                     warning(msg)
                     upstream_version = repo.version.split('-')[0]
-                    legacy_release_tag = 'release/{0}/{1}/package.xml'.format(self.name, upstream_version)
+                    legacy_release_tag = 'release/{0}/{1}'.format(self.name, upstream_version)
                     url = url.replace(release_tag, legacy_release_tag)
                     info("Trying to read from legacy-style url '{0}' instead".format(url))
                     package_xml = urlopen(url).read()
