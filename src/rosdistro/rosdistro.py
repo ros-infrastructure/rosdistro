@@ -199,8 +199,7 @@ class RosPackage:
         repo = self.repository
         if 'github.com' in repo.url:
             url = repo.url
-            upstream_version = repo.version.split('-')[0]
-            release_tag = 'release/{0}/{1}'.format(self.name, upstream_version)
+            release_tag = 'release/{0}/{1}/{2}'.format(rosdistro, self.name, repo.version)
             url = url.replace('.git', '/{0}/package.xml'.format(release_tag))
             url = url.replace('git://', 'https://')
             url = url.replace('https://', 'https://raw.')
@@ -210,13 +209,10 @@ class RosPackage:
                 except Exception as e:
                     msg = "Failed to read package.xml file from url '{0}': {1}".format(url, e)
                     warning(msg)
-                    url = repo.url
-                    release_tag = 'release/{0}/{1}/{2}'.format(rosdistro, self.name, repo.version)
-                    tail = '/{0}/package.xml'.format(release_tag)
-                    url = url.replace('.git', tail)
-                    url = url.replace('git://', 'https://')
-                    url = url.replace('https://', 'https://raw.')
-                    info("Trying to read from url '{0}' instead".format(url))
+                    upstream_version = repo.version.split('-')[0]
+                    legacy_release_tag = 'release/{0}/{1}'.format(self.name, upstream_version)
+                    url = url.replace(release_tag, legacy_release_tag)
+                    info("Trying to read from legacy-style url '{0}' instead".format(url))
                     package_xml = urlopen(url).read()
             except Exception as e:
                 msg += '\nAND\n'
