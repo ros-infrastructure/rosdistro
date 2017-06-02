@@ -222,7 +222,18 @@ class RosPackage:
             self._release_tags[rosdistro] = release_tag
             return package_xml, release_tag
         else:
-            raise Exception("Non-github repositories are net yet supported by the rosdistro tool")
+            release_tag = 'release/{0}/{1}/{2}'.format(rosdistro, self.name, repo.version)
+            url = repo.url
+            try:
+                # URL extension for GitLab/BitBucket repos
+                url = url.replace('.git', '/raw/{0}/package.xml'.format(release_tag))
+                package_xml = urlopen(url).read()
+                self._package_xmls[rosdistro] = package_xml
+                self._release_tags[rosdistro] = release_tag
+                return package_xml, release_tag
+            except Exception as e:
+                msg = "Failed to read package.xml file from url '{0}': {1}".format(url, e))
+                raise RuntimeError(msg)
 
     def get_package_xml(self, rosdistro):
         if rosdistro not in self._package_xmls:
