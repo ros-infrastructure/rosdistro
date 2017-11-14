@@ -110,7 +110,6 @@ class DependencyWalker(object):
             next_pkg_to_check = pkgs_to_check.pop()
             for depend_type in depend_types:
                 deps = self.get_depends_on(next_pkg_to_check, depend_type, ignore_pkgs=ignore_pkgs)
-x
                 new_deps = deps - depends_on
                 pkgs_to_check |= new_deps
                 depends_on |= new_deps
