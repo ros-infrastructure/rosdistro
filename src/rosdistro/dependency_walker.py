@@ -93,8 +93,7 @@ class DependencyWalker(object):
         for name in self._get_package_names():
             if name in ignore_pkgs:
                 continue
-            pkg = self._get_package(name)
-            repo = self._distribution_instance.repositories[pkg.repository_name].release_repository
+            repo = self._get_package_repo(name)
             if repo is None or repo.version is None:
                 continue
             deps = self._get_dependencies(name, depend_type)
@@ -126,6 +125,9 @@ class DependencyWalker(object):
         }
         return set([d.name for d in deps[dep_type]])
 
+    def _get_package_repo(self, name):
+        return self._distribution_instance.repositories[self._distribution_instance.release_packages[name].repository_name].release_repository
+
 
 class SourceDependencyWalker(DependencyWalker):
     def _get_package(self, pkg_name):
@@ -142,3 +144,6 @@ class SourceDependencyWalker(DependencyWalker):
 
     def _get_package_names(self):
         return self._distribution_instance.source_packages.keys()
+
+    def _get_package_repo(self, name):
+        return self._distribution_instance.repositories[self._distribution_instance.source_packages[name].repository_name].source_repository
