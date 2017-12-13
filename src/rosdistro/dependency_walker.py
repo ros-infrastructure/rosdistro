@@ -126,8 +126,7 @@ class DependencyWalker(object):
         return set([d.name for d in deps[dep_type]])
 
     def _get_package_repo(self, name):
-        repo = self._distribution_instance.repositories[self._distribution_instance.release_packages[name].repository_name].release_repository
-        return repo
+        return self._distribution_instance.repositories[self._distribution_instance.release_packages[name].repository_name].release_repository
 
 
 class SourceDependencyWalker(DependencyWalker):
@@ -147,5 +146,4 @@ class SourceDependencyWalker(DependencyWalker):
         return self._distribution_instance.source_packages.keys()
 
     def _get_package_repo(self, name):
-        repo = self._distribution_instance.repositories[self._distribution_instance.source_packages[name].repository_name].source_repository
-        return repo
+        return self._distribution_instance.repositories[self._distribution_instance.source_packages[name].repository_name].source_repository
