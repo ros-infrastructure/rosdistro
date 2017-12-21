@@ -82,12 +82,28 @@ def freeze_distribution_sources(dist, release_version=False, release_tag=False,
         print("")
 
 
+# Get the repo commit information
+def _getRepoInfo(source_repo):
+    count = 0
+    # allow for a retry if the ls-remote fails to query the endpoint repo
+    while True:
+        try:
+            cmd = ['git', 'ls-remote', source_repo.url]
+            ls_remote_lines = subprocess.check_output(cmd).splitlines()
+            return ls_remote_lines
+        except:
+            print("Non-zero return code for: %s retrying command" % ' '.join(cmd), file=sys.stderr)
+            count += 1
+            # reraise the error if we've attempted 3 times
+            if count > 3:
+                raise
+
+
 def _worker(work_queue):
     while True:
         try:
             source_repo, freeze_version, freeze_to_tag = work_queue.get(block=False)
-            cmd = ['git', 'ls-remote', source_repo.url]
-            ls_remote_lines = subprocess.check_output(cmd).splitlines()
+            ls_remote_lines = _getRepoInfo(source_repo)
             for line in ls_remote_lines:
                 hash, ref = line.split('\t', 1)
                 if freeze_to_tag and ref == 'refs/tags/%s' % freeze_version:
@@ -100,7 +116,7 @@ def _worker(work_queue):
             work_queue.task_done()
 
         except subprocess.CalledProcessError:
-            print("Non-zero return code for: %s" % ' '.join(cmd), file=sys.stderr)
+            print("No information could be retrieved for repo %s" % source_repo.url)
             work_queue.task_done()
 
         except queue.Empty:
