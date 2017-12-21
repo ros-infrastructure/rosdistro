@@ -83,7 +83,7 @@ def freeze_distribution_sources(dist, release_version=False, release_tag=False,
 
 
 # Get the repo commit information
-def _getRepoInfo(source_repo):
+def _get_repo_info(source_repo):
     count = 0
     # allow for a retry if the ls-remote fails to query the endpoint repo
     while True:
@@ -103,7 +103,7 @@ def _worker(work_queue):
     while True:
         try:
             source_repo, freeze_version, freeze_to_tag = work_queue.get(block=False)
-            ls_remote_lines = _getRepoInfo(source_repo)
+            ls_remote_lines = _get_repo_info(source_repo)
             for line in ls_remote_lines:
                 hash, ref = line.split('\t', 1)
                 if freeze_to_tag and ref == 'refs/tags/%s' % freeze_version:
