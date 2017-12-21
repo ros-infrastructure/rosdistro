@@ -97,6 +97,8 @@ def _get_repo_info(source_repo):
             # reraise the error if we've attempted 3 times
             if count > 3:
                 raise
+            # brief delay incase its an intermittent issue with infrastructure
+            time.sleep(1)
 
 
 def _worker(work_queue):
