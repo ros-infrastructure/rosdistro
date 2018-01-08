@@ -87,6 +87,9 @@ def github_source_manifest_provider(repo):
     try:
         tree_json = json.loads(urlopen(req).read().decode('utf-8'))
         logger.debug('- load repo tree from %s' % tree_url)
+    except HTTPError as e:
+        body = e.readlines()
+        raise RuntimeError('Failed HTTP request: %s, %s, %s' % (e.code, e.reason, body))
     except URLError as e:
         raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e))
 
