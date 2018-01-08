@@ -36,7 +36,7 @@ try:
     from urllib.error import URLError
 except ImportError:
     from urllib2 import urlopen, Request
-    from urllib2 import URLError
+    from urllib2 import URLError, HTTPError
 
 import base64
 import json
