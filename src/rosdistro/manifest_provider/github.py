@@ -36,7 +36,7 @@ try:
     from urllib.error import URLError
 except ImportError:
     from urllib2 import urlopen, Request
-    from urllib2 import URLError
+    from urllib2 import URLError, HTTPError
 
 import base64
 import json
@@ -87,6 +87,9 @@ def github_source_manifest_provider(repo):
     try:
         tree_json = json.loads(urlopen(req).read().decode('utf-8'))
         logger.debug('- load repo tree from %s' % tree_url)
+    except HTTPError as e:
+        body = e.readlines()
+        raise RuntimeError('Failed HTTP request: %s, %s' % (e.code, body))
     except URLError as e:
         raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e))
 
