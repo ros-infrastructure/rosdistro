@@ -49,6 +49,8 @@ from rosdistro import logger
 GITHUB_USER = os.getenv('GITHUB_USER', None)
 GITHUB_PASSWORD = os.getenv('GITHUB_PASSWORD', None)
 
+def _get_url_contents(url):
+    return urlopen(url).read().decode('utf-8')
 
 def github_manifest_provider(_dist_name, repo, pkg_name):
     assert repo.version
@@ -65,8 +67,7 @@ def github_manifest_provider(_dist_name, repo, pkg_name):
     url = 'https://raw.githubusercontent.com/%s/%s/package.xml' % (path, release_tag)
     try:
         logger.debug('Load package.xml file from url "%s"' % url)
-        package_xml = urlopen(url).read().decode('utf-8')
-        return package_xml
+        return _get_url_contents(url)
     except URLError as e:
         logger.debug('- failed (%s), trying "%s"' % (e, url))
         raise RuntimeError()
@@ -85,7 +86,7 @@ def github_source_manifest_provider(repo):
         authheader = 'Basic %s' % base64.b64encode('%s:%s' % (GITHUB_USER, GITHUB_PASSWORD))
         req.add_header('Authorization', authheader)
     try:
-        tree_json = json.loads(urlopen(req).read().decode('utf-8'))
+        tree_json = json.loads(_get_url_contents(req))
         logger.debug('- load repo tree from %s' % tree_url)
     except URLError as e:
         raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e))
@@ -116,7 +117,7 @@ def github_source_manifest_provider(repo):
         url = 'https://raw.githubusercontent.com/%s/%s/%s' % \
             (path, cache['_ref'], package_xml_path + '/package.xml' if package_xml_path else 'package.xml')
         logger.debug('- load package.xml from %s' % url)
-        package_xml = urlopen(url).read().decode('utf-8')
+        package_xml = _get_url_contents(url)
         name = parse_package_string(package_xml).name
         cache[name] = [package_xml_path, package_xml]
 
