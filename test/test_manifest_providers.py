@@ -55,13 +55,12 @@ def test_git_source():
 # example from some local files.
 def mock_get_url_contents(req):
     import re
-    import sys
 
     # For python3, look for the 'str' type; for Python 2, the 'unicode' type
-    if sys.version_info[0] == 3:
-        text_type = str
-    else:
+    try:
         text_type = unicode
+    except NameError:
+        text_type = str
 
     # The urlopen() function from urllib or urllib2 takes either a string or a
     # urllib.Request object in; determine the URL in either case.
