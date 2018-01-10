@@ -85,6 +85,8 @@ def freeze_distribution_sources(dist, release_version=False, release_tag=False,
 # Get the repo commit information
 def _get_repo_info(source_repo, retry_count=3, sleep_time=1):
     count = 1
+    # increase retry count to handle initial call
+    retry_count += 1
     # allow for a retry if the ls-remote fails to query the endpoint repo
     while True:
         try:
@@ -121,7 +123,7 @@ def _worker(work_queue):
 
         except subprocess.CalledProcessError as err:
             print("No information could be retrieved for repo %s with error: %s %s" %
-                 (source_repo.url, err, err.message))
+                 (source_repo.url, err, err.message), file=sys.stderr)
             work_queue.task_done()
 
         except queue.Empty:
