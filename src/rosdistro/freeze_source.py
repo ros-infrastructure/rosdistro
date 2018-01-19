@@ -82,12 +82,26 @@ def freeze_distribution_sources(dist, release_version=False, release_tag=False,
         print("")
 
 
+# Get the repo commit information
+def _get_repo_info(url, retry=2, retry_period=1):
+    cmd = ['git', 'ls-remote', url]
+    try:
+        return subprocess.check_output(cmd).splitlines()
+    except subprocess.CalledProcessError as err:
+        if not retry:
+            raise
+        print('  Non-zero return code for: %s, retrying in %f seconds' %
+              (' '.join(cmd), retry_period), file=sys.stderr)
+        # brief delay incase its an intermittent issue with infrastructure
+        time.sleep(retry_period)
+        return _get_repo_info(source_repo, retry=retry - 1, retry_period=retry_period * 2)
+
+
 def _worker(work_queue):
     while True:
         try:
             source_repo, freeze_version, freeze_to_tag = work_queue.get(block=False)
-            cmd = ['git', 'ls-remote', source_repo.url]
-            ls_remote_lines = subprocess.check_output(cmd).splitlines()
+            ls_remote_lines = _get_repo_info(source_repo.url)
             for line in ls_remote_lines:
                 hash, ref = line.split('\t', 1)
                 if freeze_to_tag and ref == 'refs/tags/%s' % freeze_version:
@@ -99,8 +113,9 @@ def _worker(work_queue):
 
             work_queue.task_done()
 
-        except subprocess.CalledProcessError:
-            print("Non-zero return code for: %s" % ' '.join(cmd), file=sys.stderr)
+        except subprocess.CalledProcessError as e:
+            print("No information could be retrieved for repo %s with error: %s" %
+                  (source_repo.url, e), file=sys.stderr)
             work_queue.task_done()
 
         except queue.Empty:
