@@ -106,10 +106,13 @@ def test_git_source_multi():
 
 def test_sanitize():
     assert '<a>abc</a>' in sanitize_xml('<a>ab<!-- comment -->c</a>')
-    assert '<a><b></b><c>ab c</c></a>' in sanitize_xml('<a><b> </b>  <c>  ab  c  </c></a>')
+    assert '<a><b/><c>ab c</c></a>' in sanitize_xml('<a><b> </b>  <c>  ab  c  </c></a>')
 
     # This unicode check should be valid on both Python 2 and 3.
     assert '<a>français</a>' in sanitize_xml('<a> français  </a>')
+
+    # subsequent parse calls will collapse empty tags, therefore sanitize should do the same
+    assert '<a><empty/></a>' in sanitize_xml('<a> <empty> <!-- comment --> </empty> </a>')
 
 
 def _genmsg_release_repo():
