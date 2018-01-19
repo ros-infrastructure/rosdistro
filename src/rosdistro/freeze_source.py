@@ -122,8 +122,8 @@ def _worker(work_queue):
             work_queue.task_done()
 
         except subprocess.CalledProcessError as e:
-            print("No information could be retrieved for repo %s with error: %s" %
-                  (source_repo.url, e), file=sys.stderr)
+            print("No information could be retrieved for repo %s with error: %s %s" %
+                  (source_repo.url, e, e.message), file=sys.stderr)
             work_queue.task_done()
 
         except queue.Empty:
