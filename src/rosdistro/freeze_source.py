@@ -83,33 +83,25 @@ def freeze_distribution_sources(dist, release_version=False, release_tag=False,
 
 
 # Get the repo commit information
-def _get_repo_info(source_repo, retry_count=3, sleep_time=1):
-    count = 1
-    # increase retry count to handle initial call
-    retry_count += 1
-    # allow for a retry if the ls-remote fails to query the endpoint repo
-    while True:
-        try:
-            cmd = ['git', 'ls-remote', source_repo.url]
-            ls_remote_lines = subprocess.check_output(cmd).splitlines()
-            return ls_remote_lines
-        except subprocess.CalledProcessError as err:
-            print("Non-zero return code for: %s, attempt %s of %s, sleeping for %s seconds and retrying command" %
-                 (' '.join(cmd), count, retry_count, sleep_time), file=sys.stderr)
-            count += 1
-            # reraise the error if we've attempted retry_count times
-            if count > retry_count:
-                err.message += " - Attempted %s time(s)" % retry_count
-                raise
-            # brief delay incase its an intermittent issue with infrastructure
-            time.sleep(sleep_time)
+def _get_repo_info(url, retry=2, retry_period=1):
+    cmd = ['git', 'ls-remote', url]
+    try:
+        return subprocess.check_output(cmd).splitlines()
+    except subprocess.CalledProcessError as err:
+        if not retry:
+            raise
+        print('  Non-zero return code for: %s, retrying in %f seconds' %
+              (' '.join(cmd), retry_period), file=sys.stderr)
+        # brief delay incase its an intermittent issue with infrastructure
+        time.sleep(retry_period)
+        return _get_repo_info(source_repo, retry=retry - 1, retry_period=retry_period * 2)
 
 
 def _worker(work_queue):
     while True:
         try:
             source_repo, freeze_version, freeze_to_tag = work_queue.get(block=False)
-            ls_remote_lines = _get_repo_info(source_repo)
+            ls_remote_lines = _get_repo_info(source_repo.url)
             for line in ls_remote_lines:
                 hash, ref = line.split('\t', 1)
                 if freeze_to_tag and ref == 'refs/tags/%s' % freeze_version:
@@ -122,8 +114,8 @@ def _worker(work_queue):
             work_queue.task_done()
 
         except subprocess.CalledProcessError as e:
-            print("No information could be retrieved for repo %s with error: %s %s" %
-                  (source_repo.url, e, e.message), file=sys.stderr)
+            print("No information could be retrieved for repo %s with error: %s" %
+                  (source_repo.url, e), file=sys.stderr)
             work_queue.task_done()
 
         except queue.Empty:
