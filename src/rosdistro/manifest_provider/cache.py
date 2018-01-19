@@ -42,17 +42,21 @@ def sanitize_xml(xml_string):
     so str (Python 2) or bytes (Python 3).
     """
     def _squash(node):
-        drop_nodes = []
-        for x in node.childNodes:
+        # remove comment nodes
+        for x in list(node.childNodes):
+            if x.nodeType is minidom.Node.COMMENT_NODE:
+                node.removeChild(x)
+        # minimize whitespaces, remove empty text nodes
+        for x in list(node.childNodes):
             if x.nodeType == minidom.Node.TEXT_NODE:
                 if x.nodeValue:
                     x.nodeValue = ' '.join(x.nodeValue.strip().split())
-            elif x.nodeType == minidom.Node.ELEMENT_NODE:
+                if not x.nodeValue:
+                    node.removeChild(x)
+        # process all tags recusively
+        for x in node.childNodes:
+            if x.nodeType == minidom.Node.ELEMENT_NODE:
                 _squash(x)
-            elif x.nodeType is minidom.Node.COMMENT_NODE:
-                drop_nodes.append(x)
-        for x in drop_nodes:
-            node.removeChild(x)
         return node
     try:
         # Python 2. The minidom module parses as ascii, so we have to pre-encode.
