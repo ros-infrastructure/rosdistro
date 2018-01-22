@@ -94,7 +94,7 @@ def _get_repo_info(url, retry=2, retry_period=1):
               (' '.join(cmd), retry_period), file=sys.stderr)
         # brief delay incase its an intermittent issue with infrastructure
         time.sleep(retry_period)
-        return _get_repo_info(source_repo, retry=retry - 1, retry_period=retry_period * 2)
+        return _get_repo_info(url, retry=retry - 1, retry_period=retry_period * 2)
 
 
 def _worker(work_queue):
