@@ -97,7 +97,7 @@ class DistributionCache(object):
                     for section in ['doc', 'source']:
                         if section not in repo:
                             continue
-                        if repo_name in old_data['repositories'] and \
+                        if repo_name in (old_data['repositories'] or []) and \
                                 section in old_data['repositories'][repo_name] and \
                                 old_data['repositories'][repo_name][section] == repo[section]:
                             continue
