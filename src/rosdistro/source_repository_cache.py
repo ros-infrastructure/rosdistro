@@ -77,7 +77,7 @@ class SourceRepositoryCache(object):
         path to package relative to repo root, and string of package xml.
         """ 
         if package_name not in self._package_names:
-            raise KeyError("Package %s not present in SourceRepositoryCache." % package_name)
+            raise KeyError("Package '%s' not present in SourceRepositoryCache." % package_name)
         return self._data[package_name]
 
     def __len__(self):
