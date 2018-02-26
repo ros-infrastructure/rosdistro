@@ -43,7 +43,7 @@ def test_git_source():
     repo_cache = git_source_manifest_provider(_genmsg_source_repo())
 
     # This hash corresponds to the 0.5.7 tag.
-    assert repo_cache['_ref'] == '81b66fe5eb00043c43894ddeee07e738d9b9712f'
+    assert repo_cache.ref() == '81b66fe5eb00043c43894ddeee07e738d9b9712f'
 
     package_path, package_xml = repo_cache['genmsg']
     assert '' == package_path
@@ -90,7 +90,7 @@ def test_github_source():
     repo_cache = rosdistro.manifest_provider.github.github_source_manifest_provider(_genmsg_source_repo())
 
     # This hash corresponds to the 0.5.7 tag.
-    assert repo_cache['_ref'] == '81b66fe5eb00043c43894ddeee07e738d9b9712f'
+    assert repo_cache.ref() == '81b66fe5eb00043c43894ddeee07e738d9b9712f'
 
     package_path, package_xml = repo_cache['genmsg']
     assert '' == package_path
@@ -99,7 +99,7 @@ def test_github_source():
 
 def test_git_source_multi():
     repo_cache = git_source_manifest_provider(_ros_source_repo())
-    assert repo_cache['_ref']
+    assert repo_cache.ref()
     package_path, package_xml = repo_cache['roslib']
     assert package_path == 'core/roslib'
 

@@ -44,6 +44,7 @@ import os
 
 from catkin_pkg.package import parse_package_string
 
+from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro import logger
 
 GITHUB_USER = os.getenv('GITHUB_USER', None)
@@ -112,13 +113,13 @@ def github_source_manifest_provider(repo):
                 return True
     package_xml_paths = list(filter(package_xml_in_parent, package_xml_paths))
 
-    cache = {'_ref': tree_json['sha']}
+    cache = SourceRepositoryCache.from_ref(tree_json['sha'])
     for package_xml_path in package_xml_paths:
         url = 'https://raw.githubusercontent.com/%s/%s/%s' % \
-            (path, cache['_ref'], package_xml_path + '/package.xml' if package_xml_path else 'package.xml')
+            (path, cache.ref(), package_xml_path + '/package.xml' if package_xml_path else 'package.xml')
         logger.debug('- load package.xml from %s' % url)
         package_xml = _get_url_contents(url)
         name = parse_package_string(package_xml).name
-        cache[name] = [package_xml_path, package_xml]
+        cache.add(name, package_xml_path, package_xml)
 
     return cache

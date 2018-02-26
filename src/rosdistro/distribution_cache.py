@@ -38,6 +38,7 @@ import sys
 from . import logger
 from .distribution_file import create_distribution_file
 from .package import Package
+from .source_repository_cache import SourceRepositoryCache
 from .vcs import Git, ref_is_hash
 
 
@@ -64,8 +65,10 @@ class DistributionCache(object):
         self._distribution_file_data = data['distribution_file'] if data else distribution_file_data
         self.distribution_file = create_distribution_file(name, self._distribution_file_data)
         self.release_package_xmls = data['release_package_xmls'] if data else {}
-        self.source_repo_package_xmls = data['source_repo_package_xmls'] if data and 'source_repo_package_xmls' in data else {}
-
+        self.source_repo_package_xmls = {}
+        if data and 'source_repo_package_xmls' in data:
+            for repo_name, repo_data in data['source_repo_package_xmls'].items():
+                self.source_repo_package_xmls[repo_name] = SourceRepositoryCache(repo_data)
         self.distribution_file.source_packages = self.get_source_packages()
 
         # if Python 2 has converted the xml to unicode, convert it back
@@ -80,7 +83,8 @@ class DistributionCache(object):
         data['name'] = self.distribution_file.name
         data['distribution_file'] = self._distribution_file_data
         data['release_package_xmls'] = self.release_package_xmls
-        data['source_repo_package_xmls'] = self.source_repo_package_xmls
+        data['source_repo_package_xmls'] = dict([(repo_name, repo_cache.get_data())
+            for repo_name, repo_cache in self.source_repo_package_xmls.items()])
         return data
 
     def update_distribution(self, distribution_file_data):
@@ -145,7 +149,7 @@ class DistributionCache(object):
                     # a known host key validation notice.
                     source_hash = result['output'].split('\n')[-1].split('\t')[0]
 
-                cached_hash = self.source_repo_package_xmls[repo]['_ref']
+                cached_hash = self.source_repo_package_xmls[repo].ref()
                 if source_hash != cached_hash:
                     logger.debug('Repo "%s" has moved from %s to %s, dropping cache.' % (repo, cached_hash, source_hash))
                     del self.source_repo_package_xmls[repo]
@@ -162,8 +166,7 @@ class DistributionCache(object):
         package_dict = {}
         for source_repo_name, source_repo in self.source_repo_package_xmls.items():
             for pkg_name in source_repo:
-                if pkg_name[0] != '_':
-                    package_dict[pkg_name] = Package(pkg_name, source_repo_name)
+                package_dict[pkg_name] = Package(pkg_name, source_repo_name)
         return package_dict
 
     def _get_repo_info(self, dist_file, pkg_name):
