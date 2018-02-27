@@ -80,6 +80,15 @@ class SourceRepositoryCache(object):
             raise KeyError("Package '%s' not present in SourceRepositoryCache." % package_name)
         return self._data[package_name]
 
+    def items(self):
+        """
+        Generator of (str, str, str) containing the package name, path relative
+        to repo root, and package xml string.
+        """
+        for package_name in self._package_names:
+            package_path, package_xml_string = self._data[package_name]
+            yield package_name, package_path, package_xml_string
+
     def __len__(self):
         """
         Returns the number of packages in this repo.
