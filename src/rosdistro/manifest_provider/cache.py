@@ -136,8 +136,7 @@ class CachedSourceManifestProvider(object):
                 package_xml = sanitize_xml(package_xml)
                 release_package_xml = self._distribution_cache.release_package_xmls.get(package_name, None)
                 if package_xml == release_package_xml:
-                    # Re-add to the cache with a reference to the "release" instance of the string, so that
-                    # the YAML writer is able to notice that the same object appears multiple times.
-                    repo_cache.add(package_name, package_path, release_package_xml)
+                    package_xml = release_package_xml
+                repo_cache.add(package_name, package_path, package_xml)
 
         return repo_cache
