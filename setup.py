@@ -26,7 +26,6 @@ kwargs = {
     'maintainer': 'Dirk Thomas',
     'maintainer_email': 'dthomas@osrfoundation.org',
     'url': 'http://wiki.ros.org/rosdistro',
-    'download_url': 'http://download.ros.org/downloads/rosdistro/',
     'keywords': ['ROS'],
     'classifiers': [
         'Programming Language :: Python',
