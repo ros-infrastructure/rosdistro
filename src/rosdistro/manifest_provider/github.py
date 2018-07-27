@@ -84,7 +84,7 @@ def github_source_manifest_provider(repo):
     req = Request(tree_url)
     if GITHUB_USER and GITHUB_PASSWORD:
         logger.debug('- using http basic auth from supplied environment variables.')
-        authheader = 'Basic %s' % base64.b64encode('%s:%s' % (GITHUB_USER, GITHUB_PASSWORD))
+        authheader = 'Basic %s' % base64.b64encode(b'%s:%s' % (GITHUB_USER, GITHUB_PASSWORD))
         req.add_header('Authorization', authheader)
     try:
         tree_json = json.loads(_get_url_contents(req))
