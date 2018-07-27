@@ -58,7 +58,10 @@ from .loader import load_url  # noqa
 from .manifest_provider.cache import CachedManifestProvider, CachedSourceManifestProvider  # noqa
 
 
-__version__ = '0.6.8'  # same version as in setup.py
+# same version as in:
+# - setup.py
+# - stdeb.cfg
+__version__ = '0.6.8'
 
 # index information
 

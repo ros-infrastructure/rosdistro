@@ -7,7 +7,10 @@ from setuptools import find_packages, setup
 
 kwargs = {
     'name': 'rosdistro',
-    'version': '0.6.8',  # same version as in src/rosdistro/__init__.py
+    # same version as in:
+    # - src/rosdistro/__init__.py
+    # - stdeb.cfg
+    'version': '0.6.8',
     'install_requires': ['PyYAML', 'setuptools'],
     'packages': find_packages('src'),
     'package_dir': {'': 'src'},
