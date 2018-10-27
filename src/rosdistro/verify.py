@@ -159,8 +159,11 @@ def _to_yaml(data):
 
 def _yaml_header_lines(file_type, version):
     rep = '141'
-    if file_type == 'index' and version == 3:
-        rep = '143'
+    if file_type == 'index':
+        if version == 3:
+            rep = '143'
+        elif version == 4:
+            rep = '153'
     if file_type == 'distribution' and version == 2:
         rep = '143'
     return [
