@@ -18,7 +18,8 @@ def test_get_index_v2():
     assert len(i.distributions.keys()) == 1
     assert 'foo' in i.distributions.keys()
 
-    assert i.distributions['foo']['ros_version'] == 1
+    assert 'distribution_status' not in i.distributions['foo']
+    assert 'distribution_type' not in i.distributions['foo']
 
 
 def test_get_index_v3():
@@ -27,7 +28,8 @@ def test_get_index_v3():
     assert len(i.distributions.keys()) == 1
     assert 'foo' in i.distributions.keys()
 
-    assert i.distributions['foo']['ros_version'] == 1
+    assert 'distribution_status' not in i.distributions['foo']
+    assert 'distribution_type' not in i.distributions['foo']
 
     dist_files = get_distribution_files(i, 'foo')
     assert len(dist_files) == 2
@@ -53,7 +55,8 @@ def test_get_index_v4():
     assert len(i.distributions.keys()) == 1
     assert 'foo' in i.distributions.keys()
 
-    assert i.distributions['foo']['ros_version'] == 2
+    assert i.distributions['foo']['distribution_status'] == 'active'
+    assert i.distributions['foo']['distribution_type'] == 'ros1'
 
     dist_files = get_distribution_files(i, 'foo')
     assert len(dist_files) == 2
@@ -80,7 +83,7 @@ def test_get_index_from_http_with_query_parameters():
 
         # test if every url has the same queries
         for key, dist_urls in i.distributions['foo'].items():
-            if key == 'ros_version':
+            if key in ('distribution_status', 'distribution_type'):
                 continue
             if not isinstance(dist_urls, list):
                 dist_urls = [dist_urls]

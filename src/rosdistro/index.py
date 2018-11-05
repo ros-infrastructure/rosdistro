@@ -57,12 +57,13 @@ class Index(object):
             if not isinstance(data['distributions'], dict):
                 raise RuntimeError("Distributions type is invalid: expected 'dict', but got '%s': %s" % (type(data['distributions']).__name__, data['distributions']))
             for distro_name in sorted(data['distributions']):
-                self.distributions[distro_name] = {'ros_version': 1}
+                self.distributions[distro_name] = {}
                 distro_data = data['distributions'][distro_name]
                 for key in distro_data:
-                    if key == 'ros_version':
-                        assert isinstance(distro_data[key], int), 'wrong type of key "%s"' % key
-                        self.distributions[distro_name]['ros_version'] = distro_data[key]
+                    if key in ('distribution_status', 'distribution_type'):
+                        assert self.version >= 4, "'%s' format version '%d' does not allow a '%s' entry" % (Index._type, self.version, key)
+                        assert isinstance(distro_data[key], str), 'wrong type of key "%s"' % key
+                        self.distributions[distro_name][key] = distro_data[key]
                         continue
 
                     if key in ['distribution']:
