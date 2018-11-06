@@ -83,7 +83,12 @@ class Index(object):
                         else:
                             assert False
                     else:
-                        assert False, 'unknown key "%s"' % key
+                        if self.version <= 3:
+                            assert False, 'unknown key "%s"' % key
+                        # ignoring unknown keys
+                        # in order to allow adding new ones in the future
+                        # without the need to level the version
+                        continue
 
                     self.distributions[distro_name][key] = []
                     value = distro_data[key]
