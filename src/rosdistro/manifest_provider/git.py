@@ -51,7 +51,11 @@ def git_manifest_provider(_dist_name, repo, pkg_name):
         with _temp_git_clone(repo.url, release_tag) as git_repo_path:
             filename = os.path.join(git_repo_path, 'package.xml')
             if not os.path.exists(filename):
-                raise RuntimeError('Could not find package.xml in repository "%s"' % repo.url)
+                # Try appending package name to repo path to handle case where there are multiple packages in a single
+                # repo
+                filename = os.path.join(git_repo_path, pkg_name, 'package.xml')
+                if not os.path.exists(filename):
+                    raise RuntimeError('Could not find package.xml in repository "%s"' % repo.url)
             with open(filename, 'r') as f:
                 return f.read()
     except Exception as e:
