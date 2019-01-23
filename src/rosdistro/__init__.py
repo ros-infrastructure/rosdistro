@@ -61,7 +61,7 @@ from .manifest_provider.cache import CachedManifestProvider, CachedSourceManifes
 # same version as in:
 # - setup.py
 # - stdeb.cfg
-__version__ = '0.7.1'
+__version__ = '0.7.2'
 
 # index information
 
