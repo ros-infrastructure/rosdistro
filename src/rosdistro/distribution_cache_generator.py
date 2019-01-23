@@ -187,7 +187,7 @@ def _get_cached_distribution(index, dist_name, preclean=False, ignore_local=Fals
                     with open('%s-cache.yaml' % dist_name, 'r') as f:
                         yaml_str = f.read()
                 if yaml_str is not None:
-                    data = yaml.load(yaml_str)
+                    data = yaml.safe_load(yaml_str)
                     cache = DistributionCache(dist_name, data)
             if not cache:
                 print('- trying to fetch cache')

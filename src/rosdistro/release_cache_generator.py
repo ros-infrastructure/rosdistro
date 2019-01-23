@@ -124,7 +124,7 @@ def _get_cached_release(index, dist_name, preclean=False):
                 with open('%s-cache.yaml' % dist_name, 'r') as f:
                     yaml_str = f.read()
             if yaml_str is not None:
-                data = yaml.load(yaml_str)
+                data = yaml.safe_load(yaml_str)
                 cache = ReleaseCache(dist_name, data)
             if not cache:
                 print('- trying to fetch cache')
