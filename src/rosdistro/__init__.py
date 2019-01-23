@@ -76,7 +76,7 @@ def get_index_url():
     def read_cfg_index_url(fname):
         try:
             with open(fname) as f:
-                return yaml.load(f.read())['index_url']
+                return yaml.safe_load(f.read())['index_url']
         except (IOError, KeyError, yaml.YAMLError):
             return None
 
@@ -102,7 +102,7 @@ def get_index_url():
 def get_index(url):
     logger.debug('Load index from "%s"' % url)
     yaml_str = load_url(url)
-    data = yaml.load(yaml_str)
+    data = yaml.safe_load(yaml_str)
     base_url = os.path.dirname(url)
     url_parts = urlparse(url)
     return Index(data, base_url, url_query=url_parts.query)
@@ -170,7 +170,7 @@ def get_distribution_cache(index, dist_name):
         f.close()
     else:
         raise NotImplementedError('The url of the cache must end with either ".yaml" or ".yaml.gz"')
-    data = yaml.load(yaml_str)
+    data = yaml.safe_load(yaml_str)
     return DistributionCache(dist_name, data)
 
 
@@ -187,7 +187,7 @@ def _get_dist_file_data(index, dist_name, type_):
     def _load_yaml_data(url):
         logger.debug('Load file from "%s"' % url)
         yaml_str = load_url(url)
-        return yaml.load(yaml_str)
+        return yaml.safe_load(yaml_str)
 
     if not isinstance(url, list):
         data = _load_yaml_data(url)
