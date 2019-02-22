@@ -22,32 +22,32 @@ def test_cached():
             self.release_package_xmls = {}
     dc = FakeDistributionCache()
     cache = CachedManifestProvider(dc, [rosdistro.manifest_provider.github.github_manifest_provider])
-    assert '</package>' in cache('kinetic', _genmsg_release_repo(), 'genmsg')
+    assert '</package>' in cache('melodic', _genmsg_release_repo(), 'genmsg')
 
 
 def test_git():
-    assert '</package>' in git_manifest_provider('kinetic', _genmsg_release_repo(), 'genmsg')
+    assert '</package>' in git_manifest_provider('melodic', _genmsg_release_repo(), 'genmsg')
 
 
 def test_git_legacy():
     rosdistro.vcs.Git._client_version = '1.7.0'
-    assert '</package>' in git_manifest_provider('kinetic', _genmsg_release_repo(), 'genmsg')
+    assert '</package>' in git_manifest_provider('melodic', _genmsg_release_repo(), 'genmsg')
     rosdistro.vcs.Git._client_version = None
 
 
 def test_github():
-    assert '</package>' in rosdistro.manifest_provider.github.github_manifest_provider('kinetic', _genmsg_release_repo(), 'genmsg')
+    assert '</package>' in rosdistro.manifest_provider.github.github_manifest_provider('melodic', _genmsg_release_repo(), 'genmsg')
 
 
 def test_git_source():
     repo_cache = git_source_manifest_provider(_genmsg_source_repo())
 
-    # This hash corresponds to the 0.5.7 tag.
-    assert repo_cache.ref() == '81b66fe5eb00043c43894ddeee07e738d9b9712f'
+    # This hash corresponds to the 0.5.11 tag.
+    assert repo_cache.ref() == 'a189fc78558e7276df59d2961cfe4f8b4de08a8b'
 
     package_path, package_xml = repo_cache['genmsg']
     assert '' == package_path
-    assert '<version>0.5.7</version>' in package_xml
+    assert '<version>0.5.11</version>' in package_xml
 
 # mock_get_url_contents is used to mock out the '_get_url_contents' method in
 # the rosdistro.manifest_provider.github module.  Instead of going out to github
@@ -94,7 +94,7 @@ def test_github_source():
 
     package_path, package_xml = repo_cache['genmsg']
     assert '' == package_path
-    assert '<version>0.5.7</version>' in package_xml
+    assert '<version>0.5.11</version>' in package_xml
 
 
 def test_git_source_multi():
@@ -118,15 +118,15 @@ def test_sanitize():
 def _genmsg_release_repo():
     return ReleaseRepositorySpecification('genmsg', {
         'url': 'https://github.com/ros-gbp/genmsg-release.git',
-        'tags': {'release': 'release/kinetic/{package}/{version}'},
-        'version': '0.5.7-1'
+        'tags': {'release': 'release/melodic/{package}/{version}'},
+        'version': '0.5.11-0'
     })
 
 
 def _genmsg_source_repo():
     return SourceRepositorySpecification('genmsg', {
         'url': 'https://github.com/ros/genmsg.git',
-        'version': '0.5.7'
+        'version': '0.5.11'
     })
 
 
