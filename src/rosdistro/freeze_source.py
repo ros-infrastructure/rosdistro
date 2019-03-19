@@ -51,7 +51,7 @@ def freeze_distribution_sources(dist, release_version=False, release_tag=False,
     # Populate this queue with tuples of repositories instances to be updated,
     # so that this work can be spread across multiple threads.
     work_queue = queue.Queue()
-    for repo_name, repo in dist.repositories.iteritems():
+    for repo_name, repo in dist.repositories.items():
         # Only manipulate distribution entries with a source repo listed.
         if repo.source_repository:
             # Decide which git ref string we'll be using as the replacement match.
@@ -84,7 +84,7 @@ def freeze_distribution_sources(dist, release_version=False, release_tag=False,
 def _get_repo_info(url, retry=2, retry_period=1):
     cmd = ['git', 'ls-remote', url]
     try:
-        return subprocess.check_output(cmd).splitlines()
+        return subprocess.check_output(cmd).decode().splitlines()
     except subprocess.CalledProcessError as err:
         if not retry:
             raise
@@ -108,6 +108,11 @@ def _worker(work_queue):
                 elif ref in ('refs/heads/%s' % freeze_version, 'refs/tags/%s' % freeze_version):
                     source_repo.version = hash
                     break
+
+            if not isinstance(source_repo.version, str):
+                # On Python 2, explicitly encode back to string. Unnecessary on Python 3, because
+                # we're already a unicode string since subprocess.check_output returned a bytes.
+                source_repo.version = source_repo.version.encode()
 
             work_queue.task_done()
 
