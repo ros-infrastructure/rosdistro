@@ -119,7 +119,7 @@ def github_source_manifest_provider(repo):
             (path, cache.ref(), package_xml_path + '/package.xml' if package_xml_path else 'package.xml')
         logger.debug('- load package.xml from %s' % url)
         package_xml = _get_url_contents(url)
-        name = parse_package_string(package_xml).name
+        name = parse_package_string(package_xml.encode('utf-8')).name
         cache.add(name, package_xml_path, package_xml)
 
     return cache
