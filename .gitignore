@@ -4,3 +4,7 @@ deb_dist
 dist
 *.pyc
 rosdistro.egg-info
+
+# nosetests artifacts
+/.coverage
+/nosetests.xml
