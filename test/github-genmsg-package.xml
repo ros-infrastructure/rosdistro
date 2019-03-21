@@ -6,6 +6,7 @@
     Standalone Python library for generating ROS message and service data structures for various languages.
   </description>
   <maintainer email="dthomas@osrfoundation.org">Dirk Thomas</maintainer>
+  <maintainer email="bogus@example.com">Bögus Umlaut User</maintainer>
   <license>BSD</license>
 
   <url type="website">http://www.ros.org/wiki/genmsg</url>

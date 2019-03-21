@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import mock
+import sys
 
 import rosdistro.manifest_provider.github
 import rosdistro.vcs
@@ -81,6 +82,11 @@ def mock_get_url_contents(req):
 
     with open(fname, 'r') as infp:
         data = infp.read()
+
+    # Decode string, as done in
+    # rosdistro.manifest_provider.github._get_url_contents()
+    if sys.version_info[0] == 2:
+        data = data.decode('utf-8')
 
     return data
 
