@@ -118,10 +118,14 @@ class DependencyWalker(object):
     def _get_dependencies(self, pkg_name, dep_type):
         pkg = self._get_package(pkg_name)
         deps = {
-            'buildtool': pkg.buildtool_depends,
             'build': pkg.build_depends,
+            'buildtool': pkg.buildtool_depends,
+            'build_export': pkg.build_export_depends,
+            'buildtool_export': pkg.buildtool_export_depends,
+            'exec': pkg.exec_depends,
             'run': pkg.run_depends,
-            'test': pkg.test_depends
+            'test': pkg.test_depends,
+            'doc': pkg.doc_depends,
         }
         return set([d.name for d in deps[dep_type]])
 
