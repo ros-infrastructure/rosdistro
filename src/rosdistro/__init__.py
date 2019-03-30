@@ -149,7 +149,7 @@ def get_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False)
     return dist
 
 
-def get_distribution_cache(index, dist_name):
+def get_distribution_cache_string(index, dist_name):
     if dist_name not in index.distributions.keys():
         raise RuntimeError("Unknown distribution: '{0}'. Valid distribution names are: {1}".format(dist_name, ', '.join(sorted(index.distributions.keys()))))
     dist = index.distributions[dist_name]
@@ -165,11 +165,16 @@ def get_distribution_cache(index, dist_name):
         yaml_gz_stream = StringIO(yaml_gz_str)
         f = gzip.GzipFile(fileobj=yaml_gz_stream, mode='rb')
         yaml_str = f.read()
+        f.close()
         if not isinstance(yaml_str, str):
             yaml_str = yaml_str.decode('utf-8')
-        f.close()
     else:
         raise NotImplementedError('The url of the cache must end with either ".yaml" or ".yaml.gz"')
+    return yaml_str
+
+
+def get_distribution_cache(index, dist_name):
+    yaml_str = get_distribution_cache_string(index, dist_name)
     data = yaml.safe_load(yaml_str)
     return DistributionCache(dist_name, data)
 
