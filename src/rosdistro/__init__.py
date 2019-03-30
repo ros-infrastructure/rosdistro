@@ -174,8 +174,8 @@ def get_distribution_cache_string(index, dist_name):
 
 
 def get_distribution_cache(index, dist_name):
-    cache_file_data = get_distribution_cache_string(index, dist_name)
-    data = yaml.safe_load(cache_file_data)
+    yaml_str = get_distribution_cache_string(index, dist_name)
+    data = yaml.safe_load(yaml_str)
     return DistributionCache(dist_name, data)
 
 
