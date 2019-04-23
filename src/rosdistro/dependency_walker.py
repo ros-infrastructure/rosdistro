@@ -36,9 +36,10 @@ from catkin_pkg.package import InvalidPackage, parse_package_string
 
 class DependencyWalker(object):
 
-    def __init__(self, distribution_instance):
+    def __init__(self, distribution_instance, evaluate_condition_context=None):
         self._distribution_instance = distribution_instance
         self._packages = {}
+        self._evaluate_condition_context = evaluate_condition_context
 
     def _get_package(self, pkg_name):
         if pkg_name not in self._packages:
@@ -50,6 +51,9 @@ class DependencyWalker(object):
                 pkg = parse_package_string(pkg_xml)
             except InvalidPackage as e:
                 raise InvalidPackage(pkg_name + ': %s' % str(e))
+            else:
+                if self._evaluate_condition_context is not None:
+                    pkg.evaluate_conditions(self._evaluate_condition_context)
             self._packages[pkg_name] = pkg
         return self._packages[pkg_name]
 
@@ -127,7 +131,7 @@ class DependencyWalker(object):
             'test': pkg.test_depends,
             'doc': pkg.doc_depends,
         }
-        return set([d.name for d in deps[dep_type]])
+        return set([d.name for d in deps[dep_type] if d.evaluated_condition is not False])
 
     def _get_package_repo(self, name):
         return self._distribution_instance.repositories[self._distribution_instance.release_packages[name].repository_name].release_repository
