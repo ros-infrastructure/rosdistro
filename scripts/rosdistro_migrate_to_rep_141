@@ -149,7 +149,7 @@ def update_cache(index_yaml, distro_name, cache_url, cache_file, distribution_fi
     cache_data['version'] = 2
 
     data = _to_yaml(cache_data)
-    data = '\n'.join(_yaml_header_lines('cache'), cache_data['version']) + '\n' + data
+    data = '\n'.join(_yaml_header_lines('cache', cache_data['version'])) + '\n' + data
     with open(cache_file, 'w') as f:
         f.write(data)
 
