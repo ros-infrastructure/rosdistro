@@ -60,9 +60,12 @@ class Index(object):
                 self.distributions[distro_name] = {}
                 distro_data = data['distributions'][distro_name]
                 for key in distro_data:
-                    if key in ('distribution_status', 'distribution_type'):
+                    if key in ('distribution_status', 'distribution_type', 'python_version'):
                         assert self.version >= 4, "'%s' format version '%d' does not allow a '%s' entry" % (Index._type, self.version, key)
-                        assert isinstance(distro_data[key], str), 'wrong type of key "%s"' % key
+                        if key == 'python_version':
+                            assert isinstance(distro_data[key], int), 'wrong type of key "%s"' % key
+                        else:
+                            assert isinstance(distro_data[key], str), 'wrong type of key "%s"' % key
                         self.distributions[distro_name][key] = distro_data[key]
                         continue
 
