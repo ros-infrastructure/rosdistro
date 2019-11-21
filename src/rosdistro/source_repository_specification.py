@@ -47,10 +47,17 @@ class SourceRepositorySpecification(RepositorySpecification):
         if 'test_pull_requests' in data:
             self.test_pull_requests = bool(data['test_pull_requests'])
 
+        self.test_abi = None
+        if 'test_abi' in data:
+            self.test_abi = bool(data['test_abi'])
+
     def get_data(self):
         data = self._get_data(skip_git_type=False)
         if self.test_commits is not None:
             data['test_commits'] = self.test_commits
         if self.test_pull_requests is not None:
             data['test_pull_requests'] = self.test_pull_requests
+        if self.test_abi is not None:
+            data['test_abi'] = self.test_abi
+
         return data
