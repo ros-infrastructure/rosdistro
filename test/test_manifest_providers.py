@@ -39,6 +39,10 @@ def test_github():
     assert '</package>' in rosdistro.manifest_provider.github.github_manifest_provider('melodic', _genmsg_release_repo(), 'genmsg')
 
 
+def test_tar():
+    assert '</package>' in rosdistro.manifest_provider.tar.tar_manifest_provider('melodic', _genmsg_release_tarball(), 'genmsg')
+
+
 def test_git_source():
     repo_cache = git_source_manifest_provider(_genmsg_source_repo())
 
@@ -48,6 +52,7 @@ def test_git_source():
     package_path, package_xml = repo_cache['genmsg']
     assert '' == package_path
     assert '<version>0.5.11</version>' in package_xml
+
 
 # mock_get_url_contents is used to mock out the '_get_url_contents' method in
 # the rosdistro.manifest_provider.github module.  Instead of going out to github
@@ -104,6 +109,16 @@ def test_git_source_multi():
     assert package_path == 'core/roslib'
 
 
+def test_tar_source():
+    repo_cache = rosdistro.manifest_provider.tar.tar_source_manifest_provider(_genmsg_source_tarball())
+
+    assert repo_cache.ref() is None
+
+    package_path, package_xml = repo_cache['genmsg']
+    assert 'genmsg-0.5.16' == package_path
+    assert '<version>0.5.16</version>' in package_xml
+
+
 def test_sanitize():
     assert '<a>abc</a>' in sanitize_xml('<a>ab<!-- comment -->c</a>')
     assert '<a><b/><c>ab c</c></a>' in sanitize_xml('<a><b> </b>  <c>  ab  c  </c></a>')
@@ -123,10 +138,26 @@ def _genmsg_release_repo():
     })
 
 
+def _genmsg_release_tarball():
+    return ReleaseRepositorySpecification('genmsg', {
+        'url': 'https://github.com/ros-gbp/genmsg-release/archive/release/melodic/genmsg/0.5.16-1.tar.gz',
+        'tags': {'release': '{package}-release-release-melodic-{package}-{version}'},
+        'version': '0.5.16-1',
+        'type': 'tar'
+    })
+
+
 def _genmsg_source_repo():
     return SourceRepositorySpecification('genmsg', {
         'url': 'https://github.com/ros/genmsg.git',
         'version': '0.5.11'
+    })
+
+
+def _genmsg_source_tarball():
+    return SourceRepositorySpecification('genmsg', {
+        'url': 'https://github.com/ros/genmsg/archive/0.5.16.tar.gz',
+        'type': 'tar'
     })
 
 
