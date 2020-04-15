@@ -38,7 +38,7 @@ class ReleaseRepositorySpecification(RepositorySpecification):
 
     def __init__(self, name, data):
         super(ReleaseRepositorySpecification, self).__init__(name, data)
-        assert self.type == 'git'
+        assert self.type in ('git', 'tar')
 
         self.tags = {}
         if self.version is not None:
