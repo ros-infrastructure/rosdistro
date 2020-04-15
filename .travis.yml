@@ -13,6 +13,7 @@ install:
   - python setup.py build develop
   # newer versions of docutils dropped support for Python 3.4
   - if [ $TRAVIS_PYTHON_VERSION == "3.4" ]; then pip install docutils==0.15.2; fi
+  - if [ $TRAVIS_PYTHON_VERSION == "3.4" ]; then pip install PyYAML==5.2; fi
   - pip install PyYAML argparse catkin_pkg rospkg setuptools
   - pip install nose coverage mock
 # command to run tests
