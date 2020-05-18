@@ -60,7 +60,8 @@ def tar_manifest_provider(_dist_name, repo, pkg_name):
     request = Request(repo.url)
     if _TAR_USER and _TAR_PASSWORD:
         logger.debug('- using http basic auth from supplied environment variables.')
-        authheader = 'Basic %s' % base64.b64encode('%s:%s' % (_TAR_USER, _TAR_PASSWORD))
+        credential_pair = '%s:%s' % (_TAR_USER, _TAR_PASSWORD)
+        authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
         request.add_header('Authorization', authheader)
     elif _TAR_PASSWORD:
         logger.debug('- using private token auth from supplied environment variables.')
@@ -84,7 +85,8 @@ def tar_source_manifest_provider(repo):
         request = Request(repo.url)
         if _TAR_USER and _TAR_PASSWORD:
             logger.debug('- using http basic auth from supplied environment variables.')
-            authheader = 'Basic %s' % base64.b64encode('%s:%s' % (_TAR_USER, _TAR_PASSWORD))
+            credential_pair = '%s:%s' % (_TAR_USER, _TAR_PASSWORD)
+            authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
             request.add_header('Authorization', authheader)
         elif _TAR_PASSWORD:
             logger.debug('- using private token auth from supplied environment variables.')
