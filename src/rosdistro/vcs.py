@@ -46,7 +46,8 @@ class Git(object):
     def __init__(self, cwd=None):
         self.cwd = cwd
         if not self._client_executable:
-            self.__class__._client_executable = _find_executable('git')
+            git_excutable = 'git' if os.name != 'nt' else 'git.exe'
+            self.__class__._client_executable = _find_executable(git_excutable)
 
     def command(self, *args):
         assert self._client_executable is not None, "'git' not found"
