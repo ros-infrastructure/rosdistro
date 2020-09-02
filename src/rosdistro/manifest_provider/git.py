@@ -83,6 +83,15 @@ def git_source_manifest_provider(repo):
     return cache
 
 
+def onerror(func, path, exc_info):
+    import stat
+    if not os.access(path, os.W_OK):
+        os.chmod(path, stat.S_IWUSR)
+        func(path)
+    else:
+        raise
+
+
 @contextmanager
 def _temp_git_clone(url, ref):
     base = tempfile.mkdtemp('rosdistro')
@@ -107,4 +116,4 @@ def _temp_git_clone(url, ref):
 
         yield base
     finally:
-        shutil.rmtree(base)
+        shutil.rmtree(base, onerror=onerror)
