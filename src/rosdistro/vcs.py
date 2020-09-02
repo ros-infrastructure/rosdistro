@@ -46,8 +46,7 @@ class Git(object):
     def __init__(self, cwd=None):
         self.cwd = cwd
         if not self._client_executable:
-            git_excutable = 'git' if os.name != 'nt' else 'git.exe'
-            self.__class__._client_executable = _find_executable(git_excutable)
+            self.__class__._client_executable = _find_executable('git')
 
     def command(self, *args):
         assert self._client_executable is not None, "'git' not found"
@@ -81,8 +80,14 @@ def _run_command(cmd, cwd=None, env=None):
 
 
 def _find_executable(file_name):
+    pathext = ['']
+    if os.name == 'nt':
+        # https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/start#remarks
+        # mimic the behavior how CMD.exe searching for a command without the extension specified.
+        pathext = pathext + os.getenv('PATHEXT').split(os.path.pathsep)
     for path in os.getenv('PATH').split(os.path.pathsep):
-        file_path = os.path.join(path, file_name)
-        if os.path.isfile(file_path) and os.access(file_path, os.X_OK):
-            return file_path
+        for ext in pathext:
+            file_path = os.path.join(path, file_name + ext)
+            if os.path.isfile(file_path) and os.access(file_path, os.X_OK):
+                return file_path
     return None
