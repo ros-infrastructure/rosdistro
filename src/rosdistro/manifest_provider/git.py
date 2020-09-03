@@ -42,6 +42,7 @@ from catkin_pkg.packages import find_package_paths
 
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro.vcs import Git, ref_is_hash
+from rosdistro.util import rmtree as util_rmtree
 
 
 def git_manifest_provider(_dist_name, repo, pkg_name):
@@ -83,15 +84,6 @@ def git_source_manifest_provider(repo):
     return cache
 
 
-def onerror(func, path, exc_info):
-    import stat
-    if not os.access(path, os.W_OK):
-        os.chmod(path, stat.S_IWUSR)
-        func(path)
-    else:
-        raise
-
-
 @contextmanager
 def _temp_git_clone(url, ref):
     base = tempfile.mkdtemp('rosdistro')
@@ -116,4 +108,4 @@ def _temp_git_clone(url, ref):
 
         yield base
     finally:
-        shutil.rmtree(base, onerror=onerror)
+        util_rmtree(base)

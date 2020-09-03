@@ -47,6 +47,7 @@ except ImportError:
 
 from rosdistro.loader import load_url
 from rosdistro.release_file import ReleaseFile
+from rosdistro.util import rmtree as util_rmtree
 
 import yaml
 
@@ -197,7 +198,7 @@ def convert_doc(dist_name):
     rc = subprocess.call(['git', 'clone', '--depth', '0', 'git://github.com/ros/rosdistro.git', base])
     if rc:
         print('Failed to checkout rosdistro repo', file=sys.stderr)
-        shutil.rmtree(base)
+        util_rmtree(base)
         return
 
     doc_base = os.path.join(base, 'doc', dist_name)
@@ -212,7 +213,7 @@ def convert_doc(dist_name):
                 rosinstall_depends[name] = data
             else:
                 rosinstalls[name] = data
-    shutil.rmtree(base)
+    util_rmtree(base)
     # currently no doc has depends in groovy and hydro
     # assert not rosinstall_depends
 
