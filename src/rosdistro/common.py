@@ -1,5 +1,9 @@
 from __future__ import print_function
 
+from errno import EACCES, EPERM
+import os
+import shutil
+import stat
 import sys
 
 _quiet = False
@@ -38,3 +42,16 @@ def error(msg, end=None, file=None):
     global _print
     file = sys.stderr if file is None else file
     _print(msg, end=end, file=file)
+
+
+def rmtree(path):
+    kwargs = {}
+    if sys.platform == 'win32':
+        kwargs['onerror'] = _onerror_windows
+    return shutil.rmtree(path, **kwargs)
+
+
+def _onerror_windows(function, path, excinfo):
+    if isinstance(excinfo[1], OSError) and excinfo[1].errno in (EACCES, EPERM):
+        os.chmod(path, stat.S_IWRITE)
+        function(path)

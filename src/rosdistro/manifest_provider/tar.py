@@ -33,7 +33,6 @@
 import base64
 import io
 import os
-import shutil
 import tarfile
 import tempfile
 import urllib
@@ -46,6 +45,7 @@ except ImportError:
 from catkin_pkg.package import InvalidPackage, parse_package_string
 from catkin_pkg.packages import find_package_paths
 
+from rosdistro.common import rmtree
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro import logger
 
@@ -113,7 +113,7 @@ def tar_source_manifest_provider(repo):
 
                 return cache
             finally:
-                shutil.rmtree(tmpdir)
+                rmtree(tmpdir)
     except Exception as e:
         raise RuntimeError('Unable to fetch source package.xml files: %s' % e)
 
