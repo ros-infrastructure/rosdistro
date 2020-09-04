@@ -36,7 +36,6 @@
 from __future__ import print_function
 
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -45,9 +44,9 @@ try:
 except ImportError:
     from urllib2 import HTTPError
 
+from rosdistro.common import rmtree
 from rosdistro.loader import load_url
 from rosdistro.release_file import ReleaseFile
-from rosdistro.util import rmtree as util_rmtree
 
 import yaml
 
@@ -198,7 +197,7 @@ def convert_doc(dist_name):
     rc = subprocess.call(['git', 'clone', '--depth', '0', 'git://github.com/ros/rosdistro.git', base])
     if rc:
         print('Failed to checkout rosdistro repo', file=sys.stderr)
-        util_rmtree(base)
+        rmtree(base)
         return
 
     doc_base = os.path.join(base, 'doc', dist_name)
@@ -213,7 +212,7 @@ def convert_doc(dist_name):
                 rosinstall_depends[name] = data
             else:
                 rosinstalls[name] = data
-    util_rmtree(base)
+    rmtree(base)
     # currently no doc has depends in groovy and hydro
     # assert not rosinstall_depends
 

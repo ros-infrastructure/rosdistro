@@ -32,7 +32,6 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import os
-import shutil
 import tempfile
 
 from contextlib import contextmanager
@@ -40,9 +39,9 @@ from contextlib import contextmanager
 from catkin_pkg.package import InvalidPackage, parse_package_string
 from catkin_pkg.packages import find_package_paths
 
+from rosdistro.common import rmtree
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro.vcs import Git, ref_is_hash
-from rosdistro.util import rmtree as util_rmtree
 
 
 def git_manifest_provider(_dist_name, repo, pkg_name):
@@ -108,4 +107,4 @@ def _temp_git_clone(url, ref):
 
         yield base
     finally:
-        util_rmtree(base)
+        rmtree(base)
