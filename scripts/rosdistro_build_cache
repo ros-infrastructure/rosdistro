@@ -94,7 +94,7 @@ def main():
         # write the cache
         data = yaml.dump(cache.get_data(), Dumper=CacheYamlDumper)
 
-        with open('%s-cache.yaml' % dist_name, 'w') as f:
+        with open('%s-cache.yaml' % dist_name, 'w', encoding='utf-8') as f:
             print('- write cache file "%s-cache.yaml"' % dist_name)
             f.write(data)
         with gzip.open('%s-cache.yaml.gz' % dist_name, 'wb') as f:
