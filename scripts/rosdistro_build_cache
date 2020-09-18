@@ -93,7 +93,7 @@ def main():
             continue
         # write the cache
         data = yaml.dump(cache.get_data(), Dumper=CacheYamlDumper)
-        
+
         # On Python 3, we must encode the unicode yaml str prior to writing it,
         # whereas for Python 2, the yaml output is a str which cannot be further
         # encoded (compared with a unicode object).
