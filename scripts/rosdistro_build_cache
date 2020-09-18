@@ -93,16 +93,17 @@ def main():
             continue
         # write the cache
         data = yaml.dump(cache.get_data(), Dumper=CacheYamlDumper)
+        
+        # On Python 3, we must encode the unicode yaml str prior to writing it,
+        # whereas for Python 2, the yaml output is a str which cannot be further
+        # encoded (compared with a unicode object).
+        if sys.version_info[0] >= 3:
+            data = data.encode('utf-8')
 
-        with open('%s-cache.yaml' % dist_name, 'w', encoding='utf-8') as f:
+        with open('%s-cache.yaml' % dist_name, 'wb') as f:
             print('- write cache file "%s-cache.yaml"' % dist_name)
             f.write(data)
         with gzip.open('%s-cache.yaml.gz' % dist_name, 'wb') as f:
-            # On Python 3, we must encode the unicode yaml str prior to gzipping it,
-            # whereas for Python 2, the yaml output is a str which cannot be further
-            # encoded (compared with a unicode object).
-            if sys.version_info[0] >= 3:
-                data = data.encode('utf-8')
             print('- write compressed cache file "%s-cache.yaml.gz"' % dist_name)
             f.write(data)
 
