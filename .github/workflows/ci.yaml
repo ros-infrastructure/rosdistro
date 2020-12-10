@@ -1,0 +1,44 @@
+name: rosdistro-ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: ['*']
+
+jobs:
+    build:
+      strategy:
+        matrix:
+          os: [ubuntu-20.04, macos-latest]
+          python: [3.7, 3.8, 3.9]
+          include:
+          - os: ubuntu-16.04
+            python: 2.7
+          - os: ubuntu-18.04
+            python: 2.7
+          - os: macos-latest
+            python: 2.7
+          - os: ubuntu-16.04
+            python: 3.5
+          - os: ubuntu-18.04
+            python: 3.6
+      name: rosdistro tests
+      runs-on: ${{matrix.os}}
+
+      steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{matrix.python}}
+        uses: actions/setup-python@v1
+        with:
+          python-version: ${{matrix.python}}
+      - name: Install dependencies
+        run: |
+          if [ "${{matrix.python}}" == "2.7" ]; then python -m pip install pyparsing==2.4.7; fi
+          python -m pip install argparse catkin-pkg nose rosdistro rospkg PyYAML setuptools coverage
+          python -m pip install PyYAML argparse catkin_pkg rospkg setuptools
+          python -m pip install coverage mock nose
+          python setup.py build develop
+      - name: Run tests
+        run: |
+          python -m nose --with-xunit test
