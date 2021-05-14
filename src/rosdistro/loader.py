@@ -42,10 +42,14 @@ except ImportError:
     from urllib2 import HTTPError
     from urllib2 import URLError
 
+# to fix errors with SSL certificate verification
+import ssl
+import certifi
 
 def load_url(url, retry=2, retry_period=1, timeout=10, skip_decode=False):
     try:
-        fh = urlopen(url, timeout=timeout)
+        fh = urlopen(url, timeout=timeout,
+                     context=ssl.create_default_context(cafile=certifi.where()))
     except HTTPError as e:
         if e.code in [500, 502, 503] and retry:
             time.sleep(retry_period)
