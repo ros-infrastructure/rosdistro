@@ -8,7 +8,7 @@ import yaml
 class DevelDistro:
     def __init__(self, name):
         url = urlopen('https://raw.github.com/ros/rosdistro/master/releases/{0}-devel.yaml'.format(name))
-        distro = yaml.load(url.read())['repositories']
+        distro = yaml.safe_load(url.read())['repositories']
         self.repositories = {}
         for name, data in distro.iteritems():
             repo = DevelDistroRepo(name, data)

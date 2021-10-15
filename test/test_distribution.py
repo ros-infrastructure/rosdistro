@@ -12,7 +12,7 @@ FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file
 def test_distribution_file():
     url = 'file://' + FILES_DIR + '/foo/distribution.yaml'
     yaml_str = load_url(url)
-    data = yaml.load(yaml_str)
+    data = yaml.safe_load(yaml_str)
     dist_file = DistributionFile('foo', data)
     _validate_dist_file(dist_file)
 
