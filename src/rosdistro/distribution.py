@@ -34,14 +34,15 @@
 from .manifest_provider.bitbucket import bitbucket_manifest_provider
 from .manifest_provider.git import git_manifest_provider, git_source_manifest_provider
 from .manifest_provider.github import github_manifest_provider, github_source_manifest_provider
+from .manifest_provider.gitlab import gitlab_manifest_provider, gitlab_source_manifest_provider
 from .manifest_provider.tar import tar_manifest_provider, tar_source_manifest_provider
 from .package import Package
 
 
 class Distribution(object):
 
-    default_manifest_providers = [github_manifest_provider, bitbucket_manifest_provider, git_manifest_provider, tar_manifest_provider]
-    default_source_manifest_providers = [github_source_manifest_provider, git_source_manifest_provider, tar_source_manifest_provider]
+    default_manifest_providers = [github_manifest_provider, gitlab_manifest_provider, bitbucket_manifest_provider, git_manifest_provider, tar_manifest_provider]
+    default_source_manifest_providers = [github_source_manifest_provider, gitlab_source_manifest_provider, git_source_manifest_provider, tar_source_manifest_provider]
 
     def __init__(self, distribution_file, manifest_providers=None, source_manifest_providers=None):
         self._distribution_file = distribution_file
