@@ -10,7 +10,7 @@ import yaml
 
 
 def migrate(index_yaml):
-    data = yaml.load(open(index_yaml, 'r'))
+    data = yaml.safe_load(open(index_yaml, 'r'))
     assert data['type'] == 'index'
     assert data['version'] == 2
     data['version'] = 3
