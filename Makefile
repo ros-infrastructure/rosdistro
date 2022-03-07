@@ -29,7 +29,7 @@ testsetup:
 	echo "running rosdistro! tests"
 
 test: testsetup
-	python setup.py nosetests
+	cd test && pytest
 
 test--pdb-failures: testsetup
-	python setup.py nosetests --pdb-failures
+	cd test && pytest --pdb

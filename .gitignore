@@ -4,3 +4,4 @@ deb_dist
 dist
 *.pyc
 rosdistro.egg-info
+.coverage
