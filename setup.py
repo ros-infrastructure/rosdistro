@@ -26,8 +26,7 @@ kwargs = {
     ],
     'author': 'Wim Meeussen, Dirk Thomas',
     'author_email': 'wim@hidof.com, dthomas@osrfoundation.org',
-    'maintainer': 'Dirk Thomas',
-    'maintainer_email': 'dthomas@osrfoundation.org',
+    'maintainer': 'ROS Infrastructure Team',
     'url': 'http://wiki.ros.org/rosdistro',
     'keywords': ['ROS'],
     'classifiers': [
