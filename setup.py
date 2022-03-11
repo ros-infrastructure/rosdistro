@@ -28,6 +28,12 @@ kwargs = {
     'author_email': 'wim@hidof.com, dthomas@osrfoundation.org',
     'maintainer': 'ROS Infrastructure Team',
     'url': 'http://wiki.ros.org/rosdistro',
+    'project_urls': {
+        'Source code':
+        'https://github.com/ros-infrastructure/rosdistro',
+        'Issue tracker':
+        'https://github.com/ros-infrastructure/rosdistro/issues',
+    },
     'keywords': ['ROS'],
     'classifiers': [
         'Programming Language :: Python',
