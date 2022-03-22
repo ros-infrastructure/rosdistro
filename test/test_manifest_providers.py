@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 
-import mock
+try:
+    from unittest.mock import patch
+except ImportError:
+    from mock import patch
 
 import rosdistro.manifest_provider.github
 import rosdistro.vcs
@@ -90,7 +93,7 @@ def mock_get_url_contents(req):
     return data
 
 
-@mock.patch('rosdistro.manifest_provider.github._get_url_contents', mock_get_url_contents)
+@patch('rosdistro.manifest_provider.github._get_url_contents', mock_get_url_contents)
 def test_github_source():
     repo_cache = rosdistro.manifest_provider.github.github_source_manifest_provider(_genmsg_source_repo())
 

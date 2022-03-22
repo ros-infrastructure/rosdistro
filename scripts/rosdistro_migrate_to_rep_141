@@ -18,7 +18,7 @@ import yaml
 
 
 def migrate(index_yaml):
-    data = yaml.load(open(index_yaml, 'r'))
+    data = yaml.safe_load(open(index_yaml, 'r'))
     assert data['type'] == 'index'
     assert data['version'] == 1
     data['version'] = 2
@@ -75,7 +75,7 @@ def generate_repos_url(repos_url, doc_url, release_url, source_url):
     data['repositories'] = {}
 
     # migrate release stuff
-    release_data = yaml.load(open(release_url, 'r'))
+    release_data = yaml.safe_load(open(release_url, 'r'))
     assert release_data['type'] == 'release'
     assert release_data['version'] == 1
 
@@ -100,7 +100,7 @@ def generate_repos_url(repos_url, doc_url, release_url, source_url):
         data['repositories'][repo_name] = repo_data
 
     # migrate doc stuff
-    doc_data = yaml.load(open(doc_url, 'r'))
+    doc_data = yaml.safe_load(open(doc_url, 'r'))
     assert doc_data['type'] == 'doc'
     assert doc_data['version'] == 1
 
@@ -111,7 +111,7 @@ def generate_repos_url(repos_url, doc_url, release_url, source_url):
         data['repositories'][repo_name]['doc'] = get_dict_parts(doc_repo_data, ['type', 'url', 'version'])
 
     # migrate source stuff
-    source_data = yaml.load(open(source_url, 'r'))
+    source_data = yaml.safe_load(open(source_url, 'r'))
     assert source_data['type'] == 'source'
     assert source_data['version'] == 1
 
@@ -137,10 +137,10 @@ def update_cache(index_yaml, distro_name, cache_url, cache_file, distribution_fi
     if not isinstance(yaml_str, str):
         yaml_str = yaml_str.decode('utf-8')
     f.close()
-    cache_data = yaml.load(yaml_str)
+    cache_data = yaml.safe_load(yaml_str)
 
     del cache_data['release_file']
-    distribution_data = yaml.load(open(os.path.join(base, distribution_file), 'r'))
+    distribution_data = yaml.safe_load(open(os.path.join(base, distribution_file), 'r'))
     cache_data['distribution_file'] = distribution_data
 
     cache_data['release_package_xmls'] = cache_data['package_xmls']

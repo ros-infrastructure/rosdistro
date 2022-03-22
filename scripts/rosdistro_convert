@@ -58,7 +58,7 @@ def get_targets():
     url = BASE_SRC_URL + '/releases/targets.yaml'
     print('Load "%s"' % url)
     yaml_str = load_url(url)
-    data = yaml.load(yaml_str)
+    data = yaml.safe_load(yaml_str)
     targets = {}
     for d in data:
         targets[d.keys()[0]] = d.values()[0]
@@ -69,13 +69,13 @@ def convert_release(dist_name, targets):
     url = BASE_SRC_URL + '/releases/%s.yaml' % dist_name
     print('Load "%s"' % url)
     yaml_str = load_url(url)
-    input_ = yaml.load(yaml_str)
+    input_ = yaml.safe_load(yaml_str)
 
     # improve conversion performance by reusing results from last run
     last_dist = None
     if os.path.exists(dist_name + '/release.yaml'):
         with open(dist_name + '/release.yaml', 'r') as f:
-            last_data = yaml.load(f.read())
+            last_data = yaml.safe_load(f.read())
             last_dist = ReleaseFile(dist_name, last_data)
 
     output = {}
@@ -162,7 +162,7 @@ def convert_source(dist_name):
     url = BASE_SRC_URL + '/releases/%s-devel.yaml' % dist_name
     print('Load "%s"' % url)
     yaml_str = load_url(url)
-    input_ = yaml.load(yaml_str)
+    input_ = yaml.safe_load(yaml_str)
 
     output = {}
     output['type'] = 'source'
@@ -207,7 +207,7 @@ def convert_doc(dist_name):
         if filename.endswith('.rosinstall'):
             name = os.path.splitext(os.path.basename(filename))[0]
             with open(os.path.join(doc_base, filename)) as f:
-                data = yaml.load(f)
+                data = yaml.safe_load(f)
             if name.endswith('_depends'):
                 rosinstall_depends[name] = data
             else:

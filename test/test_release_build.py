@@ -12,7 +12,7 @@ FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file
 def test_release_build_file():
     url = 'file://' + FILES_DIR + '/foo/release-build.yaml'
     yaml_str = load_url(url)
-    data = yaml.load(yaml_str)
+    data = yaml.safe_load(yaml_str)
     ReleaseBuildFile('foo', data)
 
 
