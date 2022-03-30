@@ -23,6 +23,11 @@ kwargs = {
         'scripts/rosdistro_migrate_to_rep_143',
         'scripts/rosdistro_reformat'
     ],
+    'extras_require': {
+        'test': [
+            "mock; python_version < '3.3'",
+            'pytest',
+        ]},
     'author': 'Wim Meeussen, Dirk Thomas',
     'author_email': 'wim@hidof.com, dthomas@osrfoundation.org',
     'maintainer': 'Dirk Thomas',
