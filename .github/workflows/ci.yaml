@@ -30,4 +30,4 @@ jobs:
         python -m pip install -U -e .[test] pytest-cov -c constraints.txt
     - name: Run tests
       run: |
-        python -m pytest --cov test
+        python -m pytest test --cov
