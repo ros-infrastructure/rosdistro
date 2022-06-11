@@ -11,12 +11,17 @@ import rosdistro.vcs
 from rosdistro.manifest_provider.bitbucket import bitbucket_manifest_provider
 from rosdistro.manifest_provider.cache import CachedManifestProvider, sanitize_xml
 from rosdistro.manifest_provider.git import git_manifest_provider, git_source_manifest_provider
+from rosdistro.manifest_provider.gitlab import gitlab_manifest_provider, gitlab_source_manifest_provider
 from rosdistro.release_repository_specification import ReleaseRepositorySpecification
 from rosdistro.source_repository_specification import SourceRepositorySpecification
 
 
 def test_bitbucket():
     assert '</package>' in bitbucket_manifest_provider('indigo', _rospeex_release_repo(), 'rospeex_msgs')
+
+
+def test_gitlab():
+    assert '</package>' in gitlab_manifest_provider('foxy', _tracetools_analysis_release_repo(), 'tracetools_analysis')
 
 
 def test_cached():
@@ -105,6 +110,17 @@ def test_github_source():
     assert '<version>0.5.11</version>' in package_xml
 
 
+def test_gitlab_source():
+    repo_cache = gitlab_source_manifest_provider(_tracetools_analysis_source_repo())
+
+    # This hash corresponds to the 1.0.3 tag.
+    assert repo_cache.ref() == 'cd30853005ef3a591cb8594b4aa49f9ef400d30f'
+
+    package_path, package_xml = repo_cache['ros2trace_analysis']
+    assert 'ros2trace_analysis' == package_path
+    assert '<version>1.0.3</version>' in package_xml
+
+
 def test_git_source_multi():
     repo_cache = git_source_manifest_provider(_ros_source_repo())
     assert repo_cache.ref()
@@ -177,4 +193,20 @@ def _rospeex_release_repo():
         'tags': {'release': 'release/indigo/{package}/{version}'},
         'url': 'https://bitbucket.org/rospeex/rospeex-release.git',
         'version': '2.14.7-0'
+    })
+
+
+def _tracetools_analysis_release_repo():
+    return ReleaseRepositorySpecification('tracetools_analysis', {
+        'packages': ['ros2trace_analysis', 'tracetools_analysis'],
+        'tags': {'release': 'release/foxy/{package}/{version}'},
+        'url': 'https://gitlab.com/ros-tracing/tracetools_analysis-release.git',
+        'version': '1.0.3-1'
+    })
+
+
+def _tracetools_analysis_source_repo():
+    return SourceRepositorySpecification('tracetools_analysis', {
+        'url': 'https://gitlab.com/ros-tracing/tracetools_analysis.git',
+        'version': '1.0.3'
     })
