@@ -5,6 +5,8 @@ from rosdistro import get_distribution_file, get_index
 
 from rosdistro.writer import yaml_from_distribution_file
 
+from . import path_to_url
+
 FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'files'))
 
 
@@ -30,7 +32,7 @@ def get_diff(expected, actual):
 
 
 def test_verify_files_parsable():
-    url = 'file://' + FILES_DIR + '/index_v2.yaml'
+    url = path_to_url(os.path.join(FILES_DIR, 'index_v2.yaml'))
     index = get_index(url)
     distribution_file = get_distribution_file(index, 'foo')
     data = yaml_from_distribution_file(distribution_file)
