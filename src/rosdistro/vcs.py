@@ -67,7 +67,7 @@ def ref_is_hash(ref):
 def _run_command(cmd, cwd=None, env=None):
     result = {'cmd': ' '.join(cmd), 'cwd': cwd}
     try:
-        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, env=env)
         output, _ = proc.communicate()
         result['output'] = output.rstrip()
         result['returncode'] = proc.returncode

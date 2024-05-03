@@ -69,7 +69,7 @@ def tar_manifest_provider(_dist_name, repo, pkg_name):
 
     response = urlopen(request)
     with tarfile.open(fileobj=io.BytesIO(response.read())) as tar:
-        package_xml = tar.extractfile(os.path.join(subdir, 'package.xml')).read()
+        package_xml = tar.extractfile(subdir + '/package.xml').read()
 
         # Python2 returns strings, Python3 returns bytes-- support both
         try:
