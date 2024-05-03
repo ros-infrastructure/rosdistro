@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import os
+
 try:
     from unittest.mock import patch
 except ImportError:
@@ -109,7 +111,7 @@ def test_git_source_multi():
     repo_cache = git_source_manifest_provider(_ros_source_repo())
     assert repo_cache.ref()
     package_path, package_xml = repo_cache['roslib']
-    assert package_path == 'core/roslib'
+    assert package_path == os.path.join('core', 'roslib')
 
 
 def test_tar_source():
