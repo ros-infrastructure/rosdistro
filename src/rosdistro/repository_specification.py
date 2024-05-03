@@ -38,7 +38,7 @@ from .vcs import Git
 
 class RepositorySpecification(object):
     # Match groups are server and path on server.
-    VCS_REGEX = re.compile('(?:https?:\/\/|ssh:\/\/|git:\/\/|git@)((?:[a-fA-F0-9]{40}@)?[\w.-]+)[:/]([\w/-]*)(?:\.git)?$')
+    VCS_REGEX = re.compile(r'(?:https?:\/\/|ssh:\/\/|git:\/\/|git@)((?:[a-fA-F0-9]{40}@)?[\w.-]+)[:/]([\w/-]*)(?:\.git)?$')
 
     def __init__(self, name, data):
         self.name = name
