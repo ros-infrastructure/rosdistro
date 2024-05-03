@@ -1,3 +1,12 @@
+0.9.1 (2024-05-03 13:38:00 -0500)
+---------------------------------
+
+- Don't capture stderr when running git commands. `#179 <https://github.com/ros-infrastructure/rosdistro/issues/179>`_
+- Enable CI testing on Windows now that tests pass. `#180 <https://github.com/ros-infrastructure/rosdistro/issues/180>`_
+- Switch to a raw string for various regexes. `#174 <https://github.com/ros-infrastructure/rosdistro/issues/174>`_
+- Make path operations and conversions portable in tests. `#177 <https://github.com/ros-infrastructure/rosdistro/issues/177>`_
+- Don't use os.path.sep for creating tar paths. `#178 <https://github.com/ros-infrastructure/rosdistro/issues/178>`_
+
 0.9.0 (2022-06-09 19:15:00 -0700)
 ---------------------------------
 
