@@ -4,6 +4,7 @@ from rosdistro import get_distribution_file
 from rosdistro import get_distribution_files
 from rosdistro import get_index
 from rosdistro import get_index_url
+from rosdistro import get_package_condition_context
 
 from . import path_to_url
 
@@ -96,3 +97,15 @@ def test_get_index_from_http_with_query_parameters():
         get_distribution_file(i, 'foo')
     finally:
         proc.terminate()
+
+
+def test_get_condition_context():
+    url = path_to_url(os.path.join(FILES_DIR, 'index_v4.yaml'))
+    i = get_index(url)
+    condition_context = get_package_condition_context(i, 'foo')
+
+    assert condition_context == {
+        'ROS_DISTRO': 'foo',
+        'ROS_PYTHON_VERSION': '3',
+        'ROS_VERSION': '1',
+    }

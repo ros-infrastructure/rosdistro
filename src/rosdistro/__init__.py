@@ -179,6 +179,29 @@ def get_distribution_cache(index, dist_name):
     return DistributionCache(dist_name, data)
 
 
+def get_package_condition_context(index, dist_name):
+    if dist_name not in index.distributions.keys():
+        raise RuntimeError("Unknown distribution: '{0}'. Valid distribution names are: {1}".format(dist_name, ', '.join(sorted(index.distributions.keys()))))
+
+    condition_context = {
+        'ROS_DISTRO': dist_name,
+    }
+
+    dist = index.distributions[dist_name]
+    python_version = dist.get('python_version')
+    if python_version:
+        condition_context['ROS_PYTHON_VERSION'] = str(python_version)
+
+    ros_version = {
+        'ros1': '1',
+        'ros2': '2',
+    }.get(dist.get('distribution_type'))
+    if ros_version:
+        condition_context['ROS_VERSION'] = ros_version
+
+    return condition_context
+
+
 # internal
 
 def _get_dist_file_data(index, dist_name, type_):
