@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import os
 
@@ -11,6 +11,7 @@ kwargs = {
     # - stdeb.cfg
     'version': '0.9.1',
     'install_requires': ['PyYAML', 'setuptools'],
+    'python_requires': '>=3.6',
     'packages': find_packages('src'),
     'package_dir': {'': 'src'},
     'scripts': [
@@ -25,7 +26,6 @@ kwargs = {
     ],
     'extras_require': {
         'test': [
-            "mock; python_version < '3.3'",
             'pytest',
         ]},
     'author': 'Wim Meeussen, Dirk Thomas',
