@@ -1,11 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import os
-
-try:
-    from unittest.mock import patch
-except ImportError:
-    from mock import patch
+from unittest.mock import patch
 
 import rosdistro.manifest_provider.github
 import rosdistro.vcs
