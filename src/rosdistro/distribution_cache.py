@@ -31,8 +31,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
-
 import sys
 
 from . import logger
@@ -70,11 +68,6 @@ class DistributionCache(object):
             for repo_name, repo_data in data['source_repo_package_xmls'].items():
                 self.source_repo_package_xmls[repo_name] = SourceRepositoryCache(repo_data)
         self.distribution_file.source_packages = self.get_source_packages()
-
-        # if Python 2 has converted the xml to unicode, convert it back
-        for k, v in self.release_package_xmls.items():
-            if not isinstance(v, str) and not isinstance(v, bytes):
-                self.release_package_xmls[k] = v.encode('utf-8')
 
     def get_data(self):
         data = {}
