@@ -90,9 +90,7 @@ def main():
         if args.dist_names and dist_name not in args.dist_names:
             continue
         # write the cache
-        data = yaml.dump(cache.get_data(), Dumper=CacheYamlDumper)
-
-        data = data.encode('utf-8')
+        data = yaml.dump(cache.get_data(), Dumper=CacheYamlDumper).encode()
 
         with open('%s-cache.yaml' % dist_name, 'wb') as f:
             print('- write cache file "%s-cache.yaml"' % dist_name)
