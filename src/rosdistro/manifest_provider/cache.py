@@ -38,8 +38,7 @@ from rosdistro import logger
 
 def sanitize_xml(xml_string):
     """ Returns a version of the supplied XML string with comments and all whitespace stripped,
-    including runs of spaces internal to text nodes. The returned string will be encoded,
-    so str (Python 2) or bytes (Python 3).
+    including runs of spaces internal to text nodes. The returned value will be bytes.
     """
     def _squash(node):
         # remove comment nodes
@@ -58,22 +57,9 @@ def sanitize_xml(xml_string):
             if x.nodeType == minidom.Node.ELEMENT_NODE:
                 _squash(x)
         return node
-    try:
-        # Python 2. The minidom module parses as ascii, so we have to pre-encode.
-        if isinstance(xml_string, unicode):
-            xml_string = xml_string.encode('utf-8')
-    except NameError:
-        # Python 3. Strings are native unicode.
-        pass
 
     xml_node = _squash(minidom.parseString(xml_string))
-    try:
-        # Python 2. Encode the resultant XML as a str.
-        unicode
-        return xml_node.toxml('utf-8')
-    except NameError:
-        # Python 3. Return native bytes.
-        return xml_node.toxml()
+    return xml_node.toxml()
 
 
 class CachedManifestProvider(object):

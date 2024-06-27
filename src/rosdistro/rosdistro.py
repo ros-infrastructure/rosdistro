@@ -4,12 +4,8 @@ import sys
 import tarfile
 import tempfile
 import threading
-try:
-    from urllib.request import urlopen
-    from urllib.error import HTTPError
-except ImportError:
-    from urllib2 import urlopen
-    from urllib2 import HTTPError
+from urllib.request import urlopen
+from urllib.error import HTTPError
 
 import yaml
 
@@ -382,8 +378,6 @@ def retrieve_dependencies(package_xml):
 
 
 def get_package_dependencies(package_xml):
-    if not os.path.abspath("/usr/lib/pymodules/python2.7") in sys.path:
-        sys.path.append("/usr/lib/pymodules/python2.7")
     from catkin_pkg import package as catkin_pkg
 
     pkg = catkin_pkg.parse_package_string(package_xml)

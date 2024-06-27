@@ -62,15 +62,9 @@ def test_git_source():
 def mock_get_url_contents(req):
     import re
 
-    # For python3, look for the 'str' type; for Python 2, the 'unicode' type
-    try:
-        text_type = unicode
-    except NameError:
-        text_type = str
-
-    # The urlopen() function from urllib or urllib2 takes either a string or a
-    # urllib.Request object in; determine the URL in either case.
-    if isinstance(req, text_type):
+    # The urlopen() function from urllib takes either a string or a
+    # urllib.request.Request object in; determine the URL in either case.
+    if isinstance(req, str):
         haystack = req
     else:
         haystack = req.get_full_url()
@@ -124,7 +118,7 @@ def test_sanitize():
     assert '<a>abc</a>' in sanitize_xml('<a>ab<!-- comment -->c</a>')
     assert '<a><b/><c>ab c</c></a>' in sanitize_xml('<a><b> </b>  <c>  ab  c  </c></a>')
 
-    # This unicode check should be valid on both Python 2 and 3.
+    # This unicode check should be valid.
     assert '<a>français</a>' in sanitize_xml('<a> français  </a>')
 
     # subsequent parse calls will collapse empty tags, therefore sanitize should do the same

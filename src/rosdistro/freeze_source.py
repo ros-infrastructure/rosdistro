@@ -31,8 +31,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
-
 import subprocess
 import sys
 import threading
@@ -108,11 +106,6 @@ def _worker(work_queue):
                 elif ref in ('refs/heads/%s' % freeze_version, 'refs/tags/%s' % freeze_version):
                     source_repo.version = hash
                     break
-
-            if not isinstance(source_repo.version, str):
-                # On Python 2, explicitly encode back to string. Unnecessary on Python 3, because
-                # we're already a unicode string since subprocess.check_output returned a bytes.
-                source_repo.version = source_repo.version.encode()
 
             work_queue.task_done()
 

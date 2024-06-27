@@ -36,11 +36,7 @@ import os
 import tarfile
 import tempfile
 import urllib
-
-try:
-    from urllib.request import urlopen, Request
-except ImportError:
-    from urllib2 import urlopen, Request
+from urllib.request import urlopen, Request
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
 from catkin_pkg.packages import find_package_paths
@@ -70,12 +66,7 @@ def tar_manifest_provider(_dist_name, repo, pkg_name):
     response = urlopen(request)
     with tarfile.open(fileobj=io.BytesIO(response.read())) as tar:
         package_xml = tar.extractfile(subdir + '/package.xml').read()
-
-        # Python2 returns strings, Python3 returns bytes-- support both
-        try:
-            return package_xml.decode('utf-8')
-        except AttributeError:
-            return package_xml
+        return package_xml.decode('utf-8')
 
 
 def tar_source_manifest_provider(repo):
