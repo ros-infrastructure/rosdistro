@@ -3,6 +3,7 @@
 import argparse
 import gzip
 import os
+import sys
 
 try:
     from cStringIO import StringIO
@@ -163,9 +164,13 @@ def get_dict_parts(d, keys):
     return data
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description='Migrate the distros from REP 137 to REP 141.')
     parser.add_argument('index', help='The index.yaml file to migrate')
     args = parser.parse_args()
 
     migrate(args.index)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

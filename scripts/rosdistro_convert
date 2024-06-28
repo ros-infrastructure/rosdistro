@@ -257,10 +257,14 @@ def convert_doc(dist_name):
         f.write(yaml_str)
 
 
-if __name__ == '__main__':
+def main():
     targets = get_targets()
     for distro in ['groovy', 'hydro']:
         print('\nConverting "%s"\n' % distro)
         convert_release(distro, targets)
         convert_source(distro)
         convert_doc(distro)
+
+
+if __name__ == '__main__':
+    sys.exit(main())
