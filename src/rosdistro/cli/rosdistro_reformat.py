@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # Software License Agreement (BSD License)
 #
 # Copyright (c) 2013, Open Source Robotics Foundation, Inc.

@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+
+import sys
+
+from rosdistro.cli.rosdistro_migrate_to_rep_143 import main
+
+if __name__ == '__main__':
+    print('The rosdistro_migrate_to_rep_143 script is deprecated. Use python3 '
+          "-m 'rosdistro.cli.rosdistro_migrate_to_rep_143' instead.\n",
+          file=sys.stderr)
+    sys.exit(main())

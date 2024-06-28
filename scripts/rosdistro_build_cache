@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+
+import sys
+
+from rosdistro.cli.rosdistro_build_cache import main
+
+if __name__ == '__main__':
+    print('The rosdistro_build_cache script is deprecated. Use python3 '
+          "-m 'rosdistro.cli.rosdistro_build_cache' instead.\n",
+          file=sys.stderr)
+    sys.exit(main())
