@@ -84,7 +84,7 @@ def main():
             ignore_local=args.ignore_local, include_source=args.include_source, debug=args.debug)
     except RuntimeError as e:
         print(str(e), file=sys.stderr)
-        sys.exit(1)
+        return 1
 
     for dist_name, cache in caches.items():
         if args.dist_names and dist_name not in args.dist_names:
@@ -101,4 +101,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
