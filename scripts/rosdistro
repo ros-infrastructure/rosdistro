@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+
+import sys
+
+from rosdistro.cli.rosdistro import main
+
+if __name__ == '__main__':
+    print('The rosdistro script is deprecated. Use python3 '
+          "-m 'rosdistro.cli.rosdistro' instead.\n",
+          file=sys.stderr)
+    sys.exit(main())
