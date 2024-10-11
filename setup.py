@@ -54,7 +54,7 @@ if 'SKIP_PYTHON_MODULES' in os.environ:
     kwargs['package_dir'] = {}
 elif 'SKIP_PYTHON_SCRIPTS' in os.environ:
     kwargs['name'] += '_modules'
-    kwargs['entry_points'] = []
+    kwargs['entry_points'] = {}
 else:
     kwargs['install_requires'] += ['catkin_pkg', 'rospkg']
 
