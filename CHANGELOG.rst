@@ -1,3 +1,10 @@
+1.0.0 (2024-10-11 10:00:00 -0500)
+---------------------------------
+
+- Migrate from 'scripts' to 'entry_points.console_scripts'. `#186 <https://github.com/ros-infrastructure/rosdistro/pull/186>`_
+- Add get_package_condition_context function. `#182 <https://github.com/ros-infrastructure/rosdistro/pull/182>`_
+- Drop support for Python 2. `#183 <https://github.com/ros-infrastructure/rosdistro/pull/183>`_
+
 0.9.1 (2024-05-03 13:38:00 -0500)
 ---------------------------------
 
