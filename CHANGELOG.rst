@@ -1,3 +1,8 @@
+1.0.1 (2024-10-19 08:45:00 -0500)
+---------------------------------
+
+- Fix load_url retry for binary streams. `#192 <https://github.com/ros-infrastructure/rosdistro/pull/192>`_
+
 1.0.0 (2024-10-11 10:00:00 -0500)
 ---------------------------------
 
