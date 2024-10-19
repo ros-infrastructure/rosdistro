@@ -44,13 +44,13 @@ def load_url(url, retry=2, retry_period=1, timeout=10, skip_decode=False):
     except HTTPError as e:
         if e.code in [500, 502, 503] and retry:
             time.sleep(retry_period)
-            return load_url(url, retry=retry - 1, retry_period=retry_period, timeout=timeout)
+            return load_url(url, retry=retry - 1, retry_period=retry_period, timeout=timeout, skip_decode=skip_decode)
         e.msg += ' (%s)' % url
         raise
     except URLError as e:
         if isinstance(e.reason, socket.timeout) and retry:
             time.sleep(retry_period)
-            return load_url(url, retry=retry - 1, retry_period=retry_period, timeout=timeout)
+            return load_url(url, retry=retry - 1, retry_period=retry_period, timeout=timeout, skip_decode=skip_decode)
         raise URLError(str(e) + ' (%s)' % url)
     except socket.timeout as e:
         raise socket.timeout(str(e) + ' (%s)' % url)
