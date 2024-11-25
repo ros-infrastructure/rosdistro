@@ -31,15 +31,10 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-try:
-    from urllib.request import urlopen, Request
-    from urllib.error import URLError
-except ImportError:
-    from urllib2 import urlopen, Request
-    from urllib2 import URLError
-
 import base64
 import os
+from urllib.request import urlopen, Request
+from urllib.error import URLError
 
 from rosdistro import logger
 

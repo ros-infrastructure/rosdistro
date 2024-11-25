@@ -31,8 +31,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
-
 import gzip
 import logging
 import os
@@ -61,7 +59,7 @@ from .manifest_provider.cache import CachedManifestProvider, CachedSourceManifes
 # same version as in:
 # - setup.py
 # - stdeb.cfg
-__version__ = '0.8.3'
+__version__ = '1.0.1'
 
 # index information
 
@@ -177,6 +175,29 @@ def get_distribution_cache(index, dist_name):
     yaml_str = get_distribution_cache_string(index, dist_name)
     data = yaml.safe_load(yaml_str)
     return DistributionCache(dist_name, data)
+
+
+def get_package_condition_context(index, dist_name):
+    if dist_name not in index.distributions.keys():
+        raise RuntimeError("Unknown distribution: '{0}'. Valid distribution names are: {1}".format(dist_name, ', '.join(sorted(index.distributions.keys()))))
+
+    condition_context = {
+        'ROS_DISTRO': dist_name,
+    }
+
+    dist = index.distributions[dist_name]
+    python_version = dist.get('python_version')
+    if python_version:
+        condition_context['ROS_PYTHON_VERSION'] = str(python_version)
+
+    ros_version = {
+        'ros1': '1',
+        'ros2': '2',
+    }.get(dist.get('distribution_type'))
+    if ros_version:
+        condition_context['ROS_VERSION'] = ros_version
+
+    return condition_context
 
 
 # internal

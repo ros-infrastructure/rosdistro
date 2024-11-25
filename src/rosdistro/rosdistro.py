@@ -4,12 +4,8 @@ import sys
 import tarfile
 import tempfile
 import threading
-try:
-    from urllib.request import urlopen
-    from urllib.error import HTTPError
-except ImportError:
-    from urllib2 import urlopen
-    from urllib2 import HTTPError
+from urllib.request import urlopen
+from urllib.error import HTTPError
 
 import yaml
 
@@ -161,7 +157,7 @@ class RosDistroFile:
 
         # parse ros distro file
         distro_url = urlopen('https://raw.github.com/ros/rosdistro/master/releases/%s.yaml' % name)
-        distro = yaml.load(distro_url.read())['repositories']
+        distro = yaml.safe_load(distro_url.read())['repositories']
 
         # loop over all repo's
         for repo_name, data in distro.iteritems():
@@ -338,7 +334,7 @@ class RosDependencies:
 
             tar = tarfile.open(fh.name, 'r')
         data = tar.extractfile(self.file_name)
-        deps = yaml.load(data.read())
+        deps = yaml.safe_load(data.read())
         if not deps \
            or 'cache_version' not in deps \
            or deps['cache_version'] != CACHE_VERSION \
@@ -382,8 +378,6 @@ def retrieve_dependencies(package_xml):
 
 
 def get_package_dependencies(package_xml):
-    if not os.path.abspath("/usr/lib/pymodules/python2.7") in sys.path:
-        sys.path.append("/usr/lib/pymodules/python2.7")
     from catkin_pkg import package as catkin_pkg
 
     pkg = catkin_pkg.parse_package_string(package_xml)

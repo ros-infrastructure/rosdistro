@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 from errno import EACCES, EPERM
 import os
 import shutil

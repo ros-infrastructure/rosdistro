@@ -31,31 +31,39 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import socket
-import time
-from urllib.request import urlopen
-from urllib.error import HTTPError
-from urllib.error import URLError
+import argparse
+import os
+import sys
+
+from rosdistro.verify import reformat_files
+from rosdistro.verify import verify_files_identical
 
 
-def load_url(url, retry=2, retry_period=1, timeout=10, skip_decode=False):
-    try:
-        fh = urlopen(url, timeout=timeout)
-    except HTTPError as e:
-        if e.code in [500, 502, 503] and retry:
-            time.sleep(retry_period)
-            return load_url(url, retry=retry - 1, retry_period=retry_period, timeout=timeout, skip_decode=skip_decode)
-        e.msg += ' (%s)' % url
-        raise
-    except URLError as e:
-        if isinstance(e.reason, socket.timeout) and retry:
-            time.sleep(retry_period)
-            return load_url(url, retry=retry - 1, retry_period=retry_period, timeout=timeout, skip_decode=skip_decode)
-        raise URLError(str(e) + ' (%s)' % url)
-    except socket.timeout as e:
-        raise socket.timeout(str(e) + ' (%s)' % url)
-    contents = fh.read()
-    if skip_decode:
-        return contents
+def parse_args(args=sys.argv[1:]):
+    parser = argparse.ArgumentParser(
+        description='Reformat the rosdistro files by reading and overwriting each file referenced from the index.'
+    )
+    add = parser.add_argument
+    add(
+        'index',
+        help='The path or url of the index.yaml file (must be either a local file or a file:// url)')
+    add(
+        '-n', '--dry-run', action='store_true',
+        help="Don't actually overwrite any files, just show what would be done.")
+    return parser.parse_args(args)
+
+
+def main():
+    args = parse_args()
+    index = args.index
+    if os.path.isfile(index):
+        index = 'file://' + os.path.abspath(index)
+    if args.dry_run:
+        success = verify_files_identical(index)
     else:
-        return contents.decode('utf-8')
+        success = reformat_files(index)
+    return 0 if success else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

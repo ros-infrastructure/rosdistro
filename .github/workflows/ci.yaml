@@ -1,0 +1,19 @@
+---
+name: Run tests
+
+on:  # yamllint disable-line rule:truthy
+  push:
+    branches: ['master']
+  pull_request:
+
+jobs:
+  pytest:
+    uses: ros-infrastructure/ci/.github/workflows/pytest.yaml@main
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: >-
+          yamllint .
+          -f github
+          -d '{extends: default, ignore: [test/files/foo/*.yaml]}'

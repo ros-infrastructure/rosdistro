@@ -8,5 +8,6 @@ distributions:
     distribution_cache: foo/release-cache.yaml
     distribution_status: active
     distribution_type: ros1
+    python_version: 3
 type: index
 version: 4

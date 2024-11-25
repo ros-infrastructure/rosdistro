@@ -31,8 +31,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
-
 import gzip
 import os
 import re
@@ -107,7 +105,7 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
             errors.append('%s: invalid package.xml file for package "%s": %s' % (dist_name, pkg_name, e))
             continue
         # check that version numbers match (at least without deb inc)
-        if not re.match('^%s(-[\dA-z~\+\.]+)?$' % re.escape(pkg.version), repo.version):
+        if not re.match(r'^%s(-[\dA-z~\+\.]+)?$' % re.escape(pkg.version), repo.version):
             errors.append('%s: different version in package.xml (%s) for package "%s" than for the repository (%s) (after removing the debian increment)' % (dist_name, pkg.version, pkg_name, repo.version))
 
         if package_xml != old_package_xml:
@@ -155,12 +153,7 @@ class CacheYamlDumper(yaml.SafeDumper):
 
     def ignore_aliases(self, content):
         """ Allow strings that look like package XML to alias to each other in the YAML output. """
-        try:
-            basestring
-        except NameError:
-            # Python 3
-            basestring = str
-        return not (isinstance(content, basestring) and '<package' in content)
+        return not (isinstance(content, str) and '<package' in content)
 
     def represent_mapping(self, tag, mapping, flow_style=False):
         """ Gives compact representation for the distribution_file section, while allowing the package

@@ -31,8 +31,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from __future__ import print_function
-
 import gzip
 try:
     from cStringIO import StringIO
@@ -122,7 +120,7 @@ def get_release_cache(index, dist_name):
         f.close()
     else:
         raise NotImplementedError('The url of the cache must end with either ".yaml" or ".yaml.gz"')
-    data = yaml.load(yaml_str)
+    data = yaml.safe_load(yaml_str)
     return ReleaseCache(dist_name, data)
 
 

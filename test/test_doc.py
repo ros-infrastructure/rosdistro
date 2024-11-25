@@ -6,19 +6,21 @@ from rosdistro.loader import load_url
 
 import yaml
 
+from . import path_to_url
+
 FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'files'))
 
 
 def test_doc_file():
-    url = 'file://' + FILES_DIR + '/foo/distribution.yaml'
+    url = path_to_url(os.path.join(FILES_DIR, 'foo', 'distribution.yaml'))
     yaml_str = load_url(url)
-    data = yaml.load(yaml_str)
+    data = yaml.safe_load(yaml_str)
     doc_file = DocFile('foo', data)
     _validate_doc_file(doc_file)
 
 
 def test_get_doc_file():
-    url = 'file://' + FILES_DIR + '/index_v2.yaml'
+    url = path_to_url(os.path.join(FILES_DIR, 'index_v2.yaml'))
     i = get_index(url)
     doc_file = get_doc_file(i, 'foo')
     _validate_doc_file(doc_file)

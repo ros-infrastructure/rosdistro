@@ -4,6 +4,9 @@ from rosdistro import get_distribution_file
 from rosdistro import get_distribution_files
 from rosdistro import get_index
 from rosdistro import get_index_url
+from rosdistro import get_package_condition_context
+
+from . import path_to_url
 
 FILES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'files'))
 
@@ -13,7 +16,7 @@ def test_get_index_url():
 
 
 def test_get_index_v2():
-    url = 'file://' + FILES_DIR + '/index_v2.yaml'
+    url = path_to_url(os.path.join(FILES_DIR, 'index_v2.yaml'))
     i = get_index(url)
     assert len(i.distributions.keys()) == 1
     assert 'foo' in i.distributions.keys()
@@ -23,7 +26,7 @@ def test_get_index_v2():
 
 
 def test_get_index_v3():
-    url = 'file://' + FILES_DIR + '/index_v3.yaml'
+    url = path_to_url(os.path.join(FILES_DIR, 'index_v3.yaml'))
     i = get_index(url)
     assert len(i.distributions.keys()) == 1
     assert 'foo' in i.distributions.keys()
@@ -37,7 +40,7 @@ def test_get_index_v3():
 
 
 def test_get_index_v3_invalid():
-    url = 'file://' + FILES_DIR + '/index_v3_invalid.yaml'
+    url = path_to_url(os.path.join(FILES_DIR, 'index_v3_invalid.yaml'))
     i = get_index(url)
 
     dist_files = get_distribution_files(i, 'foo')
@@ -50,7 +53,7 @@ def test_get_index_v3_invalid():
 
 
 def test_get_index_v4():
-    url = 'file://' + FILES_DIR + '/index_v4.yaml'
+    url = path_to_url(os.path.join(FILES_DIR, 'index_v4.yaml'))
     i = get_index(url)
     assert len(i.distributions.keys()) == 1
     assert 'foo' in i.distributions.keys()
@@ -94,3 +97,15 @@ def test_get_index_from_http_with_query_parameters():
         get_distribution_file(i, 'foo')
     finally:
         proc.terminate()
+
+
+def test_get_condition_context():
+    url = path_to_url(os.path.join(FILES_DIR, 'index_v4.yaml'))
+    i = get_index(url)
+    condition_context = get_package_condition_context(i, 'foo')
+
+    assert condition_context == {
+        'ROS_DISTRO': 'foo',
+        'ROS_PYTHON_VERSION': '3',
+        'ROS_VERSION': '1',
+    }
