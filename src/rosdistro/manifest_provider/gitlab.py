@@ -37,6 +37,7 @@ import re
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 from urllib.parse import quote as urlquote
+from urllib.parse import urlencode
 
 from catkin_pkg.package import parse_package_string
 
@@ -56,7 +57,7 @@ def _gitlab_urlopen(url):
 def _gitlab_api_query(server, path, resource, attrs):
     url = 'https://%s/api/v4/projects/%s/%s' % (server, urlquote(path, safe=''), resource)
     if attrs:
-        url += '?' + '&'.join(k + '=' + urlquote(str(v), safe='') for k, v in attrs.items())
+        url += '?' + urlencode(attrs)
     return _gitlab_urlopen(url)
 
 
@@ -70,7 +71,7 @@ def _gitlab_paged_api_query(server, path, resource, attrs):
 
     url = 'https://%s/api/v4/projects/%s/%s' % (server, urlquote(path, safe=''), resource)
     if _attrs:
-        url += '?' + '&'.join(k + '=' + urlquote(str(v), safe='') for k, v in _attrs.items())
+        url += '?' + urlencode(_attrs)
 
     while True:
         with _gitlab_urlopen(url) as res:
