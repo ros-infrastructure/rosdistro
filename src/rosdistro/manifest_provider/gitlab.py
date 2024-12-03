@@ -45,6 +45,7 @@ from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro import logger
 
 GITLAB_PRIVATE_TOKEN = os.getenv('GITLAB_PRIVATE_TOKEN', None)
+ROSDISTRO_GITLAB_SERVER = os.getenv('ROSDISTRO_GITLAB_SERVER', None)
 
 def _gitlab_urlopen(url):
     req = Request(url)
@@ -91,7 +92,7 @@ def _gitlab_paged_api_query(server, path, resource, attrs):
 def gitlab_manifest_provider(_dist_name, repo, pkg_name):
     assert repo.version
     server, path = repo.get_url_parts()
-    if not server.startswith('gitlab.'):
+    if not server.endswith('gitlab.com') and server != ROSDISTRO_GITLAB_SERVER:
         logger.debug('Skip non-gitlab url "%s"' % repo.url)
         raise RuntimeError('can not handle non gitlab urls')
 
@@ -110,7 +111,7 @@ def gitlab_manifest_provider(_dist_name, repo, pkg_name):
 def gitlab_source_manifest_provider(repo):
     assert repo.version
     server, path = repo.get_url_parts()
-    if not server.startswith('gitlab.'):
+    if not server.endswith('gitlab.com') and server != ROSDISTRO_GITLAB_SERVER:
         logger.debug('Skip non-gitlab url "%s"' % repo.url)
         raise RuntimeError('can not handle non gitlab urls')
 
