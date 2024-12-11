@@ -36,7 +36,7 @@ import os
 import re
 import subprocess
 
-from distutils.version import LooseVersion
+from packaging.version import parse
 
 
 class Git(object):
@@ -57,7 +57,7 @@ class Git(object):
         if not cls._client_version:
             result = cls().command('--version')
             cls._client_version = result['output'].split()[-1]
-        return LooseVersion(cls._client_version) >= LooseVersion(version)
+        return parse(cls._client_version) >= parse(version)
 
 
 def ref_is_hash(ref):
