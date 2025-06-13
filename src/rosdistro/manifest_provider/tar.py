@@ -48,7 +48,7 @@ from rosdistro import logger
 _TAR_USER = os.getenv('TAR_USER', None)
 _TAR_PASSWORD = os.getenv('TAR_PASSWORD', None)
 
-def tar_manifest_provider(_dist_name, repo, pkg_name):
+def tar_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     assert repo.type == 'tar'
 
     subdir = repo.get_release_tag(pkg_name)
@@ -65,7 +65,7 @@ def tar_manifest_provider(_dist_name, repo, pkg_name):
 
     response = urlopen(request)
     with tarfile.open(fileobj=io.BytesIO(response.read())) as tar:
-        package_xml = tar.extractfile(subdir + '/package.xml').read()
+        package_xml = tar.extractfile(subdir + '/' + filepath).read()
         return package_xml.decode('utf-8')
 
 

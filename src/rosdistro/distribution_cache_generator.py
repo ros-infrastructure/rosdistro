@@ -111,6 +111,24 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
         if package_xml != old_package_xml:
             print("  - updated manifest of package '%s' to version '%s'" % (pkg_name, pkg.version))
 
+        old_readme = None
+        if cache and pkg_name in cache.release_readmes:
+            old_readme = cache.release_readmes[pkg_name]
+        readme = dist.get_release_readme(pkg_name)
+
+        if readme != old_readme:
+            print("  - updated README.md of package '%s'" % (pkg_name))        
+
+        old_changelog = None
+        if cache and pkg_name in cache.release_changelogs:
+            old_changelog = cache.release_changelogs[pkg_name]
+        changelog = dist.get_release_changelog(pkg_name)
+
+        if changelog != old_changelog:
+            print("  - updated CHANGELOG.rst of package '%s'" % (pkg_name))        
+
+
+
     if not debug:
         print('')
 
@@ -187,7 +205,7 @@ def _get_cached_distribution(index, dist_name, preclean=False, ignore_local=Fals
                 # get distribution cache
                 cache = get_distribution_cache(index, dist_name)
     except Exception as e:
-        print('- failed to fetch old cache: %s' % e)
+        print('- failed to fetch old cache: %s' % e.what())
 
     if cache:
         print('- update cache')

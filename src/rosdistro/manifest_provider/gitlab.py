@@ -89,14 +89,14 @@ def _gitlab_paged_api_query(server, path, resource, attrs):
             url = match.group(1)
 
 
-def gitlab_manifest_provider(_dist_name, repo, pkg_name):
+def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     assert repo.version
     server, path = repo.get_url_parts()
     if not server.endswith('gitlab.com') and server != ROSDISTRO_GITLAB_SERVER:
         logger.debug('Skip non-gitlab url "%s"' % repo.url)
         raise RuntimeError('can not handle non gitlab urls')
 
-    resource = 'repository/files/package.xml/raw'
+    resource = 'repository/files/%s/raw' % filepath
     attrs = {
         'ref': repo.get_release_tag(pkg_name),
     }

@@ -58,6 +58,8 @@ class Distribution(object):
             self._source_manifest_providers = source_manifest_providers
 
         self._release_package_xmls = {}
+        self._release_readmes = {}
+        self._release_changelogs = {}
         self._source_repo_package_xmls = {}
 
     def __getattr__(self, name):
@@ -75,11 +77,47 @@ class Distribution(object):
                 return None
             package_xml = None
             for mp in self._manifest_providers:
-                package_xml = mp(self._distribution_file.name, repo, pkg_name)
+                package_xml = mp(self._distribution_file.name, repo, pkg_name, 'package.xml')
                 if package_xml is not None:
                     break
             self._release_package_xmls[pkg_name] = package_xml
         return self._release_package_xmls[pkg_name]
+
+    def get_release_readme(self, pkg_name):
+        if pkg_name not in self._release_readmes:
+            pkg = self._distribution_file.release_packages[pkg_name]
+            repo_name = pkg.repository_name
+            repo = self._distribution_file.repositories[repo_name]
+            if repo.release_repository is None:
+                return None
+            repo = repo.release_repository
+            if repo.version is None:
+                return None
+            readme = None
+            for mp in self._manifest_providers:
+                readme = mp(self._distribution_file.name, repo, pkg_name, filepath='README.md')
+                if readme is not None:
+                    break
+            self._release_readmes[pkg_name] = readme
+        return self._release_readmes[pkg_name]
+
+    def get_release_changelog(self, pkg_name):
+        if pkg_name not in self._release_changelogs:
+            pkg = self._distribution_file.release_packages[pkg_name]
+            repo_name = pkg.repository_name
+            repo = self._distribution_file.repositories[repo_name]
+            if repo.release_repository is None:
+                return None
+            repo = repo.release_repository
+            if repo.version is None:
+                return None
+            changelog = None
+            for mp in self._manifest_providers:
+                changelog = mp(self._distribution_file.name, repo, pkg_name, filepath='CHANGELOG.rst')
+                if changelog is not None:
+                    break
+            self._release_changelogs[pkg_name] = changelog
+        return self._release_changelogs[pkg_name]
 
     def get_source_package_xml(self, pkg_name):
         repo_name = self._distribution_file.source_packages[pkg_name].repository_name

@@ -62,7 +62,9 @@ class DistributionCache(object):
 
         self._distribution_file_data = data['distribution_file'] if data else distribution_file_data
         self.distribution_file = create_distribution_file(name, self._distribution_file_data)
-        self.release_package_xmls = data['release_package_xmls'] if data else {}
+        self.release_package_xmls = data['release_package_xmls'] if data and 'release_packages' in data else {}
+        self.release_readmes = data['release_readmes'] if data and 'release_readmes' in data else {}
+        self.release_changelogs = data['release_changelogs'] if data and 'release_changelogs' in data else {}
         self.source_repo_package_xmls = {}
         if data and 'source_repo_package_xmls' in data:
             for repo_name, repo_data in data['source_repo_package_xmls'].items():
@@ -76,6 +78,8 @@ class DistributionCache(object):
         data['name'] = self.distribution_file.name
         data['distribution_file'] = self._distribution_file_data
         data['release_package_xmls'] = self.release_package_xmls
+        data['release_readmes'] = self.release_readmes
+        data['release_changelogs'] = self.release_changelogs
         data['source_repo_package_xmls'] = dict([(repo_name, repo_cache.get_data())
             for repo_name, repo_cache in self.source_repo_package_xmls.items()])
         return data
@@ -112,6 +116,8 @@ class DistributionCache(object):
             if pkg_name in self.release_package_xmls and self._get_repo_info(dist_file, pkg_name) != self._get_repo_info(self.distribution_file, pkg_name):
                 logger.debug("Dropping release package XML cache for %s" % pkg_name)
                 del self.release_package_xmls[pkg_name]
+                del self.release_readmes[pkg_name]
+                del self.release_changelogs[pkg_name]
 
         # Remove all source package xmls where the devel branch is pointing to a different commit than
         # the one we have associated with our cache. This requires calling git ls-remote on all affected repos.
@@ -172,3 +178,5 @@ class DistributionCache(object):
             if pkg_name not in self.distribution_file.release_packages:
                 print('- REMOVE', pkg_name)
                 del self.release_package_xmls[pkg_name]
+                del self.release_readmes[pkg_name]
+                del self.release_changelogs[pkg_name]

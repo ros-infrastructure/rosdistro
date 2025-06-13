@@ -68,18 +68,31 @@ class CachedManifestProvider(object):
         self._distribution_cache = distribution_cache
         self._manifest_providers = manifest_providers
 
-    def __call__(self, dist_name, repo, pkg_name):
+    def __call__(self, dist_name, repo, pkg_name, filepath='package.xml'):
         assert repo.version
-        package_xml = self._distribution_cache.release_package_xmls.get(pkg_name, None)
-        if package_xml:
-            package_xml = sanitize_xml(package_xml)
-            self._distribution_cache.release_package_xmls[pkg_name] = package_xml
-            logger.debug('Loading package.xml for package "%s" from cache' % pkg_name)
+        if filepath == 'README.md':
+            package_xml = self._distribution_cache.release_readmes.get(pkg_name, None)
+            if package_xml:
+                self._distribution_cache.release_readmes[pkg_name] = package_xml
+                logger.debug('Loading README.md for package "%s" from cache' % pkg_name)
+        elif filepath == 'CHANGELOG.rst':
+            package_xml = self._distribution_cache.release_changelogs.get(pkg_name, None)
+            if package_xml:
+                self._distribution_cache.release_changelogs[pkg_name] = package_xml
+                logger.debug('Loading CHANGELOG.rst for package "%s" from cache' % pkg_name)
         else:
+            package_xml = self._distribution_cache.release_package_xmls.get(pkg_name, None)
+            if package_xml:
+                package_xml = sanitize_xml(package_xml)
+                self._distribution_cache.release_package_xmls[pkg_name] = package_xml
+                logger.debug('Loading package.xml for package "%s" from cache' % pkg_name)
+        if not package_xml:
             # use manifest providers to lazy load
             for mp in self._manifest_providers or []:
                 try:
-                    package_xml = sanitize_xml(mp(dist_name, repo, pkg_name))
+                    package_xml = mp(dist_name, repo, pkg_name, filepath)
+                    if filepath == 'package.xml':
+                        package_xml = sanitize_xml(package_xml)
                     break
                 except Exception as e:
                     # pass and try next manifest provider
@@ -87,7 +100,12 @@ class CachedManifestProvider(object):
             if package_xml is None:
                 return None
             # populate the cache
-            self._distribution_cache.release_package_xmls[pkg_name] = package_xml
+            if filepath == 'README.md':
+                self._distribution_cache.release_readmes[pkg_name] = package_xml
+            if filepath == 'CHANGELOG.rst':
+                self._distribution_cache.release_changelogs[pkg_name] = package_xml
+            else:
+                self._distribution_cache.release_package_xmls[pkg_name] = package_xml
         return package_xml
 
 

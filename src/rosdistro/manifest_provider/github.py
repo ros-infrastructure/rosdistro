@@ -44,11 +44,12 @@ from rosdistro import logger
 
 GITHUB_USER = os.getenv('GITHUB_USER', None)
 GITHUB_PASSWORD = os.getenv('GITHUB_PASSWORD', None)
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', None)
 
 def _get_url_contents(url):
     return urlopen(url).read().decode('utf-8')
 
-def github_manifest_provider(_dist_name, repo, pkg_name):
+def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     assert repo.version
     server, path = repo.get_url_parts()
     if not server.endswith('github.com'):
@@ -60,16 +61,16 @@ def github_manifest_provider(_dist_name, repo, pkg_name):
     if not repo.has_remote_tag(release_tag):
         raise RuntimeError('specified tag "%s" is not a git tag' % release_tag)
 
-    url = 'https://raw.githubusercontent.com/%s/%s/package.xml' % (path, release_tag)
+    url = 'https://raw.githubusercontent.com/%s/%s/%s' % (path, release_tag, filepath)
     try:
-        logger.debug('Load package.xml file from url "%s"' % url)
+        logger.debug('Load %s file from url "%s"' % (filepath, url))
         return _get_url_contents(url)
     except URLError as e:
         logger.debug('- failed (%s), trying "%s"' % (e, url))
         raise RuntimeError()
 
 
-def github_source_manifest_provider(repo):
+def github_source_manifest_provider(repo, filepath='package.xml'):
     server, path = repo.get_url_parts()
     if not server.endswith('github.com'):
         logger.debug('Skip non-github url "%s"' % repo.url)
@@ -77,6 +78,8 @@ def github_source_manifest_provider(repo):
 
     tree_url = 'https://api.github.com/repos/%s/git/trees/%s?recursive=1' % (path, repo.version)
     req = Request(tree_url)
+    if GITHUB_TOKEN:
+        req.add_header({"Authorization": f"Bearer {GITHUB_TOKEN}"})
     if GITHUB_USER and GITHUB_PASSWORD:
         logger.debug('- using http basic auth from supplied environment variables.')
         credential_pair = '%s:%s' % (GITHUB_USER, GITHUB_PASSWORD)
@@ -93,9 +96,10 @@ def github_source_manifest_provider(repo):
 
     package_xml_paths = set()
     for obj in tree_json['tree']:
-        if obj['path'].split('/')[-1] == 'package.xml':
+        if obj['path'].split('/')[-1] == filepath:
             package_xml_paths.add(os.path.dirname(obj['path']))
 
+    # TODO(tfoote) This is not correct for non-package.xml
     # Filter out ones that are inside other packages (eg, part of tests)
     def package_xml_in_parent(path):
         if path == '':
@@ -112,8 +116,8 @@ def github_source_manifest_provider(repo):
     cache = SourceRepositoryCache.from_ref(tree_json['sha'])
     for package_xml_path in package_xml_paths:
         url = 'https://raw.githubusercontent.com/%s/%s/%s' % \
-            (path, cache.ref(), package_xml_path + '/package.xml' if package_xml_path else 'package.xml')
-        logger.debug('- load package.xml from %s' % url)
+            (path, cache.ref(), package_xml_path + '/' + filepath if package_xml_path else filepath)
+        logger.debug('- load %s from %s' % (filepath, url))
         package_xml = _get_url_contents(url)
         name = parse_package_string(package_xml).name
         cache.add(name, package_xml_path, package_xml)
