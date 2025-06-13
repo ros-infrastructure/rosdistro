@@ -102,7 +102,7 @@ class CachedManifestProvider(object):
             # populate the cache
             if filepath == 'README.md':
                 self._distribution_cache.release_readmes[pkg_name] = package_xml
-            if filepath == 'CHANGELOG.rst':
+            elif filepath == 'CHANGELOG.rst':
                 self._distribution_cache.release_changelogs[pkg_name] = package_xml
             else:
                 self._distribution_cache.release_package_xmls[pkg_name] = package_xml

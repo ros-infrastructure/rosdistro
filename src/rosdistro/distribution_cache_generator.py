@@ -125,7 +125,7 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
         changelog = dist.get_release_changelog(pkg_name)
 
         if changelog != old_changelog:
-            print("  - updated CHANGELOG.rst of package '%s'" % (pkg_name))        
+            print("  - updated CHANGELOG.rst of package '%s'" % (pkg_name))
 
 
 
@@ -205,7 +205,7 @@ def _get_cached_distribution(index, dist_name, preclean=False, ignore_local=Fals
                 # get distribution cache
                 cache = get_distribution_cache(index, dist_name)
     except Exception as e:
-        print('- failed to fetch old cache: %s' % e.what())
+        print('- failed to fetch old cache: %s' % e)
 
     if cache:
         print('- update cache')

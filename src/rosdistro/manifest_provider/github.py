@@ -35,6 +35,7 @@ import base64
 import json
 import os
 from urllib.request import urlopen, Request
+from urllib.error import HTTPError
 from urllib.error import URLError
 
 from catkin_pkg.package import parse_package_string
@@ -64,7 +65,14 @@ def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
     url = 'https://raw.githubusercontent.com/%s/%s/%s' % (path, release_tag, filepath)
     try:
         logger.debug('Load %s file from url "%s"' % (filepath, url))
-        return _get_url_contents(url)
+        # TODO(tfoote) magic number for testing
+        return '\n'.join( _get_url_contents(url).splitlines()[:100])
+    except HTTPError as e:
+        if e.code == 404:
+            logger.debug('- File not found (%s), trying "%s"' % (e, url))
+            return 'Missing'
+        logger.debug('- HTTP ERROR (%s), trying "%s"' % (e, url))
+        raise e
     except URLError as e:
         logger.debug('- failed (%s), trying "%s"' % (e, url))
         raise RuntimeError()
@@ -79,7 +87,7 @@ def github_source_manifest_provider(repo, filepath='package.xml'):
     tree_url = 'https://api.github.com/repos/%s/git/trees/%s?recursive=1' % (path, repo.version)
     req = Request(tree_url)
     if GITHUB_TOKEN:
-        req.add_header({"Authorization": f"Bearer {GITHUB_TOKEN}"})
+        req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
     if GITHUB_USER and GITHUB_PASSWORD:
         logger.debug('- using http basic auth from supplied environment variables.')
         credential_pair = '%s:%s' % (GITHUB_USER, GITHUB_PASSWORD)

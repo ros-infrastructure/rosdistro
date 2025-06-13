@@ -62,7 +62,7 @@ class DistributionCache(object):
 
         self._distribution_file_data = data['distribution_file'] if data else distribution_file_data
         self.distribution_file = create_distribution_file(name, self._distribution_file_data)
-        self.release_package_xmls = data['release_package_xmls'] if data and 'release_packages' in data else {}
+        self.release_package_xmls = data['release_package_xmls'] if data and 'release_package_xmls' in data else {}
         self.release_readmes = data['release_readmes'] if data and 'release_readmes' in data else {}
         self.release_changelogs = data['release_changelogs'] if data and 'release_changelogs' in data else {}
         self.source_repo_package_xmls = {}
