@@ -58,11 +58,18 @@ class SourceRepositoryCache(object):
         """
         return cls({'_ref': ref})
 
-    def add(self, package_name, package_path, package_xml_string):
+    def add(self, package_name, package_path, payload_string, payload_type='package.xml'): # TODO(tfoote) Breaks rosdistro formatting changing from list to dict
         """
         Add a package to the cache.
         """
-        self._data[package_name] = (package_path, package_xml_string)
+        if package_name not in self._data:
+            self._data[package_name] = {}
+        
+        # Migration option for old caches
+        if type(self._data[package_name]) != dict:
+            self._data[package_name] = {}
+        self._data[package_name]['package_path'] = package_path
+        self._data[package_name][payload_type] = payload_string
         self._package_names.add(package_name)
 
     def __iter__(self):
@@ -86,8 +93,7 @@ class SourceRepositoryCache(object):
         to repo root, and package xml string.
         """
         for package_name in self._package_names:
-            package_path, package_xml_string = self._data[package_name]
-            yield package_name, package_path, package_xml_string
+            yield package_name, self._data[package_name]['package_path'], self._data[package_name]['package.xml']
 
     def __len__(self):
         """

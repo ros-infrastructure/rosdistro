@@ -104,7 +104,7 @@ def github_source_manifest_provider(repo, filepath='package.xml'):
 
     package_xml_paths = set()
     for obj in tree_json['tree']:
-        if obj['path'].split('/')[-1] == filepath:
+        if obj['path'].split('/')[-1] == 'package.xml': # Actually package.xml to find packages instead of filepath
             package_xml_paths.add(os.path.dirname(obj['path']))
 
     # TODO(tfoote) This is not correct for non-package.xml
@@ -128,6 +128,6 @@ def github_source_manifest_provider(repo, filepath='package.xml'):
         logger.debug('- load %s from %s' % (filepath, url))
         package_xml = _get_url_contents(url)
         name = parse_package_string(package_xml).name
-        cache.add(name, package_xml_path, package_xml)
+        cache.add(name, package_xml_path, package_xml, filepath)
 
     return cache
