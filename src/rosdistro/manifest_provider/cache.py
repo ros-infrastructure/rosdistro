@@ -122,7 +122,7 @@ class CachedSourceManifestProvider(object):
             # Use manifest providers to lazy load
             for mp in self._source_manifest_providers or []:
                 try:
-                    repo_cache = mp(repo)
+                    repo_cache = mp(repo) # TODO (tfoote) list other files here
                 except Exception as e:
                     # pass and try next manifest provider
                     logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
@@ -136,11 +136,32 @@ class CachedSourceManifestProvider(object):
         # De-duplicate with the release package XMLs. This will cause the YAML writer
         # to use references for the common strings, saving a lot of space in the cache file.
         if repo_cache:
-            for package_name, package_path, package_xml in repo_cache.items():
-                package_xml = sanitize_xml(package_xml)
-                release_package_xml = self._distribution_cache.release_package_xmls.get(package_name, None)
-                if package_xml == release_package_xml:
-                    package_xml = release_package_xml
-                repo_cache.add(package_name, package_path, package_xml)
+            for package_name, pkg_entries in repo_cache._data.items():
+                if package_name.startswith('_'):
+                    continue
+                print(f"pkg_entries {pkg_entries}")
+                if 'package.xml' in pkg_entries:
+                    package_xml = sanitize_xml(pkg_entries['package.xml'])
+                    release_package_xml = self._distribution_cache.release_package_xmls.get(package_name, None)
+                    if package_xml == release_package_xml:
+                        logger.debug(f'{package_name} Linking package.xml of source cache entry for compaction.')
+                        package_xml = release_package_xml
+                        repo_cache.add(package_name, pkg_entries['package_path'], package_xml)
+
+                if 'CHANGELOG.rst' in pkg_entries:
+                    changelog = pkg_entries['CHANGELOG.rst']
+                    release_changelog = self._distribution_cache.release_changelogs.get(package_name, None)
+                    if changelog == release_changelog:
+                        logger.debug(f'{package_name} Linking CHANGELOG.rst of source cache entry for compaction.')
+                        changelog = release_changelog
+                        repo_cache.add(package_name, pkg_entries['package_path'], changelog)
+
+                if 'README.md' in pkg_entries:
+                    readme = pkg_entries['README.md']
+                    release_readme = self._distribution_cache.release_readmes.get(package_name, None)
+                    if readme == release_readme:
+                        logger.debug(f'{package_name} Linking README.md of source cache entry for compaction.')
+                        readme = release_readme
+                        repo_cache.add(package_name, pkg_entries['package_path'], readme)
 
         return repo_cache
