@@ -90,7 +90,7 @@ def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
         raise RuntimeError()
 
 
-def github_source_manifest_provider(repo, filepath='package.xml'):
+def github_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md']):
     server, path = repo.get_url_parts()
     if not server.endswith('github.com'):
         logger.debug('Skip non-github url "%s"' % repo.url)
@@ -135,11 +135,26 @@ def github_source_manifest_provider(repo, filepath='package.xml'):
 
     cache = SourceRepositoryCache.from_ref(tree_json['sha'])
     for package_xml_path in package_xml_paths:
+        filepath = 'package.xml'
         url = 'https://raw.githubusercontent.com/%s/%s/%s' % \
             (path, cache.ref(), package_xml_path + '/' + filepath if package_xml_path else filepath)
         logger.debug('- load %s from %s' % (filepath, url))
         package_xml = _get_url_contents(url)
         name = parse_package_string(package_xml).name
         cache.add(name, package_xml_path, package_xml, filepath)
+        for filepath in filepaths:
+            url = 'https://raw.githubusercontent.com/%s/%s/%s' % \
+                (path, cache.ref(), package_xml_path + '/' + filepath if package_xml_path else filepath)
+            logger.debug('- load %s from %s' % (filepath, url))
+            try:
+                contents = _get_url_contents(url)
+            except HTTPError as e:
+                if e.code == 404:
+                    logger.debug('- Recording Missing (%s), hit error "%s"' % (url, e))
+                    contents = 'Missing'
+                else:
+                    logger.debug('- HTTP ERROR (%s), trying "%s"' % (e, url))
+                    raise e
+            cache.add(name, package_xml_path, contents, filepath)
 
     return cache
