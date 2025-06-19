@@ -139,7 +139,6 @@ class CachedSourceManifestProvider(object):
             for package_name, pkg_entries in repo_cache._data.items():
                 if package_name.startswith('_'):
                     continue
-                print(f"pkg_entries {pkg_entries}")
                 if 'package.xml' in pkg_entries:
                     package_xml = sanitize_xml(pkg_entries['package.xml'])
                     release_package_xml = self._distribution_cache.release_package_xmls.get(package_name, None)
