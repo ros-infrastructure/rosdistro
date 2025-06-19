@@ -31,6 +31,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from datetime import datetime
 
 class SourceRepositoryCache(object):
     """
@@ -71,6 +72,8 @@ class SourceRepositoryCache(object):
         self._data[package_name]['package_path'] = package_path
         self._data[package_name][payload_type] = payload_string
         self._package_names.add(package_name)
+        self._data['_last_update_time'] = datetime.now()
+
 
     def __iter__(self):
         """
