@@ -75,7 +75,7 @@ def git_source_manifest_provider(repo, filepath='package.xml'):
                     name = parse_package_string(package_xml).name
                 except InvalidPackage:
                     raise RuntimeError('Unable to parse %s file found in %s' % (filepath, repo.url))
-                cache.add(name, package_path, package_xml)
+                cache.add(name, package_path, package_xml, filepath)
 
     except Exception as e:
         raise RuntimeError('Unable to fetch source %s files: %s' % (filepath, e))
