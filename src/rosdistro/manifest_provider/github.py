@@ -34,6 +34,8 @@
 import base64
 import json
 import os
+import time
+
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 from urllib.error import URLError
@@ -48,6 +50,16 @@ GITHUB_PASSWORD = os.getenv('GITHUB_PASSWORD', None)
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', None)
 
 def _get_url_contents(url):
+    backoff = 1
+    while backoff < 120:
+        try:
+            return urlopen(url).read().decode('utf-8')
+        except HTTPError as e:
+            if e.code != 403:
+                raise e
+            logger.debug(f'Fetch of {url} failed with 403, assuming rate limit, retrying after period {backoff} seconds.')
+        time.sleep(backoff)
+        backoff *= 1.5
     return urlopen(url).read().decode('utf-8')
 
 def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
