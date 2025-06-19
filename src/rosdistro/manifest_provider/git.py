@@ -42,6 +42,7 @@ from catkin_pkg.packages import find_package_paths
 from rosdistro.common import rmtree
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro.vcs import Git, ref_is_hash
+from rosdistro import logger
 
 
 def git_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
@@ -60,7 +61,8 @@ def git_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
 
 def git_source_manifest_provider(repo, filepath='package.xml'):
     try:
-        with _temp_git_clone(repo.url, repo.version, '/tmp/rosdistro') as git_repo_path:
+        with _temp_git_clone(repo.url, repo.version) as git_repo_path:
+            logger.debug(f'Cloing repository {repo.url} to get source info')
             # Include the git hash in our cache dictionary.
             git_hash = Git(git_repo_path).command('rev-parse', 'HEAD')['output']
             cache = SourceRepositoryCache.from_ref(git_hash)
