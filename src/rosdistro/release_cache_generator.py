@@ -78,7 +78,7 @@ def generate_release_cache(index, dist_name, preclean=False, debug=False):
                 print('  - skip "%s" since it has no version' % pkg_name)
             continue
         if debug:
-            print('  - fetch "%s"' % pkg_name)
+            print('  - release cache fetch "%s"' % pkg_name)
         else:
             sys.stdout.write('.')
             sys.stdout.flush()

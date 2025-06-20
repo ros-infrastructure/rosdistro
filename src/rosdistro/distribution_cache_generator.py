@@ -86,7 +86,7 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
                 print('  - skip "%s" since it has no version' % pkg_name)
             continue
         if debug:
-            print('  - fetch "%s"' % pkg_name)
+            print('  - dist cache fetch "%s"' % pkg_name)
         else:
             sys.stdout.write('.')
             sys.stdout.flush()
@@ -138,7 +138,7 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
             if dist.repositories[repo_name].source_repository:
                 dist.get_source_repo_package_xmls(repo_name)
                 if debug:
-                    print('  - fetch "%s"' % repo_name)
+                    print('  - dist cache source fetch "%s"' % repo_name)
                 else:
                     sys.stdout.write('.')
                     sys.stdout.flush()
