@@ -68,6 +68,7 @@ class SourceRepositoryCache(object):
         
         # Migration option for old caches
         if type(self._data[package_name]) != dict:
+            print(f"Clearing content from package {package_name} @@@@@@@@@@@@@@@@!!!!!!!!!!!!!!!!")
             self._data[package_name] = {}
         self._data[package_name]['package_path'] = package_path
         self._data[package_name][payload_type] = payload_string
@@ -90,13 +91,13 @@ class SourceRepositoryCache(object):
             raise KeyError("Package '%s' not present in SourceRepositoryCache." % package_name)
         return self._data[package_name]
 
-    def items(self):
-        """
-        Generator of (str, str, str) containing the package name, path relative
-        to repo root, and package xml string.
-        """
-        for package_name in self._package_names:
-            yield package_name, self._data[package_name]['package_path'], self._data[package_name]['package.xml']
+    # def items(self): # TODO(tfoote) unused now
+    #     """
+    #     Generator of (str, str, str) containing the package name, path relative
+    #     to repo root, and package xml string.
+    #     """
+    #     for package_name in self._package_names:
+    #         yield package_name, self._data[package_name]['package_path'], self._data[package_name]['package.xml']
 
     def __len__(self):
         """
