@@ -31,7 +31,9 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import datetime
 import sys
+import time
 
 from . import logger
 from .distribution_file import create_distribution_file
@@ -109,7 +111,7 @@ class DistributionCache(object):
         dist_file = create_distribution_file(self.distribution_file.name, self._distribution_file_data)
 
         # remove all release package xmls where the package version has changed.
-        print("- removing invalid release package cache entries.")
+        print(f"- removing invalid release package cache entries. [{len(dist_file.release_packages.keys())}]")
         for pkg_name in sorted(dist_file.release_packages.keys()):
             if pkg_name not in self.distribution_file.release_packages:
                 continue
@@ -122,7 +124,10 @@ class DistributionCache(object):
         # Remove all source package xmls where the devel branch is pointing to a different commit than
         # the one we have associated with our cache. This requires calling git ls-remote on all affected repos.
         if self.source_repo_package_xmls:
-            print("- checking invalid source repo cache entries.")
+            start_time = time.perf_counter()
+            dropped_count = 0
+            skipped_count = 0
+            print(f"- checking invalid source repo cache entries. [{len(self.source_repo_package_xmls.keys())}]")
             for repo in sorted(self.source_repo_package_xmls.keys()):
                 sys.stdout.write('.')
                 sys.stdout.flush()
@@ -135,6 +140,15 @@ class DistributionCache(object):
                     del self.source_repo_package_xmls[repo]
                     continue
 
+                max_update_delta = 24 * 60 * 60
+                if '_last_update_time' in self.source_repo_package_xmls[repo]:
+                    now = datetime.datetime.now()
+                    entry_age = (now - self.source_repo_package_xmls[repo]['_last_update_time']).total_seconds()
+                    if entry_age < max_update_delta:
+                        logger.debug(f'Skipping check of {repo} because it was last updated only {entry_age} seconds ago less than {max_update_delta}')
+                        skipped_count += 1
+                        continue
+
                 if ref_is_hash(source_repository.version):
                     source_hash = source_repository.version
                 else:
@@ -143,6 +157,7 @@ class DistributionCache(object):
                         # Error checking remote, or unable to find remote reference. Drop the cache entry.
                         logger.debug("Unable to check hash for branch %s of %s, dropping cache entry." % (source_repository.version, source_repository.url))
                         del self.source_repo_package_xmls[repo]
+                        dropped_count += 1
                         continue
                     # Split by line first and take the last line, to squelch any preamble output, for example
                     # a known host key validation notice.
@@ -152,7 +167,12 @@ class DistributionCache(object):
                 if source_hash != cached_hash:
                     logger.debug('Repo "%s" has moved from %s to %s, dropping cache.' % (repo, cached_hash, source_hash))
                     del self.source_repo_package_xmls[repo]
+                    dropped_count += 1
             sys.stdout.write('\n')
+            sys.stdout.write(f'Dropped {dropped_count} repositories\n')
+            sys.stdout.write(f'Skippted {skipped_count} repositories\n')
+            end_time = time.perf_counter()
+            logger.debug(f'Check of invalid source repo cache entries took {(end_time - start_time):.1f} seconds')
 
         self.distribution_file = dist_file
         self.distribution_file.source_packages = self.get_source_packages()
