@@ -141,7 +141,6 @@ def github_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md
         logger.debug('- load %s from %s' % (package_xml_filename, url))
         package_xml = _get_url_contents(url)
         name = parse_package_string(package_xml).name
-        logger.debug(f'==== Package xml added for {name}')
         cache.add(name, package_xml_path, package_xml, package_xml_filename)
         for filepath in filepaths:
             url = 'https://raw.githubusercontent.com/%s/%s/%s' % \
