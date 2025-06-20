@@ -145,7 +145,7 @@ class CachedSourceManifestProvider(object):
                     if package_xml == release_package_xml:
                         logger.debug(f'{package_name} Linking package.xml of source cache entry for compaction.')
                         package_xml = release_package_xml
-                        repo_cache.add(package_name, pkg_entries['package_path'], package_xml)
+                        repo_cache.add(package_name, pkg_entries['package_path'], package_xml, 'package.xml')
 
                 if 'CHANGELOG.rst' in pkg_entries:
                     changelog = pkg_entries['CHANGELOG.rst']
@@ -153,7 +153,7 @@ class CachedSourceManifestProvider(object):
                     if changelog == release_changelog:
                         logger.debug(f'{package_name} Linking CHANGELOG.rst of source cache entry for compaction.')
                         changelog = release_changelog
-                        repo_cache.add(package_name, pkg_entries['package_path'], changelog)
+                        repo_cache.add(package_name, pkg_entries['package_path'], changelog, 'CHANGELOG.rst')
 
                 if 'README.md' in pkg_entries:
                     readme = pkg_entries['README.md']
@@ -161,6 +161,6 @@ class CachedSourceManifestProvider(object):
                     if readme == release_readme:
                         logger.debug(f'{package_name} Linking README.md of source cache entry for compaction.')
                         readme = release_readme
-                        repo_cache.add(package_name, pkg_entries['package_path'], readme)
+                        repo_cache.add(package_name, pkg_entries['package_path'], readme, 'README.md')
 
         return repo_cache
