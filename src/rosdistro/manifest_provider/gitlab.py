@@ -108,7 +108,7 @@ def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
         raise
 
 
-def gitlab_source_manifest_provider(repo):
+def gitlab_source_manifest_provider(repo, filepaths=['package.xml']):
     assert repo.version
     server, path = repo.get_url_parts()
     if not server.endswith('gitlab.com') and server != ROSDISTRO_GITLAB_SERVER:
@@ -148,11 +148,11 @@ def gitlab_source_manifest_provider(repo):
     cache = SourceRepositoryCache.from_ref(sha)
     for package_xml_path in package_xml_paths:
         resource_path = urlquote(
-            package_xml_path + '/package.xml' if package_xml_path else 'package.xml', safe='')
+            package_xml_path + '/' + filepath if package_xml_path else filepath, safe='')
         resource = 'repository/files/' + resource_path + '/raw'
         with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
             package_xml = res.read().decode('utf-8')
         name = parse_package_string(package_xml).name
-        cache.add(name, package_xml_path, package_xml)
+        cache.add(name, package_xml_path, package_xml, filepath)
 
     return cache

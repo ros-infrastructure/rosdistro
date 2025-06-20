@@ -59,7 +59,8 @@ def git_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
         raise RuntimeError('Unable to fetch %s: %s' % (filepath, e))
 
 
-def git_source_manifest_provider(repo, filepath='package.xml'):
+def git_source_manifest_provider(repo, filepaths=['package.xml']):
+    filepath = 'package.xml' # TODO(tfoote) use filepaths
     try:
         with _temp_git_clone(repo.url, repo.version) as git_repo_path:
             logger.debug(f'Cloing repository {repo.url} to get source info')

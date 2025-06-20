@@ -122,7 +122,7 @@ class CachedSourceManifestProvider(object):
             # Use manifest providers to lazy load
             for mp in self._source_manifest_providers or []:
                 try:
-                    repo_cache = mp(repo) # TODO (tfoote) list other files here
+                    repo_cache = mp(repo, filepaths=['CHANGELOG.rst', 'README.md']) # TODO (tfoote) list other files here
                 except Exception as e:
                     # pass and try next manifest provider
                     logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
