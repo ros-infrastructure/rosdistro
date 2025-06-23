@@ -35,6 +35,13 @@ from xml.dom import minidom
 
 from rosdistro import logger
 
+def sanitize_and_truncate_docs(doc_string, max_length=100):
+    # Remove trailing whitespace then truncate
+    lines = doc_string.rstrip().splitlines()
+    ending = ''
+    if len(lines) > 100:
+        ending = f'\nTruncated file at {max_length} lines'
+    return '\n'.join(lines[:max_length]) + ending
 
 def sanitize_xml(xml_string):
     """ Returns a version of the supplied XML string with comments and all whitespace stripped,
@@ -71,42 +78,46 @@ class CachedManifestProvider(object):
     def __call__(self, dist_name, repo, pkg_name, filepath='package.xml'):
         assert repo.version
         if filepath == 'README.md':
-            package_xml = self._distribution_cache.release_readmes.get(pkg_name, None)
-            if package_xml:
-                self._distribution_cache.release_readmes[pkg_name] = package_xml
+            manifest_content = self._distribution_cache.release_readmes.get(pkg_name, None)
+            if manifest_content:
+                manifest_content = sanitize_and_truncate_docs(manifest_content)
+                self._distribution_cache.release_readmes[pkg_name] = manifest_content
                 logger.debug('Loading README.md for package "%s" from cache' % pkg_name)
         elif filepath == 'CHANGELOG.rst':
-            package_xml = self._distribution_cache.release_changelogs.get(pkg_name, None)
-            if package_xml:
-                self._distribution_cache.release_changelogs[pkg_name] = package_xml
+            manifest_content = self._distribution_cache.release_changelogs.get(pkg_name, None)
+            if manifest_content:
+                manifest_content = sanitize_and_truncate_docs(manifest_content)
+                self._distribution_cache.release_changelogs[pkg_name] = manifest_content
                 logger.debug('Loading CHANGELOG.rst for package "%s" from cache' % pkg_name)
         else:
-            package_xml = self._distribution_cache.release_package_xmls.get(pkg_name, None)
-            if package_xml:
-                package_xml = sanitize_xml(package_xml)
-                self._distribution_cache.release_package_xmls[pkg_name] = package_xml
+            manifest_content = self._distribution_cache.release_package_xmls.get(pkg_name, None)
+            if manifest_content:
+                manifest_content = sanitize_xml(manifest_content)
+                self._distribution_cache.release_package_xmls[pkg_name] = manifest_content
                 logger.debug('Loading package.xml for package "%s" from cache' % pkg_name)
-        if not package_xml:
+        if not manifest_content:
             # use manifest providers to lazy load
             for mp in self._manifest_providers or []:
                 try:
-                    package_xml = mp(dist_name, repo, pkg_name, filepath)
+                    manifest_content = mp(dist_name, repo, pkg_name, filepath)
                     if filepath == 'package.xml':
-                        package_xml = sanitize_xml(package_xml)
+                        manifest_content = sanitize_xml(manifest_content)
+                    else:
+                        manifest_content = sanitize_and_truncate_docs(manifest_content)
                     break
                 except Exception as e:
                     # pass and try next manifest provider
                     logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
-            if package_xml is None:
+            if manifest_content is None:
                 return None
             # populate the cache
             if filepath == 'README.md':
-                self._distribution_cache.release_readmes[pkg_name] = package_xml
+                self._distribution_cache.release_readmes[pkg_name] = manifest_content
             elif filepath == 'CHANGELOG.rst':
-                self._distribution_cache.release_changelogs[pkg_name] = package_xml
+                self._distribution_cache.release_changelogs[pkg_name] = manifest_content
             else:
-                self._distribution_cache.release_package_xmls[pkg_name] = package_xml
-        return package_xml
+                self._distribution_cache.release_package_xmls[pkg_name] = manifest_content
+        return manifest_content
 
 
 class CachedSourceManifestProvider(object):
@@ -140,26 +151,28 @@ class CachedSourceManifestProvider(object):
                 if package_name.startswith('_'):
                     continue
                 if 'package.xml' in pkg_entries:
-                    package_xml = sanitize_xml(pkg_entries['package.xml'])
+                    package_xml = sanitize_xml(pkg_entries['package.xml'])  # TODO(tfoote) validate as unnecessary should be sanitized already on insert?
                     release_package_xml = self._distribution_cache.release_package_xmls.get(package_name, None)
                     if package_xml == release_package_xml:
-                        logger.debug(f'{package_name} Linking package.xml of source cache entry for compaction.')
+                        logger.debug(f'{package_name} Linking package.xml of source cache entry for compaction. Lines saved: {len(package_xml.splitlines())}')
                         package_xml = release_package_xml
                         repo_cache.add(package_name, pkg_entries['package_path'], package_xml, 'package.xml')
 
                 if 'CHANGELOG.rst' in pkg_entries:
-                    changelog = pkg_entries['CHANGELOG.rst']
+                    changelog = sanitize_and_truncate_docs(pkg_entries['CHANGELOG.rst'])
                     release_changelog = self._distribution_cache.release_changelogs.get(package_name, None)
                     if changelog == release_changelog:
-                        logger.debug(f'{package_name} Linking CHANGELOG.rst of source cache entry for compaction.')
+                        logger.debug(f'{package_name} Linking CHANGELOG.rst of source cache entry for compaction. Lines saved: {len(changelog.splitlines())}')
                         changelog = release_changelog
                         repo_cache.add(package_name, pkg_entries['package_path'], changelog, 'CHANGELOG.rst')
+                    else:
+                        logger.debug(f'Changelog didn\'t match!!!!!!!!!!!!!!!!!\n<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n{changelog}\n================================\n{release_changelog}\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
 
                 if 'README.md' in pkg_entries:
-                    readme = pkg_entries['README.md']
+                    readme = sanitize_and_truncate_docs(pkg_entries['README.md'])
                     release_readme = self._distribution_cache.release_readmes.get(package_name, None)
                     if readme == release_readme:
-                        logger.debug(f'{package_name} Linking README.md of source cache entry for compaction.')
+                        logger.debug(f'{package_name} Linking README.md of source cache entry for compaction. Lines saved: {len(readme.splitlines())}')
                         readme = release_readme
                         repo_cache.add(package_name, pkg_entries['package_path'], readme, 'README.md')
 
