@@ -156,7 +156,7 @@ class CachedSourceManifestProvider(object):
                     if package_xml == release_package_xml:
                         logger.debug(f'{package_name} Linking package.xml of source cache entry for compaction. Lines saved: {len(package_xml.splitlines())}')
                         package_xml = release_package_xml
-                        repo_cache.add(package_name, pkg_entries['package_path'], package_xml, 'package.xml')
+                        repo_cache.add(package_name, pkg_entries['package_path'], package_xml, 'package.xml', increment_update_time=False)
 
                 if 'CHANGELOG.rst' in pkg_entries:
                     changelog = sanitize_and_truncate_docs(pkg_entries['CHANGELOG.rst'])
@@ -164,7 +164,7 @@ class CachedSourceManifestProvider(object):
                     if changelog == release_changelog:
                         logger.debug(f'{package_name} Linking CHANGELOG.rst of source cache entry for compaction. Lines saved: {len(changelog.splitlines())}')
                         changelog = release_changelog
-                        repo_cache.add(package_name, pkg_entries['package_path'], changelog, 'CHANGELOG.rst')
+                        repo_cache.add(package_name, pkg_entries['package_path'], changelog, 'CHANGELOG.rst', increment_update_time=False)
                     else:
                         logger.debug(f'Changelog didn\'t match!!!!!!!!!!!!!!!!!\n<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n{changelog}\n================================\n{release_changelog}\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
 
@@ -174,6 +174,6 @@ class CachedSourceManifestProvider(object):
                     if readme == release_readme:
                         logger.debug(f'{package_name} Linking README.md of source cache entry for compaction. Lines saved: {len(readme.splitlines())}')
                         readme = release_readme
-                        repo_cache.add(package_name, pkg_entries['package_path'], readme, 'README.md')
+                        repo_cache.add(package_name, pkg_entries['package_path'], readme, 'README.md', increment_update_time=False)
 
         return repo_cache

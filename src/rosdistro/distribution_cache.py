@@ -140,7 +140,7 @@ class DistributionCache(object):
                     del self.source_repo_package_xmls[repo]
                     continue
 
-                max_update_delta = 24 * 60 * 60
+                max_update_delta =  1 * 60 * 60
                 if '_last_update_time' in self.source_repo_package_xmls[repo]:
                     now = datetime.datetime.now()
                     entry_age = (now - self.source_repo_package_xmls[repo]['_last_update_time']).total_seconds()

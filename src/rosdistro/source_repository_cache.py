@@ -59,7 +59,7 @@ class SourceRepositoryCache(object):
         """
         return cls({'_ref': ref})
 
-    def add(self, package_name, package_path, payload_string, payload_type='package.xml'): # TODO(tfoote) Breaks rosdistro formatting changing from list to dict
+    def add(self, package_name, package_path, payload_string, payload_type='package.xml', increment_update_time=True): # TODO(tfoote) Breaks rosdistro formatting changing from list to dict
         """
         Add a package to the cache.
         """
@@ -73,7 +73,8 @@ class SourceRepositoryCache(object):
         self._data[package_name]['package_path'] = package_path
         self._data[package_name][payload_type] = payload_string
         self._package_names.add(package_name)
-        self._data['_last_update_time'] = datetime.now()
+        if increment_update_time:
+            self._data['_last_update_time'] = datetime.now()
 
 
     def __iter__(self):
