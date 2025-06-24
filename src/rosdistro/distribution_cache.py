@@ -111,7 +111,7 @@ class DistributionCache(object):
         dist_file = create_distribution_file(self.distribution_file.name, self._distribution_file_data)
 
         # remove all release package xmls where the package version has changed.
-        print(f"- removing invalid release package cache entries. [{len(dist_file.release_packages.keys())}]")
+        print(f"- checking [{len(dist_file.release_packages.keys())}] release package cache entries for different versions")
         for pkg_name in sorted(dist_file.release_packages.keys()):
             if pkg_name not in self.distribution_file.release_packages:
                 continue
@@ -127,7 +127,7 @@ class DistributionCache(object):
             start_time = time.perf_counter()
             dropped_count = 0
             skipped_count = 0
-            print(f"- checking invalid source repo cache entries. [{len(self.source_repo_package_xmls.keys())}]")
+            print(f"- checking [{len(self.source_repo_package_xmls.keys())}] source repo cache entries without source entries, requires ls-remote")
             for repo in sorted(self.source_repo_package_xmls.keys()):
                 sys.stdout.write('.')
                 sys.stdout.flush()
@@ -140,12 +140,12 @@ class DistributionCache(object):
                     del self.source_repo_package_xmls[repo]
                     continue
 
-                max_update_delta =  1 * 60 * 60
+                min_update_delta =  1 * 60 * 60 # TOOD(tfoote) magic number make into a parameter
                 if '_last_update_time' in self.source_repo_package_xmls[repo]:
                     now = datetime.datetime.now()
                     entry_age = (now - self.source_repo_package_xmls[repo]['_last_update_time']).total_seconds()
-                    if entry_age < max_update_delta:
-                        logger.debug(f'Skipping check of {repo} because it was last updated only {entry_age} seconds ago less than {max_update_delta}')
+                    if entry_age < min_update_delta:
+                        logger.debug(f'Skipping check of {repo} because it was last updated only {entry_age} seconds ago less than {min_update_delta}')
                         skipped_count += 1
                         continue
 
