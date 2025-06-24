@@ -45,6 +45,8 @@ from catkin_pkg.package import parse_package_string
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro import logger
 
+from rosdistro.manifest_provider.cache import sanitize_and_truncate_docs
+
 GITHUB_USER = os.getenv('GITHUB_USER', None)
 GITHUB_PASSWORD = os.getenv('GITHUB_PASSWORD', None)
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', None)
@@ -155,6 +157,7 @@ def github_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md
                 else:
                     logger.debug('- HTTP ERROR (%s), trying "%s"' % (e, url))
                     raise e
+            contents = sanitize_and_truncate_docs(contents) # TODO(tfoote) Do this later so it doesn't need to be in all manifest providers
             cache.add(name, package_xml_path, contents, filepath)
 
     return cache
