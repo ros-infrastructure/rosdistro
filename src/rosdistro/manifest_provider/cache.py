@@ -130,6 +130,7 @@ class CachedSourceManifestProvider(object):
         assert repo.url
         repo_cache = self._distribution_cache.source_repo_package_xmls.get(repo.name, None)
         if not repo_cache:
+            logger.debug(f"Internal Cache Miss for {repo.name} Louding from Source Manifset Providers")
             # Use manifest providers to lazy load
             for mp in self._source_manifest_providers or []:
                 try:
