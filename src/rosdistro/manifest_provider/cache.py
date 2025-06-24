@@ -39,9 +39,9 @@ def sanitize_and_truncate_docs(doc_string, max_length=100):
     # Remove trailing whitespace then truncate
     lines = doc_string.rstrip().splitlines()
     ending = ''
-    if len(lines) >= max_length:
+    if len(lines) > max_length:
         ending = f'\nTruncated content at {max_length} of {len(lines)} lines'
-    return '\n'.join(lines[:max_length]) + ending
+    return '\n'.join(lines[:max_length - 1 ]) + ending
 
 def sanitize_xml(xml_string):
     """ Returns a version of the supplied XML string with comments and all whitespace stripped,
