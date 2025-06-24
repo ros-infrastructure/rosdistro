@@ -40,7 +40,7 @@ def sanitize_and_truncate_docs(doc_string, max_length=100):
     lines = doc_string.rstrip().splitlines()
     ending = ''
     if len(lines) >= max_length:
-        ending = f'\nTruncated file at {max_length} lines'
+        ending = f'\nTruncated content at {max_length} of {len(lines)} lines'
     return '\n'.join(lines[:max_length]) + ending
 
 def sanitize_xml(xml_string):
