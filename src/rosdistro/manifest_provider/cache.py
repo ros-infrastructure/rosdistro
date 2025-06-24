@@ -155,25 +155,19 @@ class CachedSourceManifestProvider(object):
                     release_package_xml = self._distribution_cache.release_package_xmls.get(package_name, None)
                     if package_xml == release_package_xml:
                         logger.debug(f'{package_name} Linking package.xml of source cache entry for compaction. Lines saved: {len(package_xml.splitlines())}')
-                        package_xml = release_package_xml
-                        repo_cache.add(package_name, pkg_entries['package_path'], package_xml, 'package.xml', increment_update_time=False)
+                        repo_cache.add(package_name, pkg_entries['package_path'], release_package_xml, 'package.xml', increment_update_time=False)
 
                 if 'CHANGELOG.rst' in pkg_entries:
                     changelog = sanitize_and_truncate_docs(pkg_entries['CHANGELOG.rst'])
                     release_changelog = self._distribution_cache.release_changelogs.get(package_name, None)
                     if changelog == release_changelog:
                         logger.debug(f'{package_name} Linking CHANGELOG.rst of source cache entry for compaction. Lines saved: {len(changelog.splitlines())}')
-                        changelog = release_changelog
-                        repo_cache.add(package_name, pkg_entries['package_path'], changelog, 'CHANGELOG.rst', increment_update_time=False)
-                    else:
-                        logger.debug(f'Changelog didn\'t match!!!!!!!!!!!!!!!!!\n<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n{changelog}\n================================\n{release_changelog}\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
-
+                        repo_cache.add(package_name, pkg_entries['package_path'], release_changelog, 'CHANGELOG.rst', increment_update_time=False)
                 if 'README.md' in pkg_entries:
                     readme = sanitize_and_truncate_docs(pkg_entries['README.md'])
                     release_readme = self._distribution_cache.release_readmes.get(package_name, None)
                     if readme == release_readme:
                         logger.debug(f'{package_name} Linking README.md of source cache entry for compaction. Lines saved: {len(readme.splitlines())}')
-                        readme = release_readme
-                        repo_cache.add(package_name, pkg_entries['package_path'], readme, 'README.md', increment_update_time=False)
+                        repo_cache.add(package_name, pkg_entries['package_path'], release_readme, 'README.md', increment_update_time=False)
 
         return repo_cache
