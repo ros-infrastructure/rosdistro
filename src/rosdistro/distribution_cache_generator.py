@@ -170,8 +170,8 @@ class CacheYamlDumper(yaml.SafeDumper):
         super(CacheYamlDumper, self).__init__(*args, **kwargs)
 
     def ignore_aliases(self, content):
-        """ Allow strings that look like package XML to alias to each other in the YAML output. """
-        return not (isinstance(content, str) and '<package' in content)
+        """ Allow long strings that look like package XML to alias to each other in the YAML output. """
+        return not (isinstance(content, str) and len(content) > 300) # TODO(tfoote) magic number move to config
 
     def represent_mapping(self, tag, mapping, flow_style=False):
         """ Gives compact representation for the distribution_file section, while allowing the package
