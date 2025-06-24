@@ -39,7 +39,7 @@ def sanitize_and_truncate_docs(doc_string, max_length=100):
     # Remove trailing whitespace then truncate
     lines = doc_string.rstrip().splitlines()
     ending = ''
-    if len(lines) > 100:
+    if len(lines) >= max_length:
         ending = f'\nTruncated file at {max_length} lines'
     return '\n'.join(lines[:max_length]) + ending
 
