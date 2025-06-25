@@ -78,8 +78,12 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
         include_source=include_source)
 
     print('- fetch missing release manifests')
+    max_source_packages = 100000 # TODO(tfoote) magic number move to config
+    max_source_repos = 10000 # TODO(tfoote) magic number move to config
     errors = []
-    for pkg_name in sorted(dist.release_packages.keys()):
+    if debug and (len(dist.release_packages.keys()) > max_source_packages):
+        print(f'  - limiting packages scanned to {max_source_packages} of {len(dist.release_packages.keys())} as per config') 
+    for pkg_name in sorted(dist.release_packages.keys())[:max_source_packages]:
         repo = dist.repositories[dist.release_packages[pkg_name].repository_name].release_repository
         if repo.version is None:
             if debug:
@@ -134,7 +138,9 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
 
     if include_source:
         print('- fetch source repository manifests')
-        for repo_name in sorted(dist.repositories.keys()):
+        if debug and len(dist.repositories.keys()) > max_source_repos:
+            print(f'  - limiting repositories scanned to {max_source_repos} of {len(dist.repositories.keys())} as per config') 
+        for repo_name in sorted(dist.repositories.keys())[:max_source_repos]:
             if dist.repositories[repo_name].source_repository:
                 dist.get_source_repo_package_xmls(repo_name)
                 if debug:
