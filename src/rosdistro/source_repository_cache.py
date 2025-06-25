@@ -83,22 +83,22 @@ class SourceRepositoryCache(object):
         """
         return iter(self._package_names)
 
-    def __getitem__(self, package_name):
+    def __getitem__(self, package_name): #TODO(tfoote) API change
         """
-        Access the cached information about a specific package. Returns a (str, str) of
-        path to package relative to repo root, and string of package xml.
+        Access the cached information about a specific package. Returns a dict of
+        path to package relative paths to repo root, and string of the file contents (potentially truncated).
         """ 
         if package_name not in self._package_names:
             raise KeyError("Package '%s' not present in SourceRepositoryCache." % package_name)
         return self._data[package_name]
 
-    # def items(self): # TODO(tfoote) unused now
-    #     """
-    #     Generator of (str, str, str) containing the package name, path relative
-    #     to repo root, and package xml string.
-    #     """
-    #     for package_name in self._package_names:
-    #         yield package_name, self._data[package_name]['package_path'], self._data[package_name]['package.xml']
+    def items(self):  #TODO(tfoote) API change
+        """
+        Generator of (str, dict) containing the package name, and a dict of
+        paths to file contents (potentially truncated).
+        """
+        for package_name in self._package_names:
+            yield package_name, self._data[package_name]
 
     def __len__(self):
         """
