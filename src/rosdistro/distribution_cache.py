@@ -67,10 +67,10 @@ class DistributionCache(object):
         self.release_package_xmls = data['release_package_xmls'] if data and 'release_package_xmls' in data else {}
         self.release_readmes = data['release_readmes'] if data and 'release_readmes' in data else {}
         self.release_changelogs = data['release_changelogs'] if data and 'release_changelogs' in data else {}
-        self.source_repo_package_xmls = {}
-        if data and 'source_repo_package_xmls' in data:
-            for repo_name, repo_data in data['source_repo_package_xmls'].items():
-                self.source_repo_package_xmls[repo_name] = SourceRepositoryCache(repo_data)
+        self.source_repo_resources = {}
+        if data and 'source_repo_resources' in data:
+            for repo_name, repo_data in data['source_repo_resources'].items():
+                self.source_repo_resources[repo_name] = SourceRepositoryCache(repo_data)
         self.distribution_file.source_packages = self.get_source_packages()
 
     def get_data(self):
@@ -82,8 +82,8 @@ class DistributionCache(object):
         data['release_package_xmls'] = self.release_package_xmls
         data['release_readmes'] = self.release_readmes
         data['release_changelogs'] = self.release_changelogs
-        data['source_repo_package_xmls'] = dict([(repo_name, repo_cache.get_data())
-            for repo_name, repo_cache in self.source_repo_package_xmls.items()])
+        data['source_repo_resources'] = dict([(repo_name, repo_cache.get_data())
+            for repo_name, repo_cache in self.source_repo_resources.items()])
         return data
 
     def update_distribution(self, distribution_file_data):
@@ -123,12 +123,12 @@ class DistributionCache(object):
 
         # Remove all source package xmls where the devel branch is pointing to a different commit than
         # the one we have associated with our cache. This requires calling git ls-remote on all affected repos.
-        if self.source_repo_package_xmls:
+        if self.source_repo_resources:
             start_time = time.perf_counter()
             dropped_count = 0
             skipped_count = 0
-            print(f"- checking [{len(self.source_repo_package_xmls.keys())}] source repo cache entries without source entries, requires ls-remote")
-            for repo in sorted(self.source_repo_package_xmls.keys()):
+            print(f"- checking [{len(self.source_repo_resources.keys())}] source repo cache entries without source entries, requires ls-remote")
+            for repo in sorted(self.source_repo_resources.keys()):
                 sys.stdout.write('.')
                 sys.stdout.flush()
                 try:
@@ -137,13 +137,13 @@ class DistributionCache(object):
                     # The repo entry has been dropped, or the source stanza from it has been dropped,
                     # either way, remove the cache entries associated with this repository.
                     logger.debug('Unable to find source repository info for repo "%s".' % repo)
-                    del self.source_repo_package_xmls[repo]
+                    del self.source_repo_resources[repo]
                     continue
 
                 min_update_delta =  1 * 60 * 60 # TOOD(tfoote) magic number make into a parameter
-                if '_last_update_time' in self.source_repo_package_xmls[repo]:
+                if '_last_update_time' in self.source_repo_resources[repo]:
                     now = datetime.datetime.now()
-                    entry_age = (now - self.source_repo_package_xmls[repo]['_last_update_time']).total_seconds()
+                    entry_age = (now - self.source_repo_resources[repo]['_last_update_time']).total_seconds()
                     if entry_age < min_update_delta:
                         logger.debug(f'Skipping check of {repo} because it was last updated only {entry_age} seconds ago less than {min_update_delta}')
                         skipped_count += 1
@@ -156,17 +156,17 @@ class DistributionCache(object):
                     if result['returncode'] != 0 or not result['output']:
                         # Error checking remote, or unable to find remote reference. Drop the cache entry.
                         logger.debug("Unable to check hash for branch %s of %s, dropping cache entry." % (source_repository.version, source_repository.url))
-                        del self.source_repo_package_xmls[repo]
+                        del self.source_repo_resources[repo]
                         dropped_count += 1
                         continue
                     # Split by line first and take the last line, to squelch any preamble output, for example
                     # a known host key validation notice.
                     source_hash = result['output'].split('\n')[-1].split('\t')[0]
 
-                cached_hash = self.source_repo_package_xmls[repo].ref()
+                cached_hash = self.source_repo_resources[repo].ref()
                 if source_hash != cached_hash:
                     logger.debug('Repo "%s" has moved from %s to %s, dropping cache.' % (repo, cached_hash, source_hash))
-                    del self.source_repo_package_xmls[repo]
+                    del self.source_repo_resources[repo]
                     dropped_count += 1
             sys.stdout.write('\n')
             sys.stdout.write(f'Dropped {dropped_count} repositories\n')
@@ -183,7 +183,7 @@ class DistributionCache(object):
     def get_source_packages(self):
         """ Returns dictionary mapping source package names to Package() objects. """
         package_dict = {}
-        for source_repo_name, source_repo in self.source_repo_package_xmls.items():
+        for source_repo_name, source_repo in self.source_repo_resources.items():
             for pkg_name in source_repo:
                 package_dict[pkg_name] = Package(pkg_name, source_repo_name)
         return package_dict

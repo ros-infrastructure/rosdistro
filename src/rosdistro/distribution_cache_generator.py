@@ -142,7 +142,7 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
             print(f'  - limiting repositories scanned to {max_source_repos} of {len(dist.repositories.keys())} as per config') 
         for repo_name in sorted(dist.repositories.keys())[:max_source_repos]:
             if dist.repositories[repo_name].source_repository:
-                dist.get_source_repo_package_xmls(repo_name)
+                dist.get_source_repo_resources(repo_name)
                 if debug:
                     print('  - dist cache source fetch "%s"' % repo_name)
                 else:
@@ -223,7 +223,7 @@ def _get_cached_distribution(index, dist_name, preclean=False, ignore_local=Fals
         # if we're not including the source portion of the cache, strip it out of the existing cache
         # in order to skip the potentially lengthy cache invalidation process.
         if not include_source:
-            cache.source_repo_package_xmls = {}
+            cache.source_repo_resources = {}
         # update cache with current distribution file, which filters existing cache by validity.
         cache.update_distribution(rel_file_data)
     else:
