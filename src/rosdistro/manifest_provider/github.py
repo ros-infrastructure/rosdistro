@@ -79,8 +79,7 @@ def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
     url = 'https://raw.githubusercontent.com/%s/%s/%s' % (path, release_tag, filepath)
     try:
         logger.debug('Load %s file from url "%s"' % (filepath, url))
-        # TODO(tfoote) magic number for testing
-        return '\n'.join( _get_url_contents(url).splitlines()[:100])
+        return '\n'.join( _get_url_contents(url).splitlines())
     except HTTPError as e:
         if e.code == 404:
             logger.debug('- File not found (%s), trying "%s"' % (e, url))
