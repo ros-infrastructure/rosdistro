@@ -59,8 +59,8 @@ def git_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
         raise RuntimeError('Unable to fetch %s: %s' % (filepath, e))
 
 
-def git_source_manifest_provider(repo, filepaths=['package.xml']):
-    filepath = 'package.xml' # TODO(tfoote) use filepaths
+def git_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md']):
+    xmlpath = 'package.xml' # TODO(tfoote) use filepaths
     try:
         with _temp_git_clone(repo.url, repo.version) as git_repo_path:
             logger.debug(f'Cloing repository {repo.url} to get source info')
@@ -72,13 +72,23 @@ def git_source_manifest_provider(repo, filepaths=['package.xml']):
             for package_path in find_package_paths(git_repo_path):
                 if package_path == '.':
                     package_path = ''
-                with open(os.path.join(git_repo_path, package_path, filepath), 'r') as f:
+                with open(os.path.join(git_repo_path, package_path, xmlpath), 'r') as f:
                     package_xml = f.read()
                 try:
                     name = parse_package_string(package_xml).name
                 except InvalidPackage:
-                    raise RuntimeError('Unable to parse %s file found in %s' % (filepath, repo.url))
-                cache.add(name, package_path, package_xml, filepath)
+                    raise RuntimeError('Unable to parse %s file found in %s' % (xmlpath, repo.url))
+                cache.add(name, package_path, package_xml, xmlpath)
+                for filepath in filepaths:
+                    repo_filename = os.path.join(git_repo_path, package_path, filepath)
+                    if not os.path.exists(repo_filename):
+                        logger.debug(f'- git load of {filepath} from {repo.url} at {repo.version} skipped because it did not exist.')
+                        continue
+                    with open(repo_filename, 'r') as f:
+                        logger.debug('- git load %s from %s' % (filepath, repo_filename))
+                        contents = f.read()
+                        contents = sanitize_and_truncate_docs(contents) # TODO(tfoote) Do this later so it doesn't need to be in all manifest providers
+                        cache.add(name, package_path, contents, filepath)
 
     except Exception as e:
         raise RuntimeError('Unable to fetch source %s files: %s' % (filepath, e))
