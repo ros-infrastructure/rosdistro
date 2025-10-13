@@ -51,7 +51,7 @@ def _gitlab_urlopen(url):
     req = Request(url)
     if GITLAB_PRIVATE_TOKEN:
         req.add_header('Private-Token', GITLAB_PRIVATE_TOKEN)
-    logger.warn('Performing GitLab API query "%s"' % (url,))
+    logger.debug('Performing GitLab API query "%s"' % (url,))
     return urlopen(req)
 
 
