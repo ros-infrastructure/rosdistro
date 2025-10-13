@@ -66,17 +66,32 @@ def test_get_index_v4():
     get_distribution_file(i, 'foo')
 
 
+def _wait_for_server():
+    import socket
+    import time
+    i = 0
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.connect(('127.0.0.1', 9876))
+            except OSError:
+                if i >= 20:
+                    raise
+                time.sleep(0.1)
+            else:
+                return
+
+
 def test_get_index_from_http_with_query_parameters():
     import subprocess
     import sys
-    import time
     url = 'http://127.0.0.1:9876/index_v3.yaml?raw&at=master'
     # start a http server and wait
     proc = subprocess.Popen(
         [sys.executable, '-m', 'http.server', '9876', '--bind', '127.0.0.1'],
         cwd=FILES_DIR)
-    time.sleep(1)
     try:
+        _wait_for_server()
         i = get_index(url)
         assert len(i.distributions.keys()) == 1
         assert 'foo' in i.distributions.keys()
