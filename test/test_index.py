@@ -70,14 +70,11 @@ def test_get_index_from_http_with_query_parameters():
     import subprocess
     import sys
     import time
-    url = 'http://localhost:9876/index_v3.yaml?raw&at=master'
+    url = 'http://127.0.0.1:9876/index_v3.yaml?raw&at=master'
     # start a http server and wait
-    if sys.version_info < (3, 0, 0):
-        proc = subprocess.Popen([sys.executable, '-m', 'SimpleHTTPServer', '9876'],
-                                cwd=FILES_DIR)
-    else:
-        proc = subprocess.Popen([sys.executable, '-m', 'http.server', '9876'],
-                                cwd=FILES_DIR)
+    proc = subprocess.Popen(
+        [sys.executable, '-m', 'http.server', '9876', '--bind', '127.0.0.1'],
+        cwd=FILES_DIR)
     time.sleep(0.5)
     try:
         i = get_index(url)
