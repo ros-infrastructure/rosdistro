@@ -96,8 +96,8 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
             sys.stdout.flush()
         # check that package.xml is fetchable
         old_package_xml = None
-        if cache and pkg_name in cache.release_package_xmls:
-            old_package_xml = cache.release_package_xmls[pkg_name]
+        if cache and pkg_name in cache.release_resources:
+            old_package_xml = cache.release_resources[pkg_name].get('package.xml', None)
         package_xml = dist.get_release_package_xml(pkg_name)
         if not package_xml:
             errors.append('%s: missing package.xml file for package "%s"' % (dist_name, pkg_name))
@@ -116,17 +116,17 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
             print("  - updated manifest of package '%s' to version '%s'" % (pkg_name, pkg.version))
 
         old_readme = None
-        if cache and pkg_name in cache.release_readmes:
-            old_readme = cache.release_readmes[pkg_name]
-        readme = dist.get_release_readme(pkg_name)
+        if cache and pkg_name in cache.release_resources:
+            old_readme = cache.release_resources[pkg_name].get('README.md', None)
+        readme = dist.get_release_resource(pkg_name, 'README.md')
 
         if readme != old_readme:
             print("  - updated README.md of package '%s'" % (pkg_name))        
 
         old_changelog = None
-        if cache and pkg_name in cache.release_changelogs:
-            old_changelog = cache.release_changelogs[pkg_name]
-        changelog = dist.get_release_changelog(pkg_name)
+        if cache and pkg_name in cache.release_resources:
+            old_changelog = cache.release_resources[pkg_name].get('CHANGELOG.rst', None)
+        changelog = dist.get_release_resource(pkg_name, 'CHANGELOG.rst')
 
         if changelog != old_changelog:
             print("  - updated CHANGELOG.rst of package '%s'" % (pkg_name))

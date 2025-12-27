@@ -77,24 +77,15 @@ class CachedManifestProvider(object):
 
     def __call__(self, dist_name, repo, pkg_name, filepath='package.xml'):
         assert repo.version
-        if filepath == 'README.md':
-            manifest_content = self._distribution_cache.release_readmes.get(pkg_name, None)
-            if manifest_content:
+
+        # Load from cache
+        manifest_content = self._distribution_cache.release_resources.get(pkg_name, {}).get(filepath, None)
+        if manifest_content:
+            if filepath != 'package.xml':
                 manifest_content = sanitize_and_truncate_docs(manifest_content)
-                self._distribution_cache.release_readmes[pkg_name] = manifest_content
-                logger.debug('Loading README.md for package "%s" from cache' % pkg_name)
-        elif filepath == 'CHANGELOG.rst':
-            manifest_content = self._distribution_cache.release_changelogs.get(pkg_name, None)
-            if manifest_content:
-                manifest_content = sanitize_and_truncate_docs(manifest_content)
-                self._distribution_cache.release_changelogs[pkg_name] = manifest_content
-                logger.debug('Loading CHANGELOG.rst for package "%s" from cache' % pkg_name)
-        else:
-            manifest_content = self._distribution_cache.release_package_xmls.get(pkg_name, None)
-            if manifest_content:
-                manifest_content = sanitize_xml(manifest_content)
-                self._distribution_cache.release_package_xmls[pkg_name] = manifest_content
-                logger.debug('Loading package.xml for package "%s" from cache' % pkg_name)
+            self._distribution_cache.release_resources[pkg_name][filepath] = manifest_content
+            logger.debug('Loading %s for package "%s" from cache' % (filepath, pkg_name) )
+
         if not manifest_content:
             # use manifest providers to lazy load
             for mp in self._manifest_providers or []:
@@ -110,13 +101,11 @@ class CachedManifestProvider(object):
                     logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
             if manifest_content is None:
                 return None
+
             # populate the cache
-            if filepath == 'README.md':
-                self._distribution_cache.release_readmes[pkg_name] = manifest_content
-            elif filepath == 'CHANGELOG.rst':
-                self._distribution_cache.release_changelogs[pkg_name] = manifest_content
-            else:
-                self._distribution_cache.release_package_xmls[pkg_name] = manifest_content
+            if pkg_name not in self._distribution_cache.release_resources:
+                self._distribution_cache.release_resources[pkg_name] = {}
+            self._distribution_cache.release_resources[pkg_name][filepath] = manifest_content
         return manifest_content
 
 
