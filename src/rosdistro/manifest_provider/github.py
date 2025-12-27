@@ -59,9 +59,10 @@ def _get_url_contents(url):
         except HTTPError as e:
             if e.code != 403:
                 raise e
-            logger.debug(f'Fetch of {url} failed with 403, assuming rate limit, retrying after period {backoff} seconds.')
+            logger.debug(f'Fetch of {url.full_url} failed with 403, assuming rate limit, retrying after period {backoff} seconds.')
         time.sleep(backoff)
         backoff *= 1.5
+    # Last return after timeout to collect the error object again.
     return urlopen(url).read().decode('utf-8')
 
 def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
