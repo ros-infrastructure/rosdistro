@@ -48,25 +48,40 @@ class DistributionCache(object):
 
     def __init__(self, name, data=None, distribution_file_data=None):
         assert data or distribution_file_data
+        
+        # default value
+        inbound_version = 0
         if data:
             assert 'type' in data, "Expected file type is '%s'" % DistributionCache._type
             assert data['type'] == DistributionCache._type, "Expected file type is '%s', not '%s'" % (DistributionCache._type, data['type'])
 
             assert 'version' in data, "Distribution cache file for '%s' lacks required version information" % name
-            self.version = int(data['version'])
-            assert self.version > 1, "Unable to handle '%s' format version '%d' anymore, please update your '%s' file to version '2'" % (DistributionCache._type, self.version, DistributionCache._type)
-            assert self.version == 2, "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (DistributionCache._type, self.version)
+            inbound_version = int(data['version'])
+            assert inbound_version > 1, "Unable to handle '%s' format version '%d' anymore, please update your '%s' file to version '2'" % (DistributionCache._type, inbound_version, DistributionCache._type)
+            assert inbound_version <= 3, "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (DistributionCache._type, inbound_version)
 
             assert 'name' in data, "Distribution cache file for '%s' lacks required name information" % name
             assert data['name'] == name, "Distribution cache file for '%s' does not match the name '%s'" % (name, data['name'])
-        else:
-            self.version = 2
+
+        # All data will be migrated forward on import, any rexport will be in version 3
+        self.version = 3
 
         self._distribution_file_data = data['distribution_file'] if data else distribution_file_data
         self.distribution_file = create_distribution_file(name, self._distribution_file_data)
-        self.release_package_xmls = data['release_package_xmls'] if data and 'release_package_xmls' in data else {}
-        self.release_readmes = data['release_readmes'] if data and 'release_readmes' in data else {}
-        self.release_changelogs = data['release_changelogs'] if data and 'release_changelogs' in data else {}
+
+        # self.release_package_xmls = data['release_package_xmls'] if data and 'release_package_xmls' in data else {}
+        # self.release_readmes = data['release_readmes'] if data and 'release_readmes' in data else {}
+        # self.release_changelogs = data['release_changelogs'] if data and 'release_changelogs' in data else {}
+        self.release_resources = data['release_resources'] if data and 'release_resources' in data else {}
+
+        # Format 2 backards compatability
+        # Convert release_package_xml from flat dict at the root to be an instance of a resource loaded
+        if inbound_version == 2 and 'release_package_xmls' in data:
+            for pkg_name, pkg_xml in data['release_package_xmls']:
+                if not pkg_name in data['release_resources']:
+                    data['release_resources'][pkg_name] = {}
+                data['release_resources'][pkg_name]['package.xml'] = pkg_xml
+
         self.source_repo_resources = {}
         if data and 'source_repo_resources' in data:
             for repo_name, repo_data in data['source_repo_resources'].items():
@@ -76,12 +91,10 @@ class DistributionCache(object):
     def get_data(self):
         data = {}
         data['type'] = 'cache'
-        data['version'] = 2
+        data['version'] = 3
         data['name'] = self.distribution_file.name
         data['distribution_file'] = self._distribution_file_data
-        data['release_package_xmls'] = self.release_package_xmls
-        data['release_readmes'] = self.release_readmes
-        data['release_changelogs'] = self.release_changelogs
+        data['release_resources'] = self.release_resources
         data['source_repo_resources'] = dict([(repo_name, repo_cache.get_data())
             for repo_name, repo_cache in self.source_repo_resources.items()])
         return data
@@ -202,9 +215,7 @@ class DistributionCache(object):
         return (repo.version, repo.url)
 
     def _remove_obsolete_entries(self):
-        for pkg_name in list(self.release_package_xmls.keys()):
+        for pkg_name in list(self.release_resources.keys()):
             if pkg_name not in self.distribution_file.release_packages:
-                print('- REMOVE', pkg_name)
-                del self.release_package_xmls[pkg_name]
-                del self.release_readmes[pkg_name]
-                del self.release_changelogs[pkg_name]
+                print('- REMOVE Release Resources for: ', pkg_name)
+                del self.release_resources[pkg_name]
