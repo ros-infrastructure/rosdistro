@@ -8,8 +8,8 @@
     "version": {
       "description": "The version of the rosdistro cache",
       "type": "integer",
-      "minimum": "3",
-      "maximum": "3"
+      "minimum": 3,
+      "maximum": 3
     },
     "type": {
       "description": "Clarifying the file type",
@@ -20,8 +20,31 @@
       "patternProperties": {
          "^.*$": {"$ref": "#/$defs/repository_resources"}
       }
-    }
-  },
+    },
+    "release_resources": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/package_resources"},
+      "properties": {
+        "_last_update_time": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": ["version"]
+      },
+      "additionalProperties": false
+    },
+    "distribution_file": {
+      "type": "object",
+      "description": "rosdistro distribution_file"
+    },
+    "name": {
+      "type": "string",
+      "description": "The name of the distribution being cached"
+    },
+  "required": ["source_repo_resources", "distribution_file", "name"],
   "$defs": {
     "repository_resources": {
       "type": "object",
