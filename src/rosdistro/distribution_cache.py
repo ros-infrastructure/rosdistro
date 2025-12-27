@@ -112,14 +112,22 @@ class DistributionCache(object):
 
         # remove all release package xmls where the package version has changed.
         print(f"- checking [{len(dist_file.release_packages.keys())}] release package cache entries for different versions")
+        dropped_count = 0
+        skipped_count = 0
         for pkg_name in sorted(dist_file.release_packages.keys()):
             if pkg_name not in self.distribution_file.release_packages:
+                logger.debug("Skipping %s because not in the distro." % pkg_name)
+                skipped_count += 1
                 continue
-            if pkg_name in self.release_package_xmls and self._get_repo_info(dist_file, pkg_name) != self._get_repo_info(self.distribution_file, pkg_name):
-                logger.debug("Dropping release package XML cache for %s" % pkg_name)
-                del self.release_package_xmls[pkg_name]
-                del self.release_readmes[pkg_name]
-                del self.release_changelogs[pkg_name]
+            if pkg_name in self.release_resources and self._get_repo_info(dist_file, pkg_name) != self._get_repo_info(self.distribution_file, pkg_name):
+                logger.debug("Dropping release resources package cache for %s" % pkg_name)
+                dropped_count += 1
+                del self.release_resources[pkg_name]
+                
+    
+        sys.stdout.write('\n')
+        sys.stdout.write(f'Dropped {dropped_count} repositories\n')
+        sys.stdout.write(f'Skippted {skipped_count} repositories\n')
 
         # Remove all source package xmls where the devel branch is pointing to a different commit than
         # the one we have associated with our cache. This requires calling git ls-remote on all affected repos.
