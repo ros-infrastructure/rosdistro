@@ -35,15 +35,17 @@ from datetime import datetime
 
 class SourceRepositoryCache(object):
     """
-    This class represents a cache of the package XML strings for all packages in a single
+    This class represents a cache of the resource strings for all packages in a single
     repo at a particular moment in time. A dictionary of many of these (one for each repo)
-    keyed to the repo name represents the totality of the source package xml cache.
+    keyed to the repo name represents the totality of the source package resources cache.
     """
 
     def __init__(self, data):
         assert data
         self._ref = data['_ref']
-        self._package_names = set([name for name in data.keys() if name != '_ref'])
+        self._last_update_time = data['_last_update_time'] if data['_last_update_time'] else None
+        non_package_keys = ['_ref', '_last_update_time']
+        self._package_names = set([name for name in data.keys() if name not in non_package_keys])
         self._data = data
 
     def get_data(self):
