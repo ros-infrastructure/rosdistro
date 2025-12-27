@@ -51,9 +51,11 @@ GITHUB_USER = os.getenv('GITHUB_USER', None)
 GITHUB_PASSWORD = os.getenv('GITHUB_PASSWORD', None)
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', None)
 
+ROSDISTRO_RETRY_MAX = int(os.getenv('ROSDISTRO_RETRY_MAX', '120'))
+
 def _get_url_contents(url):
     backoff = 1
-    while backoff < 120:
+    while backoff < ROSDISTRO_RETRY_MAX:
         try:
             return urlopen(url).read().decode('utf-8')
         except HTTPError as e:
