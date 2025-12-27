@@ -60,10 +60,10 @@ def git_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
 
 
 def git_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md']):
-    xmlpath = 'package.xml' # TODO(tfoote) use filepaths
+    xmlpath = 'package.xml' # TODO(tfoote) use filepaths, currently using the package special to get the names
     try:
         with _temp_git_clone(repo.url, repo.version) as git_repo_path:
-            logger.debug(f'Cloing repository {repo.url} to get source info')
+            logger.debug(f'Cloning repository {repo.url} to get source info')
             # Include the git hash in our cache dictionary.
             git_hash = Git(git_repo_path).command('rev-parse', 'HEAD')['output']
             cache = SourceRepositoryCache.from_ref(git_hash)
@@ -91,7 +91,7 @@ def git_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md'])
                         cache.add(name, package_path, contents, filepath)
 
     except Exception as e:
-        raise RuntimeError('Unable to fetch source %s files: %s' % (filepath, e))
+        raise RuntimeError('Unable to fetch source files: %s' % (e))
 
     return cache
 
