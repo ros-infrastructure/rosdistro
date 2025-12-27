@@ -56,7 +56,8 @@ class ReleaseCache(object):
 
         self._distribution_file_data = data['distribution_file'] if data else distribution_file_data
         self.release_file = ReleaseFile(name, self._distribution_file_data)
-        self.package_xmls = data['release_package_xmls'] if data else {}
+
+        self.package_xmls = {pkg_name: info['package.xml'] for pkg_name, info in data['release_resources'] if 'package.xml' in info}
 
     # for backward compatibility only
     def __getattr__(self, name):
