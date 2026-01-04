@@ -147,12 +147,13 @@ def gitlab_source_manifest_provider(repo, filepaths=['package.xml']):
 
     cache = SourceRepositoryCache.from_ref(sha)
     for package_xml_path in package_xml_paths:
-        resource_path = urlquote(
-            package_xml_path + '/' + filepath if package_xml_path else filepath, safe='')
-        resource = 'repository/files/' + resource_path + '/raw'
-        with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
-            package_xml = res.read().decode('utf-8')
-        name = parse_package_string(package_xml).name
-        cache.add(name, package_xml_path, package_xml, filepath)
+        for filepath in filepaths:
+            resource_path = urlquote(
+                package_xml_path + '/' + filepath if package_xml_path else filepath, safe='')
+            resource = 'repository/files/' + resource_path + '/raw'
+            with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
+                contents = res.read().decode('utf-8')
+            name = parse_package_string(contents).name
+            cache.add(name, package_xml_path, contents, filepath)
 
     return cache

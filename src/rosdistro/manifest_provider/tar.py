@@ -100,7 +100,8 @@ def tar_source_manifest_provider(repo, filepaths=['package.xml']):
                         name = parse_package_string(package_xml).name
                     except InvalidPackage:
                         raise RuntimeError('Unable to parse package.xml file found in %s' % repo.url)
-                    cache.add(name, package_path, package_xml, filepath)
+                    for filepath in filepaths:
+                        cache.add(name, package_path, package_xml, filepath)
 
                 return cache
             finally:
