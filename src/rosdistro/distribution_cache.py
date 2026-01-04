@@ -77,7 +77,9 @@ class DistributionCache(object):
         # Format 2 backards compatability
         # Convert release_package_xml from flat dict at the root to be an instance of a resource loaded
         if inbound_version == 2 and 'release_package_xmls' in data:
-            for pkg_name, pkg_xml in data['release_package_xmls']:
+            if not 'release_resources' in data:
+                data['release_resources'] = {}
+            for pkg_name, pkg_xml in data['release_package_xmls'].items():
                 if not pkg_name in data['release_resources']:
                     data['release_resources'][pkg_name] = {}
                 data['release_resources'][pkg_name]['package.xml'] = pkg_xml
