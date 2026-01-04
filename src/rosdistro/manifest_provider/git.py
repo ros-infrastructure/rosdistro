@@ -40,6 +40,7 @@ from catkin_pkg.package import InvalidPackage, parse_package_string
 from catkin_pkg.packages import find_package_paths
 
 from rosdistro.common import rmtree
+from rosdistro.manifest_provider.cache import sanitize_and_truncate_docs
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro.vcs import Git, ref_is_hash
 from rosdistro import logger
