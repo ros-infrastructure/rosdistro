@@ -26,6 +26,7 @@ def test_cached():
     class FakeDistributionCache(object):
         def __init__(self):
             self.release_package_xmls = {}
+            self.release_resources = {}
     dc = FakeDistributionCache()
     cache = CachedManifestProvider(dc, [rosdistro.manifest_provider.github.github_manifest_provider])
     assert '</package>' in cache('melodic', _genmsg_release_repo(), 'genmsg')
