@@ -36,7 +36,7 @@ import os
 import re
 import subprocess
 
-from packaging.version import parse
+from packaging.version import parse, InvalidVersion
 
 
 class Git(object):
@@ -57,7 +57,17 @@ class Git(object):
         if not cls._client_version:
             result = cls().command('--version')
             cls._client_version = result['output'].split()[-1]
-        return parse(cls._client_version) >= parse(version)
+        try:
+            parsed_version = parse(cls._client_version)
+        except InvalidVersion:
+            if "windows" in cls._client_version.lower():
+                # Git for Windows uses a non-standard version string
+                cls._client_version = cls._client_version.lower().replace("windows", "post").strip()
+                parsed_version = parse(cls._client_version)
+            else:
+                raise
+
+        return parsed_version >= parse(version)
 
 
 def ref_is_hash(ref):
