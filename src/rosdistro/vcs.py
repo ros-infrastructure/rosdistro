@@ -37,6 +37,11 @@ import re
 import subprocess
 
 from packaging.version import parse, InvalidVersion
+try:
+    from packaging.version import LegacyVersion
+    packaging_lte_22 = True
+except ImportError:
+    packaging_lte_22 = False
 
 
 def _version_gte(version: str, required_version: str) -> bool:
@@ -51,6 +56,11 @@ def _version_gte(version: str, required_version: str) -> bool:
     """
     try:
         parsed_version = parse(version)
+        if packaging_lte_22:
+            # In packaging 22.0 and earlier, parse() returns a LegacyVersion for non-standard version strings,
+            # which will compare greater than any valid version. We want to raise an error instead.
+            if isinstance(parsed_version, LegacyVersion):
+                raise InvalidVersion
     except InvalidVersion:
         if "windows" in version.lower():
             # Git for Windows uses a non-standard version string
