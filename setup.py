@@ -10,7 +10,7 @@ kwargs = {
     # - src/rosdistro/__init__.py
     # - stdeb.cfg
     'version': '1.0.1',
-    'install_requires': ['packaging>=17', 'PyYAML', 'setuptools'],
+    'install_requires': ['packaging==16.8', 'PyYAML', 'setuptools'],
     'python_requires': '>=3.6',
     'packages': find_packages('src'),
     'package_dir': {'': 'src'},
