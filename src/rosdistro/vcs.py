@@ -39,6 +39,29 @@ import subprocess
 from packaging.version import parse, InvalidVersion
 
 
+def _version_gte(version: str, required_version: str) -> bool:
+    """Check if a version string is greater than or equal to a required version.
+
+    Args:
+        version: The version string to check.
+        required_version: The required version string.
+
+    Returns:
+        True if the version is greater than or equal to the required version, False otherwise.
+    """
+    try:
+        parsed_version = parse(version)
+    except InvalidVersion:
+        if "windows" in version.lower():
+            # Git for Windows uses a non-standard version string
+            version = version.lower().replace("windows", "post").strip()
+            parsed_version = parse(version)
+        else:
+            raise
+
+    return parsed_version >= parse(required_version)
+
+
 class Git(object):
     _client_executable = None
     _client_version = None
@@ -57,17 +80,8 @@ class Git(object):
         if not cls._client_version:
             result = cls().command('--version')
             cls._client_version = result['output'].split()[-1]
-        try:
-            parsed_version = parse(cls._client_version)
-        except InvalidVersion:
-            if "windows" in cls._client_version.lower():
-                # Git for Windows uses a non-standard version string
-                cls._client_version = cls._client_version.lower().replace("windows", "post").strip()
-                parsed_version = parse(cls._client_version)
-            else:
-                raise
 
-        return parsed_version >= parse(version)
+        return _version_gte(cls._client_version, version)
 
 
 def ref_is_hash(ref):
