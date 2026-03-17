@@ -195,13 +195,13 @@ def _get_cached_distribution(index, dist_name, preclean=False, ignore_local=Fals
             if not ignore_local:
                 print('- trying to use local cache')
                 yaml_str = None
-                if os.path.exists('%s-cache.yaml.gz' % dist_name):
-                    print('- use local file "%s-cache.yaml.gz"' % dist_name)
-                    with gzip.open('%s-cache.yaml.gz' % dist_name, 'rb') as f:
-                        yaml_str = f.read()
-                elif os.path.exists('%s-cache.yaml' % dist_name):
+                if os.path.exists('%s-cache.yaml' % dist_name):
                     print('- use local file "%s-cache.yaml"' % dist_name)
                     with open('%s-cache.yaml' % dist_name, 'r') as f:
+                        yaml_str = f.read()
+                elif os.path.exists('%s-cache.yaml.gz' % dist_name):
+                    print('- use local file "%s-cache.yaml.gz"' % dist_name)
+                    with gzip.open('%s-cache.yaml.gz' % dist_name, 'rb') as f:
                         yaml_str = f.read()
                 if yaml_str is not None:
                     data = yaml.safe_load(yaml_str)

@@ -58,7 +58,7 @@ class ReleaseCache(object):
         self.release_file = ReleaseFile(name, self._distribution_file_data)
 
         self.package_xmls = {pkg_name: info['package.xml'] for pkg_name, info in data['release_resources'] if 'package.xml' in info}
-        self.release_resources = data['release_resources']
+        # self.release_resources = data['release_resources']
 
     # for backward compatibility only
     def __getattr__(self, name):
@@ -73,10 +73,14 @@ class ReleaseCache(object):
         data['name'] = self.release_file.name
         data['distribution_file'] = self._distribution_file_data
         data['package_xmls'] = self.package_xmls # backwards compatibility
-        data['release_resources'] = self.release_resources
+        # data['release_resources'] = self.release_resources
         return data
 
     def update_distribution(self, distribution_file_data):
+        # TODO(tfoote) shouldn't we be poentially adding something in this update too
+        print('Release Cache update_distribution hit!!!!!!!!!!!')
+        assert False
+
         # remove packages which are not in the old distribution file
         self._remove_obsolete_entries()
 
