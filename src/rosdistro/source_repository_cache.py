@@ -47,7 +47,8 @@ class SourceRepositoryCache(object):
             self._last_update_time = data['_last_update_time']
         else:
             self._last_update_time = None
-        non_package_keys = ['_ref', '_last_update_time']
+
+        non_package_keys = ['_ref', '_last_update_time', '_stars']
         self._package_names = set([name for name in data.keys() if name not in non_package_keys])
         self._data = data
 
@@ -63,6 +64,12 @@ class SourceRepositoryCache(object):
         Create a new empty cache instance from just the version control reference hash.
         """
         return cls({'_ref': ref})
+
+    def set_stars(self, stars):
+        """
+        Set the repository stars.
+        """
+        self._data['_stars'] = stars
 
     def add(self, package_name, package_path, payload_string, payload_type='package.xml', increment_update_time=True): # TODO(tfoote) Breaks rosdistro formatting changing from list to dict
         """

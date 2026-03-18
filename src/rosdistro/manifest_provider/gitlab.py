@@ -146,6 +146,17 @@ def gitlab_source_manifest_provider(repo, filepaths=['package.xml']):
     package_xml_paths = list(filter(package_xml_in_parent, package_xml_paths))
 
     cache = SourceRepositoryCache.from_ref(sha)
+
+    # Fetch project info for star count
+    try:
+        with _gitlab_api_query(server, path, '', {}) as res:
+            project_json = json.loads(res.read().decode('utf-8'))
+            stars = project_json.get('star_count')
+            if stars is not None:
+                cache.set_stars(stars)
+    except URLError as e:
+        logger.debug('- failed to load project star count from %s: %s' % (path, e))
+
     for package_xml_path in package_xml_paths:
         for filepath in filepaths:
             resource_path = urlquote(

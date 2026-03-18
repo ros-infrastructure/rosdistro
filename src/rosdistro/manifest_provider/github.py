@@ -138,6 +138,24 @@ def github_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md
     package_xml_paths = list(filter(package_xml_in_parent, package_xml_paths))
 
     cache = SourceRepositoryCache.from_ref(tree_json['sha'])
+
+    # Fetch repository info for star count
+    repo_url = 'https://api.github.com/repos/%s' % path
+    repo_req = Request(repo_url)
+    if GITHUB_TOKEN:
+        repo_req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
+    if GITHUB_USER and GITHUB_PASSWORD:
+        credential_pair = '%s:%s' % (GITHUB_USER, GITHUB_PASSWORD)
+        authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
+        repo_req.add_header('Authorization', authheader)
+    try:
+        repo_json = json.loads(_get_url_contents(repo_req))
+        stars = repo_json.get('stargazers_count')
+        if stars is not None:
+            cache.set_stars(stars)
+    except URLError as e:
+        logger.debug('- failed to load repository info from %s: %s' % (repo_url, e))
+
     for package_xml_path in package_xml_paths:
         package_xml_filename = 'package.xml'
         url = 'https://raw.githubusercontent.com/%s/%s/%s' % \

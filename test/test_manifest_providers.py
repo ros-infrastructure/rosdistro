@@ -81,6 +81,8 @@ def mock_get_url_contents(req):
     # can properly close it during 'unmock_urlopen'.
     if re.search('.*package.xml$', haystack) is not None:
         fname = 'test/github-genmsg-package.xml'
+    elif re.search(r'.*/repos/[^/]+/[^/]+$', haystack) is not None:
+        return '{"stargazers_count": 42}'
     else:
         fname = 'test/github-tree-data.json'
 
@@ -99,6 +101,7 @@ def test_github_source():
 
     assert '' == repo_cache['genmsg']['package_path']
     assert '<version>0.5.11</version>' in repo_cache['genmsg']['package.xml']
+    assert repo_cache._data.get('_stars') == 42
 
 
 def test_gitlab_source():
@@ -109,6 +112,7 @@ def test_gitlab_source():
 
     assert 'ros2trace_analysis' == repo_cache['ros2trace_analysis']['package_path']
     assert '<version>1.0.3</version>' in repo_cache['ros2trace_analysis']['package.xml']
+    assert type(repo_cache._data.get('_stars')) is int
 
 
 def test_git_source_multi():
