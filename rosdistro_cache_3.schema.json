@@ -55,6 +55,9 @@
         },
         "_ref": {
           "type": "string"
+        },
+        "_stars": {
+          "type": "integer"
         }
       },
       "required": ["_ref"]
