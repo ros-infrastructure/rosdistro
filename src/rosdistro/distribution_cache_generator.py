@@ -94,6 +94,15 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
         else:
             sys.stdout.write('.')
             sys.stdout.flush()
+        if cache:
+            if pkg_name in cache.release_resources:
+                if cache.release_resources[pkg_name].get('version') != repo.version:
+                    print("  - invalidating package '%s' due to version mismatch" % pkg_name)
+                    cache.release_resources[pkg_name] = {}
+            else:
+                cache.release_resources[pkg_name] = {}
+            cache.release_resources[pkg_name]['version'] = repo.version
+
         # check that package.xml is fetchable
         old_package_xml = None
         if cache and pkg_name in cache.release_resources:
