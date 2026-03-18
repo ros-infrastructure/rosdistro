@@ -147,15 +147,21 @@ def gitlab_source_manifest_provider(repo, filepaths=['package.xml']):
 
     cache = SourceRepositoryCache.from_ref(sha)
 
-    # Fetch project info for star count
+    # Fetch project info for star count, description and tags
     try:
         with _gitlab_api_query(server, path, '', {}) as res:
             project_json = json.loads(res.read().decode('utf-8'))
             stars = project_json.get('star_count')
             if stars is not None:
                 cache.set_stars(stars)
+            description = project_json.get('description')
+            if description is not None:
+                cache.set_description(description)
+            tags = project_json.get('tag_list')
+            if tags is not None:
+                cache.set_tags(tags)
     except URLError as e:
-        logger.debug('- failed to load project star count from %s: %s' % (path, e))
+        logger.debug('- failed to load project info from %s: %s' % (path, e))
 
     for package_xml_path in package_xml_paths:
         for filepath in filepaths:

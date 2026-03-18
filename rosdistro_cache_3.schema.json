@@ -58,6 +58,15 @@
         },
         "_stars": {
           "type": "integer"
+        },
+        "_description": {
+          "type": ["string", "null"]
+        },
+        "_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": ["_ref"]

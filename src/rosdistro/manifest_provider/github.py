@@ -139,7 +139,7 @@ def github_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md
 
     cache = SourceRepositoryCache.from_ref(tree_json['sha'])
 
-    # Fetch repository info for star count
+    # Fetch repository info for star count description and tags
     repo_url = 'https://api.github.com/repos/%s' % path
     repo_req = Request(repo_url)
     if GITHUB_TOKEN:
@@ -153,6 +153,12 @@ def github_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md
         stars = repo_json.get('stargazers_count')
         if stars is not None:
             cache.set_stars(stars)
+        description = repo_json.get('description')
+        if description is not None:
+            cache.set_description(description)
+        tags = repo_json.get('topics')
+        if tags is not None:
+            cache.set_tags(tags)
     except URLError as e:
         logger.debug('- failed to load repository info from %s: %s' % (repo_url, e))
 

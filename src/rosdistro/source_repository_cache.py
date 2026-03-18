@@ -48,7 +48,7 @@ class SourceRepositoryCache(object):
         else:
             self._last_update_time = None
 
-        non_package_keys = ['_ref', '_last_update_time', '_stars']
+        non_package_keys = ['_ref', '_last_update_time', '_stars', '_description', '_tags']
         self._package_names = set([name for name in data.keys() if name not in non_package_keys])
         self._data = data
 
@@ -70,6 +70,18 @@ class SourceRepositoryCache(object):
         Set the repository stars.
         """
         self._data['_stars'] = stars
+
+    def set_description(self, description):
+        """
+        Set the repository description.
+        """
+        self._data['_description'] = description
+
+    def set_tags(self, tags):
+        """
+        Set the repository tags.
+        """
+        self._data['_tags'] = tags
 
     def add(self, package_name, package_path, payload_string, payload_type='package.xml', increment_update_time=True): # TODO(tfoote) Breaks rosdistro formatting changing from list to dict
         """
