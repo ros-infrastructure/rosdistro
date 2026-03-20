@@ -18,37 +18,46 @@
     "source_repo_resources": {
       "type": "object",
       "patternProperties": {
-         "^.*$": {"$ref": "#/$defs/repository_resources"}
+        "^.*$": {
+          "$ref": "#/$defs/repository_resources"
+        }
       }
     },
     "release_resources": {
       "type": "object",
-      "additionalProperties": {"$ref": "#/$defs/package_resources"},
+      "additionalProperties": {
+        "$ref": "#/$defs/package_resources"
+      },
       "properties": {
         "_last_update_time": {
           "type": "string"
-        },
-        "version": {
-          "type": "string"
         }
-      },
-      "required": ["version"]
-      },
-      "additionalProperties": false
+      }
     },
     "distribution_file": {
-      "type": "object",
+      "type": [
+        "object",
+        "array"
+      ],
       "description": "rosdistro distribution_file"
     },
     "name": {
       "type": "string",
       "description": "The name of the distribution being cached"
-    },
-  "required": ["source_repo_resources", "distribution_file", "name"],
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "source_repo_resources",
+    "distribution_file",
+    "name"
+  ],
   "$defs": {
     "repository_resources": {
       "type": "object",
-      "additionalProperties": {"$ref": "#/$defs/package_resources"},
+      "additionalProperties": {
+        "$ref": "#/$defs/package_resources"
+      },
       "properties": {
         "_last_update_time": {
           "type": "string"
@@ -60,7 +69,10 @@
           "type": "integer"
         },
         "_description": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "_tags": {
           "type": "array",
@@ -69,7 +81,9 @@
           }
         }
       },
-      "required": ["_ref"]
+      "required": [
+        "_ref"
+      ]
     },
     "package_resources": {
       "type": "object",
@@ -89,6 +103,10 @@
         "README.md": {
           "type": "string",
           "description": "Contents of the README.md if it's available"
+        },
+        "version": {
+          "type": "string",
+          "description": "The release version of the package"
         }
       }
     }
