@@ -46,7 +46,7 @@ from .distribution_cache import DistributionCache
 
 def generate_distribution_caches(
     index, dist_names=None, preclean=False,
-    ignore_local=False, include_source=False, debug=False
+    ignore_local=False, include_source=False, debug=False, limit=None
 ):
     if os.path.isfile(index):
         index = 'file://' + os.path.abspath(index)
@@ -61,7 +61,7 @@ def generate_distribution_caches(
         try:
             cache = generate_distribution_cache(
                 index, dist_name, preclean=preclean,
-                ignore_local=ignore_local, include_source=include_source, debug=debug)
+                ignore_local=ignore_local, include_source=include_source, debug=debug, limit=limit)
         except RuntimeError as e:
             errors.append(str(e))
             continue
@@ -72,14 +72,14 @@ def generate_distribution_caches(
 
 
 def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=False,
-                                include_source=False, debug=False):
+                                include_source=False, debug=False, limit=None):
     dist, cache = _get_cached_distribution(
         index, dist_name, preclean=preclean, ignore_local=ignore_local,
         include_source=include_source)
 
     print('- fetch missing release manifests')
-    max_source_packages = 100000 # TODO(tfoote) magic number move to config
-    max_source_repos = 10000 # TODO(tfoote) magic number move to config
+    max_source_packages = limit if limit is not None else 100000 # TODO(tfoote) magic number move to config
+    max_source_repos = limit if limit is not None else 10000 # TODO(tfoote) magic number move to config
     errors = []
     if debug and (len(dist.release_packages.keys()) > max_source_packages):
         print(f'  - limiting packages scanned to {max_source_packages} of {len(dist.release_packages.keys())} as per config') 
