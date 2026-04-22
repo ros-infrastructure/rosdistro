@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ros-infrastructure/rosdistro/TODO/rosdistro_cache_3.schema.json",
+  "title": "ROSDistro Cache Format 3 Schema",
+  "description": "Cache Format 3 for rosdistro",
+  "type": "object",
+  "properties": {
+    "version": {
+      "description": "The version of the rosdistro cache",
+      "type": "integer",
+      "minimum": 3,
+      "maximum": 3
+    },
+    "type": {
+      "description": "Clarifying the file type",
+      "type": "string"
+    },
+    "source_repo_resources": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "$ref": "#/$defs/repository_resources"
+        }
+      }
+    },
+    "release_resources": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/package_resources"
+      },
+      "properties": {
+        "_last_update_time": {
+          "type": "string"
+        }
+      }
+    },
+    "distribution_file": {
+      "type": [
+        "object",
+        "array"
+      ],
+      "description": "rosdistro distribution_file"
+    },
+    "name": {
+      "type": "string",
+      "description": "The name of the distribution being cached"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "source_repo_resources",
+    "distribution_file",
+    "name"
+  ],
+  "$defs": {
+    "repository_resources": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/package_resources"
+      },
+      "properties": {
+        "_last_update_time": {
+          "type": "string"
+        },
+        "_ref": {
+          "type": "string"
+        },
+        "_stars": {
+          "type": "integer"
+        },
+        "_description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "_ref"
+      ]
+    },
+    "package_resources": {
+      "type": "object",
+      "properties": {
+        "CHANGELOG.rst": {
+          "type": "string",
+          "description": "Contents of the CHANGELOG.rst if it's available"
+        },
+        "package.xml": {
+          "type": "string",
+          "description": "Contents of the package.xml if it's available"
+        },
+        "package_path": {
+          "type": "string",
+          "description": "The package_path if it's available"
+        },
+        "README.md": {
+          "type": "string",
+          "description": "Contents of the README.md if it's available"
+        },
+        "version": {
+          "type": "string",
+          "description": "The release version of the package"
+        }
+      }
+    }
+  }
+}

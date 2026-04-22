@@ -89,14 +89,14 @@ def _gitlab_paged_api_query(server, path, resource, attrs):
             url = match.group(1)
 
 
-def gitlab_manifest_provider(_dist_name, repo, pkg_name):
+def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     assert repo.version
     server, path = repo.get_url_parts()
     if not server.endswith('gitlab.com') and server != ROSDISTRO_GITLAB_SERVER:
         logger.debug('Skip non-gitlab url "%s"' % repo.url)
         raise RuntimeError('can not handle non gitlab urls')
 
-    resource = 'repository/files/package.xml/raw'
+    resource = 'repository/files/%s/raw' % filepath
     attrs = {
         'ref': repo.get_release_tag(pkg_name),
     }
@@ -108,7 +108,7 @@ def gitlab_manifest_provider(_dist_name, repo, pkg_name):
         raise
 
 
-def gitlab_source_manifest_provider(repo):
+def gitlab_source_manifest_provider(repo, filepaths=['package.xml']):
     assert repo.version
     server, path = repo.get_url_parts()
     if not server.endswith('gitlab.com') and server != ROSDISTRO_GITLAB_SERVER:
@@ -146,13 +146,31 @@ def gitlab_source_manifest_provider(repo):
     package_xml_paths = list(filter(package_xml_in_parent, package_xml_paths))
 
     cache = SourceRepositoryCache.from_ref(sha)
+
+    # Fetch project info for star count, description and tags
+    try:
+        with _gitlab_api_query(server, path, '', {}) as res:
+            project_json = json.loads(res.read().decode('utf-8'))
+            stars = project_json.get('star_count')
+            if stars is not None:
+                cache.set_stars(stars)
+            description = project_json.get('description')
+            if description is not None:
+                cache.set_description(description)
+            tags = project_json.get('tag_list')
+            if tags is not None:
+                cache.set_tags(tags)
+    except URLError as e:
+        logger.debug('- failed to load project info from %s: %s' % (path, e))
+
     for package_xml_path in package_xml_paths:
-        resource_path = urlquote(
-            package_xml_path + '/package.xml' if package_xml_path else 'package.xml', safe='')
-        resource = 'repository/files/' + resource_path + '/raw'
-        with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
-            package_xml = res.read().decode('utf-8')
-        name = parse_package_string(package_xml).name
-        cache.add(name, package_xml_path, package_xml)
+        for filepath in filepaths:
+            resource_path = urlquote(
+                package_xml_path + '/' + filepath if package_xml_path else filepath, safe='')
+            resource = 'repository/files/' + resource_path + '/raw'
+            with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
+                contents = res.read().decode('utf-8')
+            name = parse_package_string(contents).name
+            cache.add(name, package_xml_path, contents, filepath)
 
     return cache

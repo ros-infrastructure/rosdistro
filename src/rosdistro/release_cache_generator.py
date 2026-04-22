@@ -78,7 +78,7 @@ def generate_release_cache(index, dist_name, preclean=False, debug=False):
                 print('  - skip "%s" since it has no version' % pkg_name)
             continue
         if debug:
-            print('  - fetch "%s"' % pkg_name)
+            print('  - release cache fetch "%s"' % pkg_name)
         else:
             sys.stdout.write('.')
             sys.stdout.flush()
@@ -113,13 +113,13 @@ def _get_cached_release(index, dist_name, preclean=False):
         if not preclean:
             print('- trying to use local cache')
             yaml_str = None
-            if os.path.exists('%s-cache.yaml.gz' % dist_name):
-                print('- use local file "%s-cache.yaml.gz"' % dist_name)
-                with gzip.open('%s-cache.yaml.gz' % dist_name, 'rb') as f:
-                    yaml_str = f.read()
-            elif os.path.exists('%s-cache.yaml' % dist_name):
+            if os.path.exists('%s-cache.yaml' % dist_name):
                 print('- use local file "%s-cache.yaml"' % dist_name)
                 with open('%s-cache.yaml' % dist_name, 'r') as f:
+                    yaml_str = f.read()
+            elif os.path.exists('%s-cache.yaml.gz' % dist_name):
+                print('- use local file "%s-cache.yaml.gz"' % dist_name)
+                with gzip.open('%s-cache.yaml.gz' % dist_name, 'rb') as f:
                     yaml_str = f.read()
             if yaml_str is not None:
                 data = yaml.safe_load(yaml_str)

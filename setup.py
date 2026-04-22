@@ -10,10 +10,11 @@ kwargs = {
     # - src/rosdistro/__init__.py
     # - stdeb.cfg
     'version': '1.0.1',
-    'install_requires': ['PyYAML', 'setuptools'],
+    'install_requires': ['PyYAML', 'setuptools', 'jsonschema'],
     'python_requires': '>=3.6',
     'packages': find_packages('src'),
     'package_dir': {'': 'src'},
+    'package_data': {'rosdistro': ['rosdistro_cache_3.schema.json']},
     'entry_points': {
         'console_scripts': [
             # 'rosdistro = rosdistro.cli.rosdistro:main',

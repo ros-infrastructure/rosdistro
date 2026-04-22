@@ -48,7 +48,7 @@ from rosdistro import logger
 _TAR_USER = os.getenv('TAR_USER', None)
 _TAR_PASSWORD = os.getenv('TAR_PASSWORD', None)
 
-def tar_manifest_provider(_dist_name, repo, pkg_name):
+def tar_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     assert repo.type == 'tar'
 
     subdir = repo.get_release_tag(pkg_name)
@@ -65,11 +65,11 @@ def tar_manifest_provider(_dist_name, repo, pkg_name):
 
     response = urlopen(request)
     with tarfile.open(fileobj=io.BytesIO(response.read())) as tar:
-        package_xml = tar.extractfile(subdir + '/package.xml').read()
+        package_xml = tar.extractfile(subdir + '/' + filepath).read()
         return package_xml.decode('utf-8')
 
 
-def tar_source_manifest_provider(repo):
+def tar_source_manifest_provider(repo, filepaths=['package.xml']):
     assert repo.type == 'tar'
 
     try:
@@ -100,7 +100,8 @@ def tar_source_manifest_provider(repo):
                         name = parse_package_string(package_xml).name
                     except InvalidPackage:
                         raise RuntimeError('Unable to parse package.xml file found in %s' % repo.url)
-                    cache.add(name, package_path, package_xml)
+                    for filepath in filepaths:
+                        cache.add(name, package_path, package_xml, filepath)
 
                 return cache
             finally:

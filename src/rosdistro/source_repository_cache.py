@@ -31,18 +31,25 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from datetime import datetime
 
 class SourceRepositoryCache(object):
     """
-    This class represents a cache of the package XML strings for all packages in a single
+    This class represents a cache of the resource strings for all packages in a single
     repo at a particular moment in time. A dictionary of many of these (one for each repo)
-    keyed to the repo name represents the totality of the source package xml cache.
+    keyed to the repo name represents the totality of the source package resources cache.
     """
 
     def __init__(self, data):
         assert data
         self._ref = data['_ref']
-        self._package_names = set([name for name in data.keys() if name != '_ref'])
+        if '_last_update_time' in data:
+            self._last_update_time = data['_last_update_time']
+        else:
+            self._last_update_time = None
+
+        non_package_keys = ['_ref', '_last_update_time', '_stars', '_description', '_tags']
+        self._package_names = set([name for name in data.keys() if name not in non_package_keys])
         self._data = data
 
     def get_data(self):
@@ -58,12 +65,41 @@ class SourceRepositoryCache(object):
         """
         return cls({'_ref': ref})
 
-    def add(self, package_name, package_path, package_xml_string):
+    def set_stars(self, stars):
+        """
+        Set the repository stars.
+        """
+        self._data['_stars'] = stars
+
+    def set_description(self, description):
+        """
+        Set the repository description.
+        """
+        self._data['_description'] = description
+
+    def set_tags(self, tags):
+        """
+        Set the repository tags.
+        """
+        self._data['_tags'] = tags
+
+    def add(self, package_name, package_path, payload_string, payload_type='package.xml', increment_update_time=True): # TODO(tfoote) Breaks rosdistro formatting changing from list to dict
         """
         Add a package to the cache.
         """
-        self._data[package_name] = (package_path, package_xml_string)
+        if package_name not in self._data:
+            self._data[package_name] = {}
+        
+        # Migration option for old caches
+        if type(self._data[package_name]) != dict:
+            print(f"Clearing content from package {package_name} @@@@@@@@@@@@@@@@!!!!!!!!!!!!!!!!")
+            self._data[package_name] = {}
+        self._data[package_name]['package_path'] = package_path
+        self._data[package_name][payload_type] = payload_string
         self._package_names.add(package_name)
+        if increment_update_time:
+            self._data[package_name]['_last_update_time'] = datetime.now()
+
 
     def __iter__(self):
         """
@@ -71,23 +107,22 @@ class SourceRepositoryCache(object):
         """
         return iter(self._package_names)
 
-    def __getitem__(self, package_name):
+    def __getitem__(self, package_name): #TODO(tfoote) API change
         """
-        Access the cached information about a specific package. Returns a (str, str) of
-        path to package relative to repo root, and string of package xml.
+        Access the cached information about a specific package. Returns a dict of
+        path to package relative paths to repo root, and string of the file contents (potentially truncated).
         """ 
         if package_name not in self._package_names:
             raise KeyError("Package '%s' not present in SourceRepositoryCache." % package_name)
         return self._data[package_name]
 
-    def items(self):
+    def items(self):  #TODO(tfoote) API change
         """
-        Generator of (str, str, str) containing the package name, path relative
-        to repo root, and package xml string.
+        Generator of (str, dict) containing the package name, and a dict of
+        paths to file contents (potentially truncated).
         """
         for package_name in self._package_names:
-            package_path, package_xml_string = self._data[package_name]
-            yield package_name, package_path, package_xml_string
+            yield package_name, self._data[package_name]
 
     def __len__(self):
         """

@@ -57,14 +57,17 @@ class Distribution(object):
         if source_manifest_providers is not None:
             self._source_manifest_providers = source_manifest_providers
 
-        self._release_package_xmls = {}
-        self._source_repo_package_xmls = {}
+        self._release_resources = {}
+        self._source_repo_resources = {}
 
     def __getattr__(self, name):
         return getattr(self._distribution_file, name)
 
-    def get_release_package_xml(self, pkg_name):
-        if pkg_name not in self._release_package_xmls:
+
+    def get_release_resource(self, pkg_name, filepath):
+        if pkg_name not in self._release_resources:
+            self._release_resources[pkg_name] = {}
+        if not self._release_resources[pkg_name].get(filepath, None):
             pkg = self._distribution_file.release_packages[pkg_name]
             repo_name = pkg.repository_name
             repo = self._distribution_file.repositories[repo_name]
@@ -73,33 +76,45 @@ class Distribution(object):
             repo = repo.release_repository
             if repo.version is None:
                 return None
-            package_xml = None
             for mp in self._manifest_providers:
-                package_xml = mp(self._distribution_file.name, repo, pkg_name)
-                if package_xml is not None:
+                content = mp(self._distribution_file.name, repo, pkg_name, filepath)
+                if content is not None:
                     break
-            self._release_package_xmls[pkg_name] = package_xml
-        return self._release_package_xmls[pkg_name]
+            self._release_resources[pkg_name][filepath] = content
+        return self._release_resources.get(pkg_name, {}).get(filepath, None)
+
+
+    def get_release_package_xml(self, pkg_name):
+        # TODO(tfoote) deprecated
+        return self.get_release_resource(pkg_name, 'package.xml')
+
+    def get_release_readme(self, pkg_name):
+        # TODO(tfoote) deprecated
+        return self.get_release_resource(pkg_name, 'README.md')
+
+    def get_release_changelog(self, pkg_name):
+        # TODO(tfoote) deprecated
+        return self.get_release_resource(pkg_name, 'CHANGELOG.rst')
 
     def get_source_package_xml(self, pkg_name):
         repo_name = self._distribution_file.source_packages[pkg_name].repository_name
-        repo_cache = self.get_source_repo_package_xmls(repo_name)
+        repo_cache = self.get_source_repo_resources(repo_name)
         if repo_cache:
             return repo_cache[pkg_name][1]
         else:
             return None
 
-    def get_source_repo_package_xmls(self, repo_name):
-        if repo_name in self._source_repo_package_xmls:
-            return self._source_repo_package_xmls[repo_name]
+    def get_source_repo_resources(self, repo_name):
+        if repo_name in self._source_repo_resources:
+            return self._source_repo_resources[repo_name]
         else:
             for mp in self._source_manifest_providers:
                 repo_cache = mp(self.repositories[repo_name].source_repository)
                 if repo_cache is not None:
                     # Update map of package XMLs, and also list of known package names.
-                    self._source_repo_package_xmls[repo_name] = repo_cache
+                    self._source_repo_resources[repo_name] = repo_cache
                     for pkg_name in repo_cache:
                         if pkg_name[0] != '_':
                             self._distribution_file.source_packages[pkg_name] = Package(pkg_name, repo_name)
-                    return self._source_repo_package_xmls[repo_name]
+                    return self._source_repo_resources[repo_name]
         return None

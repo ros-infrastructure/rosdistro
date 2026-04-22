@@ -35,6 +35,13 @@ from xml.dom import minidom
 
 from rosdistro import logger
 
+def sanitize_and_truncate_docs(doc_string, max_length=100):
+    # Remove trailing whitespace then truncate
+    lines = doc_string.rstrip().splitlines()
+    ending = ''
+    if len(lines) > max_length:
+        ending = f'\nTruncated content at {max_length} of {len(lines)} lines'
+    return '\n'.join(lines[:max_length - 1 ]) + ending
 
 def sanitize_xml(xml_string):
     """ Returns a version of the supplied XML string with comments and all whitespace stripped,
@@ -68,27 +75,38 @@ class CachedManifestProvider(object):
         self._distribution_cache = distribution_cache
         self._manifest_providers = manifest_providers
 
-    def __call__(self, dist_name, repo, pkg_name):
+    def __call__(self, dist_name, repo, pkg_name, filepath='package.xml'):
         assert repo.version
-        package_xml = self._distribution_cache.release_package_xmls.get(pkg_name, None)
-        if package_xml:
-            package_xml = sanitize_xml(package_xml)
-            self._distribution_cache.release_package_xmls[pkg_name] = package_xml
-            logger.debug('Loading package.xml for package "%s" from cache' % pkg_name)
-        else:
+
+        # Load from cache
+        manifest_content = self._distribution_cache.release_resources.get(pkg_name, {}).get(filepath, None)
+        if manifest_content:
+            if filepath != 'package.xml':
+                manifest_content = sanitize_and_truncate_docs(manifest_content)
+            self._distribution_cache.release_resources[pkg_name][filepath] = manifest_content
+            logger.debug('Loading %s for package "%s" from cache' % (filepath, pkg_name) )
+
+        if not manifest_content:
             # use manifest providers to lazy load
             for mp in self._manifest_providers or []:
                 try:
-                    package_xml = sanitize_xml(mp(dist_name, repo, pkg_name))
+                    manifest_content = mp(dist_name, repo, pkg_name, filepath)
+                    if filepath == 'package.xml':
+                        manifest_content = sanitize_xml(manifest_content)
+                    else:
+                        manifest_content = sanitize_and_truncate_docs(manifest_content)
                     break
                 except Exception as e:
                     # pass and try next manifest provider
                     logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
-            if package_xml is None:
+            if manifest_content is None:
                 return None
+
             # populate the cache
-            self._distribution_cache.release_package_xmls[pkg_name] = package_xml
-        return package_xml
+            if pkg_name not in self._distribution_cache.release_resources:
+                self._distribution_cache.release_resources[pkg_name] = {}
+            self._distribution_cache.release_resources[pkg_name][filepath] = manifest_content
+        return manifest_content
 
 
 class CachedSourceManifestProvider(object):
@@ -99,18 +117,19 @@ class CachedSourceManifestProvider(object):
 
     def __call__(self, repo):
         assert repo.url
-        repo_cache = self._distribution_cache.source_repo_package_xmls.get(repo.name, None)
+        repo_cache = self._distribution_cache.source_repo_resources.get(repo.name, None)
         if not repo_cache:
+            logger.debug(f"Internal Cache Miss for {repo.name} Loading from Source Manifset Providers")
             # Use manifest providers to lazy load
             for mp in self._source_manifest_providers or []:
                 try:
-                    repo_cache = mp(repo)
+                    repo_cache = mp(repo, filepaths=['CHANGELOG.rst', 'README.md']) # TODO (tfoote) list other files here
                 except Exception as e:
                     # pass and try next manifest provider
                     logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
                     continue
 
-                self._distribution_cache.source_repo_package_xmls[repo.name] = repo_cache
+                self._distribution_cache.source_repo_resources[repo.name] = repo_cache
                 break
         else:
             logger.debug('Load package XMLs for repo "%s" from cache' % repo.name)
@@ -118,11 +137,24 @@ class CachedSourceManifestProvider(object):
         # De-duplicate with the release package XMLs. This will cause the YAML writer
         # to use references for the common strings, saving a lot of space in the cache file.
         if repo_cache:
-            for package_name, package_path, package_xml in repo_cache.items():
-                package_xml = sanitize_xml(package_xml)
-                release_package_xml = self._distribution_cache.release_package_xmls.get(package_name, None)
-                if package_xml == release_package_xml:
-                    package_xml = release_package_xml
-                repo_cache.add(package_name, package_path, package_xml)
-
+            for package_name, pkg_entries in repo_cache._data.items():
+                if package_name.startswith('_'):
+                    continue
+                for resource_type in pkg_entries:
+                    valid_types = ['CHANGELOG.rst', 'README.md', 'package.xml']
+                    if  resource_type not in valid_types:
+                        #TODO(tfoote) clean up this logic with magic values
+                        continue
+                    if 'package.xml' == resource_type:
+                        package_xml = sanitize_xml(pkg_entries['package.xml'])  # TODO(tfoote) validate as unnecessary should be sanitized already on insert?
+                        release_package_xml = self._distribution_cache.release_resources.get(package_name, {}).get('package.xml', None)
+                        if package_xml == release_package_xml:
+                            logger.debug(f'{package_name} Linking package.xml of source cache entry for compaction. Lines saved: {len(package_xml.splitlines())}')
+                            repo_cache.add(package_name, pkg_entries['package_path'], release_package_xml, 'package.xml', increment_update_time=False)
+                    else:
+                        content = sanitize_and_truncate_docs(pkg_entries[resource_type])
+                        release_content = self._distribution_cache.release_resources.get(package_name, {}).get(resource_type, None)
+                        if content == release_content:
+                            logger.debug(f'{package_name} Linking {resource_type} of source cache entry for compaction. Lines saved: {len(content.splitlines())}')
+                            repo_cache.add(package_name, pkg_entries['package_path'], release_content, resource_type, increment_update_time=False)
         return repo_cache

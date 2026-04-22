@@ -67,6 +67,9 @@ def parse_args(args=sys.argv[1:]):
     add(
         '--include-source', action='store_true', default=False,
         help='Also include source branch package XMLs in the cache')
+    add(
+        '--limit', type=int, default=None,
+        help='Limit the number of packages to scan (useful for testing)')
     return parser.parse_args(args)
 
 
@@ -79,7 +82,8 @@ def main():
     try:
         caches = generate_distribution_caches(
             args.index, dist_names=args.dist_names, preclean=args.preclean,
-            ignore_local=args.ignore_local, include_source=args.include_source, debug=args.debug)
+            ignore_local=args.ignore_local, include_source=args.include_source, debug=args.debug,
+            limit=args.limit)
     except RuntimeError as e:
         print(str(e), file=sys.stderr)
         return 1

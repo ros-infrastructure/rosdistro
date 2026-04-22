@@ -26,6 +26,7 @@ def test_cached():
     class FakeDistributionCache(object):
         def __init__(self):
             self.release_package_xmls = {}
+            self.release_resources = {}
     dc = FakeDistributionCache()
     cache = CachedManifestProvider(dc, [rosdistro.manifest_provider.github.github_manifest_provider])
     assert '</package>' in cache('melodic', _genmsg_release_repo(), 'genmsg')
@@ -55,9 +56,8 @@ def test_git_source():
     # This hash corresponds to the 0.5.11 tag.
     assert repo_cache.ref() == 'a189fc78558e7276df59d2961cfe4f8b4de08a8b'
 
-    package_path, package_xml = repo_cache['genmsg']
-    assert '' == package_path
-    assert '<version>0.5.11</version>' in package_xml
+    assert '' == repo_cache['genmsg']['package_path']
+    assert '<version>0.5.11</version>' in repo_cache['genmsg']['package.xml']
 
 
 # mock_get_url_contents is used to mock out the '_get_url_contents' method in
@@ -81,6 +81,8 @@ def mock_get_url_contents(req):
     # can properly close it during 'unmock_urlopen'.
     if re.search('.*package.xml$', haystack) is not None:
         fname = 'test/github-genmsg-package.xml'
+    elif re.search(r'.*/repos/[^/]+/[^/]+$', haystack) is not None:
+        return '{"stargazers_count": 42}'
     else:
         fname = 'test/github-tree-data.json'
 
@@ -97,9 +99,9 @@ def test_github_source():
     # This hash corresponds to the 0.5.7 tag.
     assert repo_cache.ref() == '81b66fe5eb00043c43894ddeee07e738d9b9712f'
 
-    package_path, package_xml = repo_cache['genmsg']
-    assert '' == package_path
-    assert '<version>0.5.11</version>' in package_xml
+    assert '' == repo_cache['genmsg']['package_path']
+    assert '<version>0.5.11</version>' in repo_cache['genmsg']['package.xml']
+    assert repo_cache._data.get('_stars') == 42
 
 
 def test_gitlab_source():
@@ -108,16 +110,15 @@ def test_gitlab_source():
     # This hash corresponds to the 1.0.3 tag.
     assert repo_cache.ref() == 'cd30853005ef3a591cb8594b4aa49f9ef400d30f'
 
-    package_path, package_xml = repo_cache['ros2trace_analysis']
-    assert 'ros2trace_analysis' == package_path
-    assert '<version>1.0.3</version>' in package_xml
+    assert 'ros2trace_analysis' == repo_cache['ros2trace_analysis']['package_path']
+    assert '<version>1.0.3</version>' in repo_cache['ros2trace_analysis']['package.xml']
+    assert type(repo_cache._data.get('_stars')) is int
 
 
 def test_git_source_multi():
     repo_cache = git_source_manifest_provider(_ros_source_repo())
     assert repo_cache.ref()
-    package_path, package_xml = repo_cache['roslib']
-    assert package_path == os.path.join('core', 'roslib')
+    assert repo_cache['roslib']['package_path'] == os.path.join('core', 'roslib')
 
 
 def test_tar_source():
@@ -125,9 +126,10 @@ def test_tar_source():
 
     assert repo_cache.ref() is None
 
-    package_path, package_xml = repo_cache['genmsg']
-    assert 'genmsg-0.5.16' == package_path
-    assert '<version>0.5.16</version>' in package_xml
+    print(repo_cache['genmsg'])
+
+    assert 'genmsg-0.5.16' == repo_cache['genmsg']['package_path']
+    assert '<version>0.5.16</version>' in repo_cache['genmsg']['package.xml']
 
 
 def test_sanitize():
