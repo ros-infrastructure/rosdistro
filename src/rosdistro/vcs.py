@@ -36,7 +36,40 @@ import os
 import re
 import subprocess
 
-from distutils.version import LooseVersion
+from packaging.version import parse, InvalidVersion
+try:
+    from packaging.version import LegacyVersion
+    packaging_lte_22 = True
+except ImportError:
+    packaging_lte_22 = False
+
+
+def _version_gte(version: str, required_version: str) -> bool:
+    """Check if a version string is greater than or equal to a required version.
+
+    Args:
+        version: The version string to check.
+        required_version: The required version string.
+
+    Returns:
+        True if the version is greater than or equal to the required version, False otherwise.
+    """
+    try:
+        parsed_version = parse(version)
+        if packaging_lte_22:
+            # In packaging 22.0 and earlier, parse() returns a LegacyVersion for non-standard version strings,
+            # which will compare greater than any valid version. We want to raise an error instead.
+            if isinstance(parsed_version, LegacyVersion):
+                raise InvalidVersion
+    except InvalidVersion:
+        if "windows" in version.lower():
+            # Git for Windows uses a non-standard version string
+            version = version.lower().replace("windows", "post").strip()
+            parsed_version = parse(version)
+        else:
+            raise
+
+    return parsed_version >= parse(required_version)
 
 
 class Git(object):
@@ -57,7 +90,8 @@ class Git(object):
         if not cls._client_version:
             result = cls().command('--version')
             cls._client_version = result['output'].split()[-1]
-        return LooseVersion(cls._client_version) >= LooseVersion(version)
+
+        return _version_gte(cls._client_version, version)
 
 
 def ref_is_hash(ref):
