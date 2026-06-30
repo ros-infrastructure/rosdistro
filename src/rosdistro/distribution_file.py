@@ -46,7 +46,7 @@ class DistributionFile(object):
         assert data['type'] == DistributionFile._type, "Expected file type is '%s', not '%s'" % (DistributionFile._type, data['type'])
 
         assert 'version' in data, "Source file for '%s' lacks required version information" % self.name
-        assert int(data['version']) in [1, 2], "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (DistributionFile._type, int(data['version']))
+        assert int(data['version']) in [1, 2, 3], "Unable to handle '%s' format version '%d', please update rosdistro (e.g. on Ubuntu/Debian use: sudo apt-get update && sudo apt-get install --only-upgrade python-rosdistro)" % (DistributionFile._type, int(data['version']))
         self.version = int(data['version'])
 
         self.repositories = {}
@@ -78,6 +78,28 @@ class DistributionFile(object):
         if 'tags' in data and data['tags']:
             for tag in data['tags']:
                 self.tags.append(tag)
+
+        self.extends = []
+        if 'extends' in data and data['extends']:
+            assert self.version >= 3, "'extends' element is only supported in distribution version >= 3"
+            for ext in data['extends']:
+                assert 'distro_name' in ext, "Extends element must have 'distro_name'"
+                assert 'extension_method' in ext, "Extends element must have 'extension_method'"
+                assert ext['extension_method'] in ('binary_import', 'source_rebuild'), "Extension method must be 'binary_import' or 'source_rebuild'"
+                self.extends.append({
+                    'distro_name': ext['distro_name'],
+                    'index_url': ext.get('index_url', None),
+                    'extension_method': ext['extension_method']
+                })
+
+        self.dependencies = []
+        if 'dependencies' in data and data['dependencies']:
+            assert self.version >= 3, "'dependencies' element is only supported in distribution version >= 3"
+            for dep in data['dependencies']:
+                self.dependencies.append({
+                    'rosdep_sources_list_urls': dep.get('rosdep_sources_list_urls', []),
+                    'rosdep_minimum_target_platforms': dep.get('rosdep_minimum_target_platforms', [])
+                })
 
     def merge(self, other_dist_file):
         assert self.name == other_dist_file.name
@@ -123,7 +145,32 @@ class DistributionFile(object):
         data['release_platforms'] = self.release_platforms
         if self.tags:
             data['tags'] = self.tags
+        if self.extends:
+            data['extends'] = self.extends
+        if self.dependencies:
+            data['dependencies'] = self.dependencies
         return data
+
+    def merge_extends(self, parent_dist_file, extension_method):
+        # Validate target platform compatibility
+        for os_name, os_code_names in self.release_platforms.items():
+            if os_name not in parent_dist_file.release_platforms:
+                for codename in os_code_names:
+                    print("WARNING: Target platform '%s:%s' specified in derived distribution is not supported by base distribution." % (os_name, codename), flush=True)
+            else:
+                parent_codenames = parent_dist_file.release_platforms[os_name]
+                for codename in os_code_names:
+                    if codename not in parent_codenames:
+                        print("WARNING: Target platform '%s:%s' specified in derived distribution is not supported by base distribution." % (os_name, codename), flush=True)
+
+        # Merge repositories (child takes precedence over parent)
+        for repo_name, parent_repo in parent_dist_file.repositories.items():
+            if repo_name not in self.repositories:
+                self.repositories[repo_name] = parent_repo
+                if parent_repo.release_repository:
+                    for pkg_name in parent_repo.release_repository.package_names:
+                        if pkg_name not in self.release_packages:
+                            self._add_package(pkg_name, parent_repo)
 
 
 def create_distribution_file(dist_name, data):
