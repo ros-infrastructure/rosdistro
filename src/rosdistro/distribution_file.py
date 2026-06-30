@@ -56,6 +56,8 @@ class DistributionFile(object):
             for repo_name in sorted(data['repositories'].keys()):
                 repo_data = data['repositories'][repo_name]
                 repo = Repository(repo_name, repo_data.get('doc', None), repo_data.get('release', None), repo_data.get('source', None), repo_data)
+                repo.origin_distro = self.name
+                repo.extension_method = None
                 self.repositories[repo_name] = repo
 
                 if repo.release_repository:
@@ -166,6 +168,9 @@ class DistributionFile(object):
         # Merge repositories (child takes precedence over parent)
         for repo_name, parent_repo in parent_dist_file.repositories.items():
             if repo_name not in self.repositories:
+                if not hasattr(parent_repo, 'origin_distro') or not parent_repo.origin_distro:
+                    parent_repo.origin_distro = parent_dist_file.name
+                parent_repo.extension_method = extension_method
                 self.repositories[repo_name] = parent_repo
                 if parent_repo.release_repository:
                     for pkg_name in parent_repo.release_repository.package_names:
