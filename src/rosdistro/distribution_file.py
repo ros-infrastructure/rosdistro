@@ -58,6 +58,9 @@ class DistributionFile(object):
                 repo = Repository(repo_name, repo_data.get('doc', None), repo_data.get('release', None), repo_data.get('source', None), repo_data)
                 repo.origin_distro = self.name
                 repo.extension_method = None
+                if repo.release_repository:
+                    repo.release_repository.origin_distro = self.name
+                    repo.release_repository.extension_method = None
                 self.repositories[repo_name] = repo
 
                 if repo.release_repository:
@@ -171,6 +174,10 @@ class DistributionFile(object):
                 if not hasattr(parent_repo, 'origin_distro') or not parent_repo.origin_distro:
                     parent_repo.origin_distro = parent_dist_file.name
                 parent_repo.extension_method = extension_method
+                if parent_repo.release_repository:
+                    if not hasattr(parent_repo.release_repository, 'origin_distro') or not parent_repo.release_repository.origin_distro:
+                        parent_repo.release_repository.origin_distro = parent_repo.origin_distro
+                    parent_repo.release_repository.extension_method = extension_method
                 self.repositories[repo_name] = parent_repo
                 if parent_repo.release_repository:
                     for pkg_name in parent_repo.release_repository.package_names:
