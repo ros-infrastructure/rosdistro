@@ -2,7 +2,7 @@
 ---
 release_platforms:
   ubuntu:
-  - precise
+    - precise
 repositories:
   bar_repo:
     doc:

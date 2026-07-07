@@ -2,7 +2,7 @@
 ---
 release_platforms:
   ubuntu:
-  - precise
+    - precise
 extends:
   - distro_name: cyclic_b
     extension_method: binary_import

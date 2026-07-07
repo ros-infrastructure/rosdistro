@@ -2,8 +2,8 @@
 ---
 release_platforms:
   ubuntu:
-  - precise
-  - quantal
+    - precise
+    - quantal
 extends:
   - distro_name: base
     extension_method: binary_import
