@@ -1,0 +1,15 @@
+%YAML 1.1
+---
+distributions:
+  base:
+    distribution: [extends/base.yaml]
+  derived:
+    distribution: [extends/derived.yaml]
+  derived_invalid_platform:
+    distribution: [extends/derived_invalid_platform.yaml]
+  cyclic_a:
+    distribution: [extends/cyclic_a.yaml]
+  cyclic_b:
+    distribution: [extends/cyclic_b.yaml]
+type: index
+version: 3

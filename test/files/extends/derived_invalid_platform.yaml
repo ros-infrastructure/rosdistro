@@ -1,0 +1,18 @@
+%YAML 1.1
+---
+release_platforms:
+  ubuntu:
+  - precise
+  - quantal
+extends:
+  - distro_name: base
+    extension_method: binary_import
+repositories:
+  derived_invalid_repo:
+    release:
+      tags:
+        release: release/foo/{package}/{version}
+      url: https://github.com/example-release/derived_invalid_repo.git
+      version: 1.0.0
+type: distribution
+version: 3
