@@ -11,5 +11,11 @@ distributions:
     distribution: [extends/cyclic_a.yaml]
   cyclic_b:
     distribution: [extends/cyclic_b.yaml]
+  parent_a:
+    distribution: [extends/parent_a.yaml]
+  parent_b:
+    distribution: [extends/parent_b.yaml]
+  multi_parent_child:
+    distribution: [extends/multi_parent_child.yaml]
 type: index
 version: 3

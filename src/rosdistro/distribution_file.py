@@ -170,18 +170,44 @@ class DistributionFile(object):
 
         # Merge repositories (child takes precedence over parent)
         for repo_name, parent_repo in parent_dist_file.repositories.items():
-            if repo_name not in self.repositories:
-                if not hasattr(parent_repo, 'origin_distro') or not parent_repo.origin_distro:
+            if repo_name in self.repositories:
+                # Check for repository collision
+                current_repo = self.repositories[repo_name]
+                if getattr(current_repo, 'origin_distro', self.name) != self.name:
+                    other_parent = current_repo.origin_distro
+                    print("WARNING: Collision detected. Repository '%s' is defined in multiple parents ('%s' and '%s'). Using definition from '%s'." % (repo_name, other_parent, parent_dist_file.name, other_parent), flush=True)
+                
+                # Check for package collisions even if repository already exists
+                if parent_repo.release_repository:
+                    for pkg_name in parent_repo.release_repository.package_names:
+                        if pkg_name in self.release_packages:
+                            current_pkg = self.release_packages[pkg_name]
+                            current_pkg_repo = self.repositories.get(current_pkg.repository_name)
+                            if current_pkg_repo and getattr(current_pkg_repo, 'origin_distro', self.name) != self.name:
+                                other_parent = current_pkg_repo.origin_distro
+                                print("WARNING: Collision detected. Package '%s' is defined in multiple parents ('%s' and '%s'). Using definition from '%s'." % (pkg_name, other_parent, parent_dist_file.name, other_parent), flush=True)
+            else:
+                if extension_method == 'source_rebuild':
+                    parent_repo.origin_distro = self.name
+                elif not hasattr(parent_repo, 'origin_distro') or not parent_repo.origin_distro:
                     parent_repo.origin_distro = parent_dist_file.name
                 parent_repo.extension_method = extension_method
                 if parent_repo.release_repository:
-                    if not hasattr(parent_repo.release_repository, 'origin_distro') or not parent_repo.release_repository.origin_distro:
+                    if extension_method == 'source_rebuild':
+                        parent_repo.release_repository.origin_distro = self.name
+                    elif not hasattr(parent_repo.release_repository, 'origin_distro') or not parent_repo.release_repository.origin_distro:
                         parent_repo.release_repository.origin_distro = parent_repo.origin_distro
                     parent_repo.release_repository.extension_method = extension_method
                 self.repositories[repo_name] = parent_repo
                 if parent_repo.release_repository:
                     for pkg_name in parent_repo.release_repository.package_names:
-                        if pkg_name not in self.release_packages:
+                        if pkg_name in self.release_packages:
+                            current_pkg = self.release_packages[pkg_name]
+                            current_pkg_repo = self.repositories.get(current_pkg.repository_name)
+                            if current_pkg_repo and getattr(current_pkg_repo, 'origin_distro', self.name) != self.name:
+                                other_parent = current_pkg_repo.origin_distro
+                                print("WARNING: Collision detected. Package '%s' is defined in multiple parents ('%s' and '%s'). Using definition from '%s'." % (pkg_name, other_parent, parent_dist_file.name, other_parent), flush=True)
+                        else:
                             self._add_package(pkg_name, parent_repo)
 
 

@@ -1,0 +1,21 @@
+%YAML 1.1
+---
+extends:
+  - distro_name: parent_a
+    extension_method: binary_import
+  - distro_name: parent_b
+    extension_method: source_rebuild
+release_platforms:
+  ubuntu:
+    - precise
+repositories:
+  child_repo:
+    release:
+      packages:
+        - pkg_child
+      tags:
+        release: release/{package}/{version}
+      url: https://github.com/example-release/child-release.git
+      version: 0.1.0
+type: distribution
+version: 3
