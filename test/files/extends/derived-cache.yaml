@@ -1,15 +1,16 @@
+---
 distribution_file:
   release_platforms:
     ubuntu:
-    - precise
+      - precise
   extends:
-  - distro_name: base
-    extension_method: binary_import
+    - distro_name: base
+      extension_method: binary_import
   dependencies:
-  - rosdep_sources_list_urls:
-    - https://raw.githubusercontent.com/ros/rosdistro/master/rosdep/base.yaml
-    rosdep_minimum_target_platforms:
-    - ubuntu:noble
+    - rosdep_sources_list_urls:
+        - https://raw.githubusercontent.com/ros/rosdistro/master/rosdep/base.yaml
+      rosdep_minimum_target_platforms:
+        - ubuntu:noble
   repositories:
     derived_repo:
       release:

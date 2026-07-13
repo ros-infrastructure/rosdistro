@@ -16,4 +16,4 @@ jobs:
       - run: >-
           yamllint .
           -f github
-          -d '{extends: default, ignore: [test/files/foo/*.yaml]}'
+          -d '{extends: default, ignore: [test/files/foo/*.yaml, test/files/extends/*-cache.yaml]}'
