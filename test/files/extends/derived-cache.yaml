@@ -23,6 +23,9 @@ distribution_file:
   version: 3
 name: derived
 release_package_xmls:
-  derived_repo: "<package><name>derived_repo</name><version>1.0.0</version><description>derived_repo</description><maintainer email=\"test@example.com\">Test</maintainer><license>BSD</license></package>"
+  derived_repo: "<package><name>derived_repo</name><version>1.0.0</version>\
+    <description>derived_repo</description>\
+    <maintainer email=\"test@example.com\">Test</maintainer>\
+    <license>BSD</license></package>"
 type: cache
 version: 2
