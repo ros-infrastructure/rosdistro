@@ -54,29 +54,27 @@ def test_circular_extends():
     assert "Circular inheritance detected" in str(excinfo.value)
 
 
-def test_platform_compatibility_warning(capsys):
+def test_platform_compatibility_warning(caplog):
     url = path_to_url(os.path.join(FILES_DIR, 'index_extends.yaml'))
     index = get_index(url)
 
     get_distribution_file(index, 'derived_invalid_platform')
-    captured = capsys.readouterr()
-    assert "WARNING: Target platform 'ubuntu:quantal' specified in derived distribution is not supported by base distribution." in captured.out
+    assert "WARNING: Target platform 'ubuntu:quantal' specified in derived distribution is not supported by base distribution." in caplog.text
 
 
-def test_multi_parent_precedence_and_collisions(capsys):
+def test_multi_parent_precedence_and_collisions(caplog):
     url = path_to_url(os.path.join(FILES_DIR, 'index_extends.yaml'))
     index = get_index(url)
 
     child_dist = get_distribution_file(index, 'multi_parent_child')
-    captured = capsys.readouterr()
 
     # Verify precedence: collision_repo release URL and version should match parent_a (0.1.0) because parent_a was declared first
     assert 'collision_repo' in child_dist.repositories
     assert child_dist.repositories['collision_repo'].release_repository.version == '0.1.0'
 
     # Verify collision warnings are logged for both repo and package
-    assert "WARNING: Collision detected. Repository 'collision_repo' is defined in multiple parents ('parent_a' and 'parent_b'). Using definition from 'parent_a'." in captured.out
-    assert "WARNING: Collision detected. Package 'collision_pkg' is defined in multiple parents ('parent_a' and 'parent_b'). Using definition from 'parent_a'." in captured.out
+    assert "WARNING: Collision detected. Repository 'collision_repo' is defined in multiple parents ('parent_a' and 'parent_b'). Using definition from 'parent_a'." in caplog.text
+    assert "WARNING: Collision detected. Package 'collision_pkg' is defined in multiple parents ('parent_a' and 'parent_b'). Using definition from 'parent_a'." in caplog.text
 
     # Verify metadata annotation: parent_a is binary_import, parent_b is source_rebuild
     # repo_a: imported from parent_a (binary_import) -> origin_distro remains parent_a

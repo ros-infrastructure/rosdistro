@@ -34,6 +34,9 @@
 from .package import Package
 from .repository import Repository
 
+import logging
+logger = logging.getLogger('rosdistro')
+
 
 class DistributionFile(object):
 
@@ -161,12 +164,12 @@ class DistributionFile(object):
         for os_name, os_code_names in self.release_platforms.items():
             if os_name not in parent_dist_file.release_platforms:
                 for codename in os_code_names:
-                    print("WARNING: Target platform '%s:%s' specified in derived distribution is not supported by base distribution." % (os_name, codename), flush=True)
+                    logger.warning("WARNING: Target platform '%s:%s' specified in derived distribution is not supported by base distribution." % (os_name, codename))
             else:
                 parent_codenames = parent_dist_file.release_platforms[os_name]
                 for codename in os_code_names:
                     if codename not in parent_codenames:
-                        print("WARNING: Target platform '%s:%s' specified in derived distribution is not supported by base distribution." % (os_name, codename), flush=True)
+                        logger.warning("WARNING: Target platform '%s:%s' specified in derived distribution is not supported by base distribution." % (os_name, codename))
 
         # Merge repositories (child takes precedence over parent)
         for repo_name, parent_repo in parent_dist_file.repositories.items():
@@ -175,7 +178,7 @@ class DistributionFile(object):
                 current_repo = self.repositories[repo_name]
                 if getattr(current_repo, 'origin_distro', self.name) != self.name:
                     other_parent = current_repo.origin_distro
-                    print("WARNING: Collision detected. Repository '%s' is defined in multiple parents ('%s' and '%s'). Using definition from '%s'." % (repo_name, other_parent, parent_dist_file.name, other_parent), flush=True)
+                    logger.warning("WARNING: Collision detected. Repository '%s' is defined in multiple parents ('%s' and '%s'). Using definition from '%s'." % (repo_name, other_parent, parent_dist_file.name, other_parent))
                 
                 # Check for package collisions even if repository already exists
                 if parent_repo.release_repository:
@@ -185,7 +188,7 @@ class DistributionFile(object):
                             current_pkg_repo = self.repositories.get(current_pkg.repository_name)
                             if current_pkg_repo and getattr(current_pkg_repo, 'origin_distro', self.name) != self.name:
                                 other_parent = current_pkg_repo.origin_distro
-                                print("WARNING: Collision detected. Package '%s' is defined in multiple parents ('%s' and '%s'). Using definition from '%s'." % (pkg_name, other_parent, parent_dist_file.name, other_parent), flush=True)
+                                logger.warning("WARNING: Collision detected. Package '%s' is defined in multiple parents ('%s' and '%s'). Using definition from '%s'." % (pkg_name, other_parent, parent_dist_file.name, other_parent))
             else:
                 if extension_method == 'source_rebuild':
                     parent_repo.origin_distro = self.name
@@ -206,7 +209,7 @@ class DistributionFile(object):
                             current_pkg_repo = self.repositories.get(current_pkg.repository_name)
                             if current_pkg_repo and getattr(current_pkg_repo, 'origin_distro', self.name) != self.name:
                                 other_parent = current_pkg_repo.origin_distro
-                                print("WARNING: Collision detected. Package '%s' is defined in multiple parents ('%s' and '%s'). Using definition from '%s'." % (pkg_name, other_parent, parent_dist_file.name, other_parent), flush=True)
+                                logger.warning("WARNING: Collision detected. Package '%s' is defined in multiple parents ('%s' and '%s'). Using definition from '%s'." % (pkg_name, other_parent, parent_dist_file.name, other_parent))
                         else:
                             self._add_package(pkg_name, parent_repo)
 
