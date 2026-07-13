@@ -8,7 +8,8 @@ distribution_file:
       extension_method: binary_import
   dependencies:
     - rosdep_sources_list_urls:
-        - https://raw.githubusercontent.com/ros/rosdistro/master/rosdep/base.yaml
+        - "https://raw.githubusercontent.com/ros/\
+          rosdistro/master/rosdep/base.yaml"
       rosdep_minimum_target_platforms:
         - ubuntu:noble
   repositories:
