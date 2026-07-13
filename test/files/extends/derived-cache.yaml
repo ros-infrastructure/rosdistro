@@ -1,0 +1,26 @@
+distribution_file:
+  release_platforms:
+    ubuntu:
+    - precise
+  extends:
+  - distro_name: base
+    extension_method: binary_import
+  dependencies:
+  - rosdep_sources_list_urls:
+    - https://raw.githubusercontent.com/ros/rosdistro/master/rosdep/base.yaml
+    rosdep_minimum_target_platforms:
+    - ubuntu:noble
+  repositories:
+    derived_repo:
+      release:
+        tags:
+          release: release/foo/{package}/{version}
+        url: https://github.com/example-release/derived_repo.git
+        version: 1.0.0
+  type: distribution
+  version: 3
+name: derived
+release_package_xmls:
+  derived_repo: "<package><name>derived_repo</name><version>1.0.0</version><description>derived_repo</description><maintainer email=\"test@example.com\">Test</maintainer><license>BSD</license></package>"
+type: cache
+version: 2

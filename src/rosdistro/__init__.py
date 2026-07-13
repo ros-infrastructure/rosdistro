@@ -206,7 +206,7 @@ def get_distribution_cache_string(index, dist_name):
 def get_distribution_cache(index, dist_name):
     yaml_str = get_distribution_cache_string(index, dist_name)
     data = yaml.safe_load(yaml_str)
-    return DistributionCache(dist_name, data)
+    return DistributionCache(dist_name, data, index=index)
 
 
 def get_package_condition_context(index, dist_name):

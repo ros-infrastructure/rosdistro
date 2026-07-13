@@ -86,3 +86,24 @@ def test_multi_parent_precedence_and_collisions(capsys):
     # repo_b: rebuilt from parent_b (source_rebuild) -> origin_distro becomes child (multi_parent_child)
     assert child_dist.repositories['repo_b'].origin_distro == 'multi_parent_child'
     assert child_dist.repositories['repo_b'].extension_method == 'source_rebuild'
+
+
+def test_chained_cache_resolution():
+    from rosdistro import get_distribution_cache
+    url = path_to_url(os.path.join(FILES_DIR, 'index_extends.yaml'))
+    index = get_index(url)
+
+    # Load cache for 'derived' (which extends 'base')
+    derived_cache = get_distribution_cache(index, 'derived')
+
+    # Verify that the cache merged both distribution files in memory
+    assert 'derived_repo' in derived_cache.distribution_file.repositories
+    assert 'bar_repo' in derived_cache.distribution_file.repositories
+
+    # Verify that the package XMLs from both caches are available
+    assert 'derived_repo' in derived_cache.release_package_xmls
+    assert 'bar_repo' in derived_cache.release_package_xmls
+
+    assert "<name>derived_repo</name>" in derived_cache.release_package_xmls['derived_repo']
+    assert "<name>bar_repo</name>" in derived_cache.release_package_xmls['bar_repo']
+

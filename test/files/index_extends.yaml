@@ -3,8 +3,10 @@
 distributions:
   base:
     distribution: [extends/base.yaml]
+    distribution_cache: extends/base-cache.yaml
   derived:
     distribution: [extends/derived.yaml]
+    distribution_cache: extends/derived-cache.yaml
   derived_invalid_platform:
     distribution: [extends/derived_invalid_platform.yaml]
   cyclic_a:
