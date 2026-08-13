@@ -40,6 +40,18 @@ from . import get_distribution_file, get_distribution_files, get_doc_build_files
 from .loader import load_url
 
 
+# Templates for the REP URL in the header comment, most preferred first.
+# The REPs moved from ros.org to reps.openrobotics.org, which is the only
+# location serving their current revision. Files are written with the first
+# template, but every template is accepted when verifying, so that existing
+# distribution files do not have to be rewritten in lockstep with this
+# package. Once written by a newer version, a file keeps the new URL.
+REP_URL_TEMPLATES = (
+    'https://reps.openrobotics.org/rep-0%s/',
+    'http://ros.org/reps/rep-0%s.html',
+)
+
+
 def verify_files_parsable(index_url):
     return verify_files(index_url, _check_files_parsable, include_deprecated=False)
 
@@ -134,18 +146,27 @@ def _check_file_identical(dist_file, yaml_url, file_type):
     yaml_str = load_url(yaml_url)
     yaml_lines = yaml_str.splitlines()
     dist_file_data = dist_file.get_data()
-    dist_file_lines = _to_yaml(dist_file_data).splitlines()
-    dist_file_lines[0:0] = _yaml_header_lines(file_type, dist_file_data['version'])
+    body_lines = _to_yaml(dist_file_data).splitlines()
 
-    if yaml_lines != dist_file_lines:
-        diff = difflib.unified_diff(
-            yaml_lines, dist_file_lines,
-            yaml_url, 'loaded-and-saved',
-            n=1, lineterm='')
-        for line in diff:
-            print(line, file=sys.stderr)
-        return False
-    return True
+    # A file is identical if it matches with any of the accepted REP URLs, so
+    # that a file written before the REPs moved is not reported as a diff.
+    for rep_url_template in REP_URL_TEMPLATES:
+        dist_file_lines = _yaml_header_lines(
+            file_type, dist_file_data['version'], rep_url_template) + body_lines
+        if yaml_lines == dist_file_lines:
+            return True
+
+    # Report the difference against the preferred header, which is what
+    # reformatting the file would produce.
+    dist_file_lines = _yaml_header_lines(
+        file_type, dist_file_data['version']) + body_lines
+    diff = difflib.unified_diff(
+        yaml_lines, dist_file_lines,
+        yaml_url, 'loaded-and-saved',
+        n=1, lineterm='')
+    for line in diff:
+        print(line, file=sys.stderr)
+    return False
 
 
 def _to_yaml(data):
@@ -155,7 +176,7 @@ def _to_yaml(data):
     return yaml_str
 
 
-def _yaml_header_lines(file_type, version):
+def _yaml_header_rep(file_type, version):
     rep = '141'
     if file_type == 'index':
         if version == 3:
@@ -164,9 +185,16 @@ def _yaml_header_lines(file_type, version):
             rep = '153'
     if file_type == 'distribution' and version == 2:
         rep = '143'
+    return rep
+
+
+def _yaml_header_lines(file_type, version, rep_url_template=None):
+    rep = _yaml_header_rep(file_type, version)
+    if rep_url_template is None:
+        rep_url_template = REP_URL_TEMPLATES[0]
     return [
         '%YAML 1.1',
         '# ROS %s file' % file_type,
-        '# see REP %s: http://ros.org/reps/rep-0%s.html' % (rep, rep),
+        '# see REP %s: %s' % (rep, rep_url_template % rep),
         '---'
     ]
