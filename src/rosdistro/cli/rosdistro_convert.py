@@ -113,7 +113,7 @@ def convert_release(dist_name, targets):
     with open(dist_name + '/release.yaml', 'w') as f:
         f.write('%YAML 1.1\n')
         f.write('# ROS release file\n')
-        f.write('# see REP 137: http://ros.org/reps/rep-0137.html\n')
+        f.write('# see REP 137: https://reps.openrobotics.org/rep-0137/\n')
         f.write('---\n')
         f.write(yaml_str)
 
@@ -180,7 +180,7 @@ def convert_source(dist_name):
     with open(dist_name + '/source.yaml', 'w') as f:
         f.write('%YAML 1.1\n')
         f.write('# ROS source file\n')
-        f.write('# see REP 137: http://ros.org/reps/rep-0137.html\n')
+        f.write('# see REP 137: https://reps.openrobotics.org/rep-0137/\n')
         f.write('---\n')
         f.write(yaml_str)
 
@@ -250,7 +250,7 @@ def convert_doc(dist_name):
     with open(dist_name + '/doc.yaml', 'w') as f:
         f.write('%YAML 1.1\n')
         f.write('# ROS doc file\n')
-        f.write('# see REP 137: http://ros.org/reps/rep-0137.html\n')
+        f.write('# see REP 137: https://reps.openrobotics.org/rep-0137/\n')
         f.write('---\n')
         f.write(yaml_str)
 
