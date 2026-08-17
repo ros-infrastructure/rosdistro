@@ -113,9 +113,41 @@ def get_distribution(index, dist_name):
     return Distribution(dist_file)
 
 
-def get_distribution_file(index, dist_name):
+class CircularInheritanceError(Exception):
+    pass
+
+
+def _resolve_extends(index, dist_file, visited=None):
+    if visited is None:
+        visited = set()
+    if dist_file.name in visited:
+        # Loop detected!
+        raise CircularInheritanceError("Circular inheritance detected: %s -> %s" % (' -> '.join(sorted(visited)), dist_file.name))
+    visited.add(dist_file.name)
+
+    # Process extends in order
+    for ext in dist_file.extends:
+        parent_dist_name = ext['distro_name']
+        parent_index_url = ext.get('index_url')
+
+        if parent_index_url:
+            parent_index = get_index(parent_index_url)
+        else:
+            parent_index = index
+
+        # Recursively fetch parent dist file passing visited set copy
+        parent_dist_file = get_distribution_file(parent_index, parent_dist_name, _visited=visited.copy())
+
+        # Merge parent_dist_file into dist_file
+        dist_file.merge_extends(parent_dist_file, ext['extension_method'])
+
+
+def get_distribution_file(index, dist_name, _visited=None):
     data = _get_dist_file_data(index, dist_name, 'distribution')
-    return create_distribution_file(dist_name, data)
+    dist_file = create_distribution_file(dist_name, data)
+    if dist_file.version >= 3:
+        _resolve_extends(index, dist_file, _visited)
+    return dist_file
 
 
 def get_distribution_files(index, dist_name):
@@ -174,7 +206,7 @@ def get_distribution_cache_string(index, dist_name):
 def get_distribution_cache(index, dist_name):
     yaml_str = get_distribution_cache_string(index, dist_name)
     data = yaml.safe_load(yaml_str)
-    return DistributionCache(dist_name, data)
+    return DistributionCache(dist_name, data, index=index)
 
 
 def get_package_condition_context(index, dist_name):

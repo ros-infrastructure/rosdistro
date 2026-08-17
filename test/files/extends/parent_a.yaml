@@ -1,0 +1,24 @@
+%YAML 1.1
+---
+release_platforms:
+  ubuntu:
+    - precise
+repositories:
+  repo_a:
+    release:
+      packages:
+        - pkg_a
+      tags:
+        release: release/{package}/{version}
+      url: https://github.com/example-release/repo_a-release.git
+      version: 0.1.0
+  collision_repo:
+    release:
+      packages:
+        - collision_pkg
+      tags:
+        release: release/{package}/{version}
+      url: https://github.com/example-release/collision-release.git
+      version: 0.1.0
+type: distribution
+version: 3

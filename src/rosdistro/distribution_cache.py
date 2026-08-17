@@ -44,7 +44,7 @@ class DistributionCache(object):
 
     _type = 'cache'
 
-    def __init__(self, name, data=None, distribution_file_data=None):
+    def __init__(self, name, data=None, distribution_file_data=None, index=None):
         assert data or distribution_file_data
         if data:
             assert 'type' in data, "Expected file type is '%s'" % DistributionCache._type
@@ -67,6 +67,27 @@ class DistributionCache(object):
         if data and 'source_repo_package_xmls' in data:
             for repo_name, repo_data in data['source_repo_package_xmls'].items():
                 self.source_repo_package_xmls[repo_name] = SourceRepositoryCache(repo_data)
+
+        # Resolve extends recursively using parent caches if index is provided
+        if index and self.distribution_file.version >= 3 and self.distribution_file.extends:
+            from . import get_distribution_cache
+            for ext in self.distribution_file.extends:
+                parent_name = ext['distro_name']
+                try:
+                    parent_cache = get_distribution_cache(index, parent_name)
+                    # Merge parent distribution file
+                    self.distribution_file.merge_extends(parent_cache.distribution_file, ext['extension_method'])
+                    # Merge package XMLs
+                    for pkg_name, xml_str in parent_cache.release_package_xmls.items():
+                        if pkg_name not in self.release_package_xmls:
+                            self.release_package_xmls[pkg_name] = xml_str
+                    # Merge source repo caches
+                    for repo_name, repo_cache in parent_cache.source_repo_package_xmls.items():
+                        if repo_name not in self.source_repo_package_xmls:
+                            self.source_repo_package_xmls[repo_name] = repo_cache
+                except Exception as e:
+                    logger.debug("Could not load parent cache for '%s': %s" % (parent_name, e))
+
         self.distribution_file.source_packages = self.get_source_packages()
 
     def get_data(self):

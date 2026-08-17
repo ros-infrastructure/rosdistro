@@ -1,0 +1,11 @@
+%YAML 1.1
+---
+release_platforms:
+  ubuntu:
+    - precise
+extends:
+  - distro_name: cyclic_a
+    extension_method: binary_import
+repositories: {}
+type: distribution
+version: 3

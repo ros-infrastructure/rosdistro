@@ -1,0 +1,26 @@
+---
+distribution_file:
+  release_platforms:
+    ubuntu:
+      - precise
+  repositories:
+    bar_repo:
+      doc:
+        type: git
+        url: https://github.com/example-test/bar_repo.git
+        version: master
+      release:
+        tags:
+          release: release/foo/{package}/{version}
+        url: https://github.com/example-release/bar_repo.git
+        version: 0.1.2
+  type: distribution
+  version: 3
+name: base
+release_package_xmls:
+  bar_repo: "<package><name>bar_repo</name><version>0.1.2</version>\
+    <description>bar_repo</description>\
+    <maintainer email=\"test@example.com\">Test</maintainer>\
+    <license>BSD</license></package>"
+type: cache
+version: 2

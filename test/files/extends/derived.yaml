@@ -1,0 +1,22 @@
+%YAML 1.1
+---
+release_platforms:
+  ubuntu:
+    - precise
+extends:
+  - distro_name: base
+    extension_method: binary_import
+dependencies:
+  - rosdep_sources_list_urls:
+      - https://raw.githubusercontent.com/ros/rosdistro/master/rosdep/base.yaml
+    rosdep_minimum_target_platforms:
+      - ubuntu:noble
+repositories:
+  derived_repo:
+    release:
+      tags:
+        release: release/foo/{package}/{version}
+      url: https://github.com/example-release/derived_repo.git
+      version: 1.0.0
+type: distribution
+version: 3

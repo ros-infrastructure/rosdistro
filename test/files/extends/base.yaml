@@ -1,0 +1,18 @@
+%YAML 1.1
+---
+release_platforms:
+  ubuntu:
+    - precise
+repositories:
+  bar_repo:
+    doc:
+      type: git
+      url: https://github.com/example-test/bar_repo.git
+      version: master
+    release:
+      tags:
+        release: release/foo/{package}/{version}
+      url: https://github.com/example-release/bar_repo.git
+      version: 0.1.2
+type: distribution
+version: 3

@@ -1,0 +1,23 @@
+%YAML 1.1
+---
+distributions:
+  base:
+    distribution: [extends/base.yaml]
+    distribution_cache: extends/base-cache.yaml
+  derived:
+    distribution: [extends/derived.yaml]
+    distribution_cache: extends/derived-cache.yaml
+  derived_invalid_platform:
+    distribution: [extends/derived_invalid_platform.yaml]
+  cyclic_a:
+    distribution: [extends/cyclic_a.yaml]
+  cyclic_b:
+    distribution: [extends/cyclic_b.yaml]
+  parent_a:
+    distribution: [extends/parent_a.yaml]
+  parent_b:
+    distribution: [extends/parent_b.yaml]
+  multi_parent_child:
+    distribution: [extends/multi_parent_child.yaml]
+type: index
+version: 3
