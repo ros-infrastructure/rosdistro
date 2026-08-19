@@ -37,6 +37,7 @@ from .manifest_provider.github import github_manifest_provider, github_source_ma
 from .manifest_provider.gitlab import gitlab_manifest_provider, gitlab_source_manifest_provider
 from .manifest_provider.tar import tar_manifest_provider, tar_source_manifest_provider
 from .package import Package
+from . import logger
 
 
 class Distribution(object):
@@ -74,10 +75,23 @@ class Distribution(object):
             if repo.version is None:
                 return None
             package_xml = None
+
+            final_exception = None
             for mp in self._manifest_providers:
-                package_xml = mp(self._distribution_file.name, repo, pkg_name)
+                try:
+                    package_xml = mp(self._distribution_file.name, repo, pkg_name)
+                except Exception as e:
+                    # pass and try next manifest provider
+                    logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
+                    final_exception = e
+                    continue
+
                 if package_xml is not None:
                     break
+
+            if final_exception is not None:
+                raise final_exception
+
             self._release_package_xmls[pkg_name] = package_xml
         return self._release_package_xmls[pkg_name]
 
@@ -93,8 +107,16 @@ class Distribution(object):
         if repo_name in self._source_repo_package_xmls:
             return self._source_repo_package_xmls[repo_name]
         else:
+            final_exception = None
             for mp in self._source_manifest_providers:
-                repo_cache = mp(self.repositories[repo_name].source_repository)
+                try:
+                    repo_cache = mp(self.repositories[repo_name].source_repository)
+                except Exception as e:
+                    # pass and try next manifest provider
+                    logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
+                    final_exception = e
+                    continue
+
                 if repo_cache is not None:
                     # Update map of package XMLs, and also list of known package names.
                     self._source_repo_package_xmls[repo_name] = repo_cache
@@ -102,4 +124,8 @@ class Distribution(object):
                         if pkg_name[0] != '_':
                             self._distribution_file.source_packages[pkg_name] = Package(pkg_name, repo_name)
                     return self._source_repo_package_xmls[repo_name]
+
+            if final_exception is not None:
+                raise final_exception
+
         return None
