@@ -32,6 +32,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from itertools import takewhile
 import os
 import re
 import subprocess
@@ -62,12 +63,10 @@ def _version_gte(version: str, required_version: str) -> bool:
             if isinstance(parsed_version, LegacyVersion):
                 raise InvalidVersion
     except InvalidVersion:
-        if "windows" in version.lower():
-            # Git for Windows uses a non-standard version string
-            version = version.lower().replace("windows", "post").strip()
-            parsed_version = parse(version)
-        else:
-            raise
+        version = '.'.join(
+            x for x in takewhile(str.isdigit, version.split('.'))
+        )
+        parsed_version = parse(version)
 
     return parsed_version >= parse(required_version)
 

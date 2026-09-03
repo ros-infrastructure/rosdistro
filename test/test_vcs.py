@@ -15,6 +15,8 @@ import pytest
     ("2.51.0.windows.1", "2.50.0", True),
     ("2.51.0.windows.1", "2.51.0", True),
     ("2.51.0.windows.1", "2.52", False),
+    ("2.55.0.some.non.standard.suffix", "2.56.0", False),
+    ("2.55.0.some.non.standard.suffix", "2.50.0", True),
 ])
 def test_version_gte(version: str, required_version: str, expected: bool):
     assert _version_gte(version, required_version) == expected
