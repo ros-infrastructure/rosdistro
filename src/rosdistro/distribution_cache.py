@@ -69,20 +69,27 @@ class DistributionCache(object):
         self._distribution_file_data = data['distribution_file'] if data else distribution_file_data
         self.distribution_file = create_distribution_file(name, self._distribution_file_data)
 
+        # Format 2 backwards compatibility
+        # Convert release_package_xmls from flat dict at the root to be an instance of a resource loaded
+        if inbound_version == 2 and data:
+            if 'release_package_xmls' in data:
+                if 'release_resources' not in data:
+                    data['release_resources'] = {}
+                for pkg_name, pkg_xml in data['release_package_xmls'].items():
+                    if pkg_name not in data['release_resources']:
+                        data['release_resources'][pkg_name] = {}
+                    data['release_resources'][pkg_name]['package.xml'] = pkg_xml
+            if 'source_repo_package_xmls' in data:
+                if 'source_repo_resources' not in data:
+                    data['source_repo_resources'] = {}
+                for repo_name, repo_data in data['source_repo_package_xmls'].items():
+                    if repo_name not in data['source_repo_resources']:
+                        data['source_repo_resources'][repo_name] = repo_data
+
         # self.release_package_xmls = data['release_package_xmls'] if data and 'release_package_xmls' in data else {}
         # self.release_readmes = data['release_readmes'] if data and 'release_readmes' in data else {}
         # self.release_changelogs = data['release_changelogs'] if data and 'release_changelogs' in data else {}
         self.release_resources = data['release_resources'] if data and 'release_resources' in data else {}
-
-        # Format 2 backards compatability
-        # Convert release_package_xml from flat dict at the root to be an instance of a resource loaded
-        if inbound_version == 2 and 'release_package_xmls' in data:
-            if not 'release_resources' in data:
-                data['release_resources'] = {}
-            for pkg_name, pkg_xml in data['release_package_xmls'].items():
-                if not pkg_name in data['release_resources']:
-                    data['release_resources'][pkg_name] = {}
-                data['release_resources'][pkg_name]['package.xml'] = pkg_xml
 
         self.source_repo_resources = {}
         if data and 'source_repo_resources' in data:
@@ -106,8 +113,10 @@ class DistributionCache(object):
         self._remove_obsolete_entries()
 
         # determine differences in doc and source entries
-        if len(distribution_file_data) == len(self._distribution_file_data):
-            for old_data, new_data in zip(self._distribution_file_data, distribution_file_data):
+        old_dist_file_data = self._distribution_file_data if isinstance(self._distribution_file_data, list) else [self._distribution_file_data]
+        new_dist_file_data = distribution_file_data if isinstance(distribution_file_data, list) else [distribution_file_data]
+        if len(new_dist_file_data) == len(old_dist_file_data):
+            for old_data, new_data in zip(old_dist_file_data, new_dist_file_data):
                 if not new_data['repositories']:
                     continue
                 for repo_name in sorted(new_data['repositories'].keys()):
@@ -142,7 +151,7 @@ class DistributionCache(object):
     
         sys.stdout.write('\n')
         sys.stdout.write(f'Dropped {dropped_count} repositories\n')
-        sys.stdout.write(f'Skippted {skipped_count} repositories\n')
+        sys.stdout.write(f'Skipped {skipped_count} repositories\n')
 
         # Remove all source package xmls where the devel branch is pointing to a different commit than
         # the one we have associated with our cache. This requires calling git ls-remote on all affected repos.
@@ -156,6 +165,8 @@ class DistributionCache(object):
                 sys.stdout.flush()
                 try:
                     source_repository = dist_file.repositories[repo].source_repository
+                    if not source_repository:
+                        raise AttributeError()
                 except (KeyError, AttributeError):
                     # The repo entry has been dropped, or the source stanza from it has been dropped,
                     # either way, remove the cache entries associated with this repository.
@@ -163,10 +174,11 @@ class DistributionCache(object):
                     del self.source_repo_resources[repo]
                     continue
 
-                min_update_delta =  1 * 60 * 60 # TOOD(tfoote) magic number make into a parameter
-                if '_last_update_time' in self.source_repo_resources[repo]:
+                min_update_delta = 1 * 60 * 60  # TODO(tfoote) magic number make into a parameter
+                last_update_time = self.source_repo_resources[repo].last_update_time()
+                if last_update_time is not None:
                     now = datetime.datetime.now()
-                    entry_age = (now - self.source_repo_resources[repo]['_last_update_time']).total_seconds()
+                    entry_age = (now - last_update_time).total_seconds()
                     if entry_age < min_update_delta:
                         logger.debug(f'Skipping check of {repo} because it was last updated only {entry_age} seconds ago less than {min_update_delta}')
                         skipped_count += 1
@@ -193,7 +205,7 @@ class DistributionCache(object):
                     dropped_count += 1
             sys.stdout.write('\n')
             sys.stdout.write(f'Dropped {dropped_count} repositories\n')
-            sys.stdout.write(f'Skippted {skipped_count} repositories\n')
+            sys.stdout.write(f'Skipped {skipped_count} repositories\n')
             end_time = time.perf_counter()
             logger.debug(f'Check of invalid source repo cache entries took {(end_time - start_time):.1f} seconds')
 

@@ -63,7 +63,10 @@
           "type": "string"
         },
         "_ref": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "_stars": {
           "type": "integer"
@@ -87,6 +90,7 @@
     },
     "package_resources": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "CHANGELOG.rst": {
           "type": "string",

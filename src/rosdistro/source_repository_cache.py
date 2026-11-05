@@ -43,19 +43,50 @@ class SourceRepositoryCache(object):
     def __init__(self, data):
         assert data
         self._ref = data['_ref']
-        if '_last_update_time' in data:
-            self._last_update_time = data['_last_update_time']
-        else:
-            self._last_update_time = None
+        self._data = data
+        self._last_update_time = data.get('_last_update_time')
 
         non_package_keys = ['_ref', '_last_update_time', '_stars', '_description', '_tags']
         self._package_names = set([name for name in data.keys() if name not in non_package_keys])
-        self._data = data
+        for pkg_name in self._package_names:
+            if isinstance(self._data[pkg_name], (list, tuple)) and len(self._data[pkg_name]) == 2:
+                package_path, package_xml = self._data[pkg_name]
+                self._data[pkg_name] = {
+                    'package_path': package_path,
+                    'package.xml': package_xml,
+                }
+            elif isinstance(self._data[pkg_name], dict) and '_last_update_time' in self._data[pkg_name]:
+                pkg_update_time = self._data[pkg_name].pop('_last_update_time')
+                if self._last_update_time is None and pkg_update_time is not None:
+                    self._last_update_time = pkg_update_time
+
+    @property
+    def _last_update_time(self):
+        val = self._data.get('_last_update_time')
+        if val is None:
+            return None
+        if isinstance(val, datetime):
+            return val
+        return datetime.fromisoformat(val)
+
+    @_last_update_time.setter
+    def _last_update_time(self, value):
+        if value is None:
+            self._data.pop('_last_update_time', None)
+        elif isinstance(value, datetime):
+            self._data['_last_update_time'] = value.isoformat()
+        elif isinstance(value, str):
+            datetime.fromisoformat(value)
+            self._data['_last_update_time'] = value
+        else:
+            raise TypeError("Expected datetime, ISO-8601 str, or None for _last_update_time")
 
     def get_data(self):
         """
         Return the bare data dict, suitable for serializing into yaml.
         """
+        if isinstance(self._data.get('_last_update_time'), datetime):
+            self._data['_last_update_time'] = self._data['_last_update_time'].isoformat()
         return self._data
 
     @classmethod
@@ -83,22 +114,30 @@ class SourceRepositoryCache(object):
         """
         self._data['_tags'] = tags
 
+    def set_last_update_time(self, update_time):
+        """
+        Set the repository last update time.
+        """
+        self._last_update_time = update_time
+
+    def last_update_time(self):
+        """
+        Return the last update time as a datetime object, or None.
+        """
+        return self._last_update_time
+
     def add(self, package_name, package_path, payload_string, payload_type='package.xml', increment_update_time=True): # TODO(tfoote) Breaks rosdistro formatting changing from list to dict
         """
         Add a package to the cache.
         """
-        if package_name not in self._data:
+        if package_name not in self._data or not isinstance(self._data[package_name], dict):
             self._data[package_name] = {}
-        
-        # Migration option for old caches
-        if type(self._data[package_name]) != dict:
-            print(f"Clearing content from package {package_name} @@@@@@@@@@@@@@@@!!!!!!!!!!!!!!!!")
-            self._data[package_name] = {}
+
         self._data[package_name]['package_path'] = package_path
         self._data[package_name][payload_type] = payload_string
         self._package_names.add(package_name)
         if increment_update_time:
-            self._data[package_name]['_last_update_time'] = datetime.now()
+            self._last_update_time = datetime.now()
 
 
     def __iter__(self):
