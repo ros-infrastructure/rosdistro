@@ -100,6 +100,9 @@ def generate_release_cache(index, dist_name, preclean=False, debug=False):
     if not debug:
         print('')
 
+    if hasattr(cache, '_sync_resources'):
+        cache._sync_resources()
+
     if errors:
         raise RuntimeError('\n'.join(errors))
 
