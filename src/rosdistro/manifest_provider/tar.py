@@ -42,6 +42,7 @@ from catkin_pkg.package import InvalidPackage, parse_package_string
 from catkin_pkg.packages import find_package_paths
 
 from rosdistro.common import rmtree
+from rosdistro.manifest_provider.cache import sanitize_and_truncate_docs
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro import logger
 
@@ -65,12 +66,19 @@ def tar_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
 
     response = urlopen(request)
     with tarfile.open(fileobj=io.BytesIO(response.read())) as tar:
-        package_xml = tar.extractfile(subdir + '/' + filepath).read()
+        try:
+            extracted = tar.extractfile(subdir + '/' + filepath)
+        except KeyError:
+            raise RuntimeError('Could not find %s in tarball "%s"' % (subdir + '/' + filepath, repo.url))
+        if extracted is None:
+            raise RuntimeError('Could not extract %s from tarball "%s"' % (subdir + '/' + filepath, repo.url))
+        package_xml = extracted.read()
         return package_xml.decode('utf-8')
 
 
-def tar_source_manifest_provider(repo, filepaths=['package.xml']):
+def tar_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md']):
     assert repo.type == 'tar'
+    xmlpath = 'package.xml'
 
     try:
         request = Request(repo.url)
@@ -87,21 +95,32 @@ def tar_source_manifest_provider(repo, filepaths=['package.xml']):
         with tarfile.open(fileobj=io.BytesIO(response.read())) as tar:
             tmpdir = tempfile.mkdtemp()
             try:
-                # Extract just the package.xmls
-                tar.extractall(path=tmpdir, members=_package_xml_members(tar))
+                # Extract the package.xmls and requested filepaths
+                tar.extractall(path=tmpdir, members=_package_xml_members(tar, filepaths))
                 cache = SourceRepositoryCache.from_ref(None)
 
                 for package_path in find_package_paths(tmpdir):
                     if package_path == '.':
                         package_path = ''
-                    with open(os.path.join(tmpdir, package_path, 'package.xml'), 'r') as f:
+                    with open(os.path.join(tmpdir, package_path, xmlpath), 'r') as f:
                         package_xml = f.read()
                     try:
                         name = parse_package_string(package_xml).name
                     except InvalidPackage:
                         raise RuntimeError('Unable to parse package.xml file found in %s' % repo.url)
+                    cache.add(name, package_path, package_xml, xmlpath)
                     for filepath in filepaths:
-                        cache.add(name, package_path, package_xml, filepath)
+                        if filepath == xmlpath:
+                            continue
+                        repo_filename = os.path.join(tmpdir, package_path, filepath)
+                        if not os.path.isfile(repo_filename):
+                            logger.debug(f'- tar load of {filepath} from {repo.url} skipped because it did not exist.')
+                            continue
+                        with open(repo_filename, 'r') as f:
+                            logger.debug('- tar load %s from %s' % (filepath, repo_filename))
+                            contents = f.read()
+                            contents = sanitize_and_truncate_docs(contents)
+                            cache.add(name, package_path, contents, filepath)
 
                 return cache
             finally:
@@ -110,7 +129,12 @@ def tar_source_manifest_provider(repo, filepaths=['package.xml']):
         raise RuntimeError('Unable to fetch source package.xml files: %s' % e)
 
 
-def _package_xml_members(tar):
+def _package_xml_members(tar, filepaths=None):
+    target_filenames = {'package.xml'}
+    if filepaths:
+        target_filenames.update(filepaths)
     for tarinfo in tar:
-        if os.path.basename(tarinfo.name) == "package.xml":
+        if os.path.basename(tarinfo.name) in target_filenames or any(
+            tarinfo.name == fp or tarinfo.name.endswith('/' + fp) for fp in target_filenames
+        ):
             yield tarinfo

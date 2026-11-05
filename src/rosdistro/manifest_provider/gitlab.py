@@ -41,6 +41,7 @@ from urllib.parse import urlencode
 
 from catkin_pkg.package import parse_package_string
 
+from rosdistro.manifest_provider.cache import sanitize_and_truncate_docs
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro import logger
 
@@ -51,7 +52,7 @@ def _gitlab_urlopen(url):
     req = Request(url)
     if GITLAB_PRIVATE_TOKEN:
         req.add_header('Private-Token', GITLAB_PRIVATE_TOKEN)
-    logger.warn('Performing GitLab API query "%s"' % (url,))
+    logger.debug('Performing GitLab API query "%s"' % (url,))
     return urlopen(req)
 
 
@@ -96,7 +97,7 @@ def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
         logger.debug('Skip non-gitlab url "%s"' % repo.url)
         raise RuntimeError('can not handle non gitlab urls')
 
-    resource = 'repository/files/%s/raw' % filepath
+    resource = 'repository/files/%s/raw' % urlquote(filepath, safe='')
     attrs = {
         'ref': repo.get_release_tag(pkg_name),
     }
@@ -108,7 +109,7 @@ def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
         raise
 
 
-def gitlab_source_manifest_provider(repo, filepaths=['package.xml']):
+def gitlab_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md']):
     assert repo.version
     server, path = repo.get_url_parts()
     if not server.endswith('gitlab.com') and server != ROSDISTRO_GITLAB_SERVER:
@@ -164,13 +165,27 @@ def gitlab_source_manifest_provider(repo, filepaths=['package.xml']):
         logger.debug('- failed to load project info from %s: %s' % (path, e))
 
     for package_xml_path in package_xml_paths:
+        package_xml_filename = 'package.xml'
+        resource_path = urlquote(
+            package_xml_path + '/' + package_xml_filename if package_xml_path else package_xml_filename, safe='')
+        resource = 'repository/files/' + resource_path + '/raw'
+        with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
+            package_xml = res.read().decode('utf-8')
+        name = parse_package_string(package_xml).name
+        cache.add(name, package_xml_path, package_xml, package_xml_filename)
         for filepath in filepaths:
+            if filepath == package_xml_filename:
+                continue
             resource_path = urlquote(
                 package_xml_path + '/' + filepath if package_xml_path else filepath, safe='')
             resource = 'repository/files/' + resource_path + '/raw'
-            with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
-                contents = res.read().decode('utf-8')
-            name = parse_package_string(contents).name
+            try:
+                with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
+                    contents = res.read().decode('utf-8')
+            except URLError as e:
+                logger.debug('- failed to load %s from %s: %s' % (filepath, path, e))
+                continue
+            contents = sanitize_and_truncate_docs(contents)
             cache.add(name, package_xml_path, contents, filepath)
 
     return cache
