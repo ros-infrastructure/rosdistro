@@ -222,16 +222,140 @@ class CacheConfig(dict):
             data = yaml.safe_load(f.read()) or {}
         return cls(data)
 
+    @classmethod
+    def from_input(cls, config=None, include_source=False, limit=None):
+        if config is None:
+            cfg = cls.extended() if include_source else cls.minimal()
+        elif isinstance(config, cls):
+            cfg = cls(config.to_dict())
+        elif isinstance(config, dict):
+            cfg = cls(config)
+        elif isinstance(config, str):
+            if config == 'minimal':
+                cfg = cls.minimal()
+            elif config == 'extended':
+                cfg = cls.extended()
+            else:
+                cfg = cls.from_file(config)
+        else:
+            raise TypeError("Unsupported cache config type: %r" % (type(config),))
+
+        if include_source and not cfg.is_source_resource_enabled('package.xml'):
+            cfg['source_package_resources']['package.xml'] = {'enabled': True}
+        if limit is not None:
+            cfg['limit'] = int(limit)
+        return cfg
+
+    @classmethod
+    def from_cache_data(cls, data, inbound_version=3):
+        if data and 'config' in data and isinstance(data['config'], dict):
+            return cls(data['config'], strict=False)
+        cfg = cls.minimal()
+        if not data:
+            return cfg
+        if inbound_version == 2:
+            if data.get('source_repo_package_xmls'):
+                cfg['source_package_resources']['package.xml'] = {'enabled': True}
+            return cfg
+        # Infer crawled resources from Format 3 data when 'config' was omitted
+        for pkg_data in (data.get('release_resources') or {}).values():
+            if isinstance(pkg_data, dict):
+                for res_key in pkg_data:
+                    if res_key != 'version':
+                        cfg['release_package_resources'][res_key] = _normalize_resource_entry(
+                            res_key, True, cls.DEFAULT_DOC_MAX_LINES
+                        )
+        for repo_data in (data.get('source_repo_resources') or {}).values():
+            raw_repo = repo_data._data if isinstance(repo_data, SourceRepositoryCache) else repo_data
+            if isinstance(raw_repo, dict):
+                for k, v in raw_repo.items():
+                    if k.startswith('_'):
+                        if k not in ('_ref', '_last_update_time'):
+                            cfg['source_repo_metadata'][k[1:]] = {'enabled': True}
+                    elif isinstance(v, dict):
+                        for res_key in v:
+                            if res_key != 'package_path':
+                                cfg['source_package_resources'][res_key] = _normalize_resource_entry(
+                                    res_key, True, cls.DEFAULT_DOC_MAX_LINES
+                                )
+                    elif isinstance(v, (list, tuple)):
+                        cfg['source_package_resources']['package.xml'] = {'enabled': True}
+        return cfg
+
+
+yaml.SafeDumper.add_representer(CacheConfig, yaml.SafeDumper.represent_dict)
+
+MINIMAL_CACHE_CONFIG = CacheConfig.minimal()
+DEFAULT_EXTENDED_CONFIG = CacheConfig.extended()
+
+
+class _ReleasePackageXmlsView(dict):
+    """Live dict view over DistributionCache.release_resources[pkg]['package.xml']
+    preserving backwards compatibility for callers accessing cache.release_package_xmls.
+    """
+
+    def __init__(self, release_resources):
+        self._release_resources = release_resources
+        super(_ReleasePackageXmlsView, self).__init__(
+            (pkg_name, pkg_data['package.xml'])
+            for pkg_name, pkg_data in release_resources.items()
+            if isinstance(pkg_data, dict) and pkg_data.get('package.xml') is not None
+        )
+
+    def __setitem__(self, pkg_name, xml_str):
+        super(_ReleasePackageXmlsView, self).__setitem__(pkg_name, xml_str)
+        if pkg_name not in self._release_resources or not isinstance(self._release_resources[pkg_name], dict):
+            self._release_resources[pkg_name] = {}
+        self._release_resources[pkg_name]['package.xml'] = xml_str
+
+    def __delitem__(self, pkg_name):
+        super(_ReleasePackageXmlsView, self).__delitem__(pkg_name)
+        if pkg_name in self._release_resources and 'package.xml' in self._release_resources[pkg_name]:
+            del self._release_resources[pkg_name]['package.xml']
+            if not self._release_resources[pkg_name]:
+                del self._release_resources[pkg_name]
+
+    def update(self, *args, **kwargs):
+        for k, v in dict(*args, **kwargs).items():
+            self[k] = v
+
+    def setdefault(self, key, default=None):
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    def pop(self, key, *args):
+        if key in self:
+            val = self[key]
+            del self[key]
+            return val
+        if args:
+            return args[0]
+        raise KeyError(key)
+
+    def popitem(self):
+        key, val = super(_ReleasePackageXmlsView, self).popitem()
+        if key in self._release_resources and 'package.xml' in self._release_resources[key]:
+            del self._release_resources[key]['package.xml']
+            if not self._release_resources[key]:
+                del self._release_resources[key]
+        return key, val
+
+    def clear(self):
+        for key in list(self.keys()):
+            del self[key]
+
+
+yaml.SafeDumper.add_representer(_ReleasePackageXmlsView, yaml.SafeDumper.represent_dict)
 
 
 class DistributionCache(object):
 
     _type = 'cache'
 
-    def __init__(self, name, data=None, distribution_file_data=None):
+    def __init__(self, name, data=None, distribution_file_data=None, config=None):
         assert data or distribution_file_data
-        
-        # default value
+
         inbound_version = 0
         if data:
             assert 'type' in data, "Expected file type is '%s'" % DistributionCache._type
@@ -245,39 +369,83 @@ class DistributionCache(object):
             assert 'name' in data, "Distribution cache file for '%s' lacks required name information" % name
             assert data['name'] == name, "Distribution cache file for '%s' does not match the name '%s'" % (name, data['name'])
 
-        # All data will be migrated forward on import, any rexport will be in version 3
+        # All data will be migrated forward on import, any re-export defaults to version 3
         self.version = 3
 
         self._distribution_file_data = data['distribution_file'] if data else distribution_file_data
         self.distribution_file = create_distribution_file(name, self._distribution_file_data)
 
-        # Format 2 backwards compatibility
-        # Convert release_package_xmls from flat dict at the root to be an instance of a resource loaded
-        if inbound_version == 2 and data:
-            if 'release_package_xmls' in data:
-                if 'release_resources' not in data:
-                    data['release_resources'] = {}
-                for pkg_name, pkg_xml in data['release_package_xmls'].items():
-                    if pkg_name not in data['release_resources']:
-                        data['release_resources'][pkg_name] = {}
-                    data['release_resources'][pkg_name]['package.xml'] = pkg_xml
-            if 'source_repo_package_xmls' in data:
-                if 'source_repo_resources' not in data:
-                    data['source_repo_resources'] = {}
-                for repo_name, repo_data in data['source_repo_package_xmls'].items():
-                    if repo_name not in data['source_repo_resources']:
-                        data['source_repo_resources'][repo_name] = repo_data
+        self.release_resources = (
+            copy.deepcopy(data['release_resources'])
+            if data and 'release_resources' in data else {}
+        )
+        raw_source_repos = (
+            copy.deepcopy(data['source_repo_resources'])
+            if data and 'source_repo_resources' in data else {}
+        )
 
-        # self.release_package_xmls = data['release_package_xmls'] if data and 'release_package_xmls' in data else {}
-        # self.release_readmes = data['release_readmes'] if data and 'release_readmes' in data else {}
-        # self.release_changelogs = data['release_changelogs'] if data and 'release_changelogs' in data else {}
-        self.release_resources = data['release_resources'] if data and 'release_resources' in data else {}
+        # Format 2 backwards compatibility without mutating caller's input data dict
+        if inbound_version == 2 and data:
+            for pkg_name, pkg_xml in (data.get('release_package_xmls') or {}).items():
+                if pkg_name not in self.release_resources:
+                    self.release_resources[pkg_name] = {}
+                self.release_resources[pkg_name]['package.xml'] = pkg_xml
+                if 'version' not in self.release_resources[pkg_name] and pkg_name in self.distribution_file.release_packages:
+                    pkg = self.distribution_file.release_packages[pkg_name]
+                    rel_repo = self.distribution_file.repositories[pkg.repository_name].release_repository
+                    if rel_repo and rel_repo.version:
+                        self.release_resources[pkg_name]['version'] = rel_repo.version
+            for repo_name, repo_data in (data.get('source_repo_package_xmls') or {}).items():
+                if repo_name not in raw_source_repos:
+                    raw_source_repos[repo_name] = copy.deepcopy(repo_data)
 
         self.source_repo_resources = {}
-        if data and 'source_repo_resources' in data:
-            for repo_name, repo_data in data['source_repo_resources'].items():
-                self.source_repo_resources[repo_name] = SourceRepositoryCache(repo_data)
+        for repo_name, repo_data in raw_source_repos.items():
+            self.source_repo_resources[repo_name] = (
+                repo_data if isinstance(repo_data, SourceRepositoryCache)
+                else SourceRepositoryCache(repo_data)
+            )
         self.distribution_file.source_packages = self.get_source_packages()
+
+        if config is not None:
+            self.config = CacheConfig.from_input(config)
+        elif data is not None:
+            self.config = CacheConfig.from_cache_data(data, inbound_version=inbound_version)
+        else:
+            self.config = CacheConfig.minimal()
+
+
+    @property
+    def release_package_xmls(self):
+        return _ReleasePackageXmlsView(self.release_resources)
+
+    @release_package_xmls.setter
+    def release_package_xmls(self, mapping):
+        for pkg_name in list(self.release_resources.keys()):
+            if 'package.xml' in self.release_resources[pkg_name]:
+                del self.release_resources[pkg_name]['package.xml']
+                if not self.release_resources[pkg_name]:
+                    del self.release_resources[pkg_name]
+        for pkg_name, xml_str in (mapping or {}).items():
+            if pkg_name not in self.release_resources:
+                self.release_resources[pkg_name] = {}
+            self.release_resources[pkg_name]['package.xml'] = xml_str
+
+    @property
+    def source_repo_package_xmls(self):
+        return self.source_repo_resources
+
+    @source_repo_package_xmls.setter
+    def source_repo_package_xmls(self, value):
+        converted = {}
+        for repo_name, repo_data in (value or {}).items():
+            converted[repo_name] = (
+                repo_data if isinstance(repo_data, SourceRepositoryCache)
+                else SourceRepositoryCache(repo_data)
+            )
+        self.source_repo_resources = converted
+        self.distribution_file.source_packages = self.get_source_packages()
+
 
     def get_data(self):
         data = {}
