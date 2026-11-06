@@ -276,3 +276,104 @@ def test_distribution_cache_v2_migration():
     }
     validate(instance=cache.get_data(), schema=schema)
 
+
+@patch('rosdistro.cli.rosdistro_build_cache.generate_distribution_caches')
+def test_cli_build_cache_writes_both_legacy_and_extended_files(mock_gen_caches, tmp_path, monkeypatch):
+    from rosdistro.cli.rosdistro_build_cache import main
+    from rosdistro.distribution_cache import CacheConfig
+
+    monkeypatch.chdir(tmp_path)
+    schema = _load_schema()
+    dist_file_data = _sample_dist_file_data()
+
+    config_file = tmp_path / 'cache_config.yaml'
+    config_file.write_text(yaml.safe_dump({
+        'release_package_resources': {
+            'package.xml': True,
+            'README.md': {'enabled': True, 'max_lines': 50},
+            'LICENSE': True,
+        },
+        'source_package_resources': {
+            'package.xml': True,
+            'README.md': {'enabled': True, 'max_lines': 50},
+        },
+        'source_repo_metadata': {
+            'stars': True,
+        },
+    }))
+
+    cache = DistributionCache('rolling', distribution_file_data=dist_file_data, config=CacheConfig.from_file(str(config_file)))
+    pkg_xml = '<package format="2"><name>my_pkg</name><version>1.0.0</version><description>d</description><maintainer email="a@b.c">a</maintainer><license>BSD</license></package>'
+    cache.release_resources['my_pkg'] = {
+        'version': '1.0.0-1',
+        'package.xml': pkg_xml,
+        'README.md': '# my_pkg',
+        'LICENSE': None,
+    }
+    repo_cache = SourceRepositoryCache.from_ref('deadbeef')
+    repo_cache.set_stars(99)
+    repo_cache.add('my_pkg', 'src/my_pkg', pkg_xml, 'package.xml')
+    cache.source_repo_resources['my_repo'] = repo_cache
+    mock_gen_caches.return_value = {'rolling': cache}
+
+    # Without --config or --extended, only the legacy Format 2 cache files are written
+    rc_legacy_only = main(['index.yaml', 'rolling'])
+    assert not rc_legacy_only
+    assert (tmp_path / 'rolling-cache.yaml').exists()
+    assert (tmp_path / 'rolling-cache.yaml.gz').exists()
+    assert not (tmp_path / 'rolling-extended-cache.yaml').exists()
+    assert not (tmp_path / 'rolling-extended-cache.yaml.gz').exists()
+
+    # With --config (or --extended), both legacy Format 2 and extended Format 3 cache files are written
+    rc = main(['index.yaml', 'rolling', '--config', str(config_file)])
+    assert not rc
+
+    assert (tmp_path / 'rolling-cache.yaml').exists()
+    assert (tmp_path / 'rolling-cache.yaml.gz').exists()
+    assert (tmp_path / 'rolling-extended-cache.yaml').exists()
+    assert (tmp_path / 'rolling-extended-cache.yaml.gz').exists()
+
+    legacy_loaded = yaml.safe_load((tmp_path / 'rolling-cache.yaml').read_text())
+    assert legacy_loaded['version'] == 2
+    assert legacy_loaded['release_package_xmls'] == {'my_pkg': pkg_xml}
+    assert legacy_loaded['source_repo_package_xmls'] == {}
+
+    ext_loaded = yaml.safe_load((tmp_path / 'rolling-extended-cache.yaml').read_text())
+    assert ext_loaded['version'] == 3
+    validate(instance=ext_loaded, schema=schema)
+    assert ext_loaded['config']['release_package_resources']['LICENSE']['enabled'] is True
+    assert ext_loaded['release_resources']['my_pkg']['LICENSE'] is None
+
+
+def test_warm_cache_apply_config_upgrades_and_v2_migration_preserves_versions():
+    from rosdistro.distribution_cache import CacheConfig
+
+    dist_file_data = _sample_dist_file_data()
+    pkg_xml = '<package format="2"><name>my_pkg</name><version>1.0.0</version><description>d</description><maintainer email="a@b.c">a</maintainer><license>BSD</license></package>'
+
+    # 1. Migrating from v2 sets 'version' from distribution_file so warm rebuild does not drop it
+    v2_input = {
+        'type': 'cache',
+        'version': 2,
+        'name': 'rolling',
+        'distribution_file': copy.deepcopy(dist_file_data) if 'copy' in globals() else dict(dist_file_data),
+        'release_package_xmls': {'my_pkg': pkg_xml},
+        'source_repo_package_xmls': {},
+    }
+    cache = DistributionCache('rolling', data=v2_input)
+    assert 'release_resources' not in v2_input  # caller input not mutated
+    assert cache.release_resources['my_pkg']['version'] == '1.0.0-1'
+    assert cache.release_resources['my_pkg']['package.xml'] == pkg_xml
+
+    # 2. Upgrading config to extended keeps package.xml, and resizing max_lines invalidates old README.md
+    cache.apply_config(CacheConfig({'release_package_resources': {'README.md': {'max_lines': 15}}}))
+    cache.release_resources['my_pkg']['README.md'] = 'short readme'
+    assert cache.release_resources['my_pkg']['package.xml'] == pkg_xml
+
+    # Changing max_lines from 15 to 50 drops cached 'README.md' so it will be re-fetched at 50 lines
+    cache.apply_config(CacheConfig({'release_package_resources': {'README.md': {'max_lines': 50}}}))
+    assert cache.release_resources['my_pkg']['package.xml'] == pkg_xml
+    assert 'README.md' not in cache.release_resources['my_pkg']
+
+
+

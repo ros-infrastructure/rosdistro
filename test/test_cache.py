@@ -168,3 +168,70 @@ def test_distribution_cache_dual_v2_and_v3_export():
         'bar_repo': ['src/bar_repo', bar_xml],
     }
 
+
+def test_not_crawled_vs_not_found():
+    url = path_to_url(os.path.join(FILES_DIR, 'index_v2.yaml'))
+    index = get_index(url)
+    dist_data = _load_foo_distribution_data()
+    bar_xml = '<package format="2"><name>bar_repo</name><version>0.1.2</version><description>d</description><maintainer email="a@b.c">a</maintainer><license>BSD</license></package>'
+
+    # 1. Minimal cache: README.md and source resources were NOT crawled
+    min_cache = DistributionCache('foo', distribution_file_data=dist_data, config=CacheConfig.minimal())
+    min_cache.release_resources['bar_repo'] = {'package.xml': bar_xml}
+    min_dist = get_cached_distribution(index, 'foo', cache=min_cache, allow_lazy_load=False)
+
+    assert min_dist.is_release_resource_crawled('package.xml') is True
+    assert min_dist.is_release_resource_crawled('README.md') is False
+    assert min_dist.is_source_resource_crawled('package.xml') is False
+    assert min_dist.is_source_metadata_crawled('stars') is False
+
+    # Default require_crawled=False returns None
+    assert min_dist.get_release_readme('bar_repo') is None
+    assert min_dist.get_source_package_xml('bar_repo') is None
+    assert min_dist.get_source_repo_metadata('bar_repo', 'stars') is None
+
+    # With require_crawled=True, raises ResourceNotCrawledError
+    with pytest.raises(ResourceNotCrawledError):
+        min_dist.get_release_readme('bar_repo', require_crawled=True)
+    with pytest.raises(ResourceNotCrawledError):
+        min_dist.get_source_package_xml('bar_repo', require_crawled=True)
+    with pytest.raises(ResourceNotCrawledError):
+        min_dist.get_source_repo_metadata('bar_repo', 'stars', require_crawled=True)
+
+    # 2. Extended cache: README.md and CHANGELOG.rst WERE crawled, but CHANGELOG.rst was not found (None)
+    ext_cache = DistributionCache('foo', distribution_file_data=dist_data, config=CacheConfig.extended())
+    ext_cache.release_resources['bar_repo'] = {
+        'package.xml': bar_xml,
+        'README.md': '# bar_repo',
+        'CHANGELOG.rst': None,
+    }
+    repo_cache = SourceRepositoryCache.from_ref('deadbeef')
+    repo_cache.set_stars(5)
+    repo_cache.add('bar_repo', '', bar_xml, 'package.xml')
+    ext_cache.source_repo_resources['bar_repo'] = repo_cache
+    ext_dist = get_cached_distribution(index, 'foo', cache=ext_cache, allow_lazy_load=False)
+
+    assert ext_dist.is_release_resource_crawled('CHANGELOG.rst') is True
+    # Because CHANGELOG.rst WAS crawled, require_crawled=True returns None (not found) without raising!
+    assert ext_dist.get_release_changelog('bar_repo', require_crawled=True) is None
+    assert ext_dist.get_source_readme('bar_repo', require_crawled=True) is None
+    assert ext_dist.get_source_repo_metadata('bar_repo', 'stars', require_crawled=True) == 5
+    # Description was enabled in config (crawled), but repo had None -> returns None without raising
+    assert ext_dist.get_source_repo_metadata('bar_repo', 'description', require_crawled=True) is None
+    # Unconfigured resource/metadata still raises ResourceNotCrawledError
+    with pytest.raises(ResourceNotCrawledError):
+        ext_dist.get_release_resource('bar_repo', 'CMakeLists.txt', require_crawled=True)
+    with pytest.raises(ResourceNotCrawledError):
+        ext_dist.get_source_repo_metadata('bar_repo', 'unconfigured_key', require_crawled=True)
+
+    # Package or repo skipped due to --limit (not present in release_resources / source_repo_resources)
+    assert ext_dist.is_release_resource_crawled('README.md', pkg_name='baz_pkg1') is False
+    assert ext_dist.is_source_resource_crawled('README.md', pkg_name='baz_pkg1') is False
+    assert ext_dist.is_source_metadata_crawled('stars', repo_name='baz-repo') is False
+    with pytest.raises(ResourceNotCrawledError):
+        ext_dist.get_release_readme('baz_pkg1', require_crawled=True)
+    with pytest.raises(ResourceNotCrawledError):
+        ext_dist.get_source_readme('baz_pkg1', require_crawled=True)
+    with pytest.raises(ResourceNotCrawledError):
+        ext_dist.get_source_repo_metadata('baz-repo', 'stars', require_crawled=True)
+
