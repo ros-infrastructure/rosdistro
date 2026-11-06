@@ -47,11 +47,17 @@ import yaml
 logger = logging.getLogger('rosdistro')
 
 from .distribution import Distribution  # noqa
-from .distribution_cache import DistributionCache  # noqa
+from .distribution_cache import (  # noqa
+    CacheConfig,
+    DEFAULT_EXTENDED_CONFIG,
+    DistributionCache,
+    MINIMAL_CACHE_CONFIG,
+    ResourceNotCrawledError,
+)
 from .distribution_file import DistributionFile  # noqa
 from .distribution_file import create_distribution_file  # noqa
 from .external.appdirs import site_config_dir, user_config_dir  # noqa
-from .index import Index  # noqa
+from .index import Index, _derive_extended_cache_url  # noqa
 from .loader import load_url  # noqa
 from .manifest_provider.cache import CachedManifestProvider, CachedSourceManifestProvider  # noqa
 
@@ -129,16 +135,20 @@ def get_distribution_files(index, dist_name):
     return dist_files
 
 
-def get_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False):
+def get_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False, extended=False):
     if cache is None:
         try:
-            cache = get_distribution_cache(index, dist_name)
+            cache = get_distribution_cache(index, dist_name, extended=extended)
         except Exception:
             if not allow_lazy_load:
                 raise
             # create empty cache instance
             dist_file_data = _get_dist_file_data(index, dist_name, 'distribution')
-            cache = DistributionCache(dist_name, distribution_file_data=dist_file_data)
+            cache = DistributionCache(
+                dist_name,
+                distribution_file_data=dist_file_data,
+                config=CacheConfig.extended() if extended else CacheConfig.minimal(),
+            )
     dist = Distribution(
         cache.distribution_file,
         [CachedManifestProvider(cache, Distribution.default_manifest_providers if allow_lazy_load else None)],
@@ -147,18 +157,31 @@ def get_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False)
     return dist
 
 
-def get_distribution_cache_string(index, dist_name):
+def get_extended_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False):
+    return get_cached_distribution(index, dist_name, cache=cache, allow_lazy_load=allow_lazy_load, extended=True)
+
+
+def get_distribution_cache_string(index, dist_name, extended=False):
     if dist_name not in index.distributions.keys():
         raise RuntimeError("Unknown distribution: '{0}'. Valid distribution names are: {1}".format(dist_name, ', '.join(sorted(index.distributions.keys()))))
     dist = index.distributions[dist_name]
-    if 'distribution_cache' not in dist.keys():
-        raise RuntimeError("Distribution has no cache: '{0}'".format(dist_name))
-    url = dist['distribution_cache']
+    if extended:
+        if 'extended_distribution_cache' in dist:
+            url = dist['extended_distribution_cache']
+        elif 'distribution_cache' in dist:
+            url = _derive_extended_cache_url(dist['distribution_cache'])
+        else:
+            raise RuntimeError("Distribution has no cache: '{0}'".format(dist_name))
+    else:
+        if 'distribution_cache' not in dist.keys():
+            raise RuntimeError("Distribution has no cache: '{0}'".format(dist_name))
+        url = dist['distribution_cache']
 
     logger.debug('Load cache from "%s"' % url)
-    if url.endswith('.yaml'):
+    url_path = urlparse(url).path
+    if url_path.endswith('.yaml'):
         yaml_str = load_url(url)
-    elif url.endswith('.yaml.gz'):
+    elif url_path.endswith('.yaml.gz'):
         yaml_gz_str = load_url(url, skip_decode=True)
         yaml_gz_stream = StringIO(yaml_gz_str)
         f = gzip.GzipFile(fileobj=yaml_gz_stream, mode='rb')
@@ -171,10 +194,18 @@ def get_distribution_cache_string(index, dist_name):
     return yaml_str
 
 
-def get_distribution_cache(index, dist_name):
-    yaml_str = get_distribution_cache_string(index, dist_name)
+def get_extended_distribution_cache_string(index, dist_name):
+    return get_distribution_cache_string(index, dist_name, extended=True)
+
+
+def get_distribution_cache(index, dist_name, extended=False):
+    yaml_str = get_distribution_cache_string(index, dist_name, extended=extended)
     data = yaml.safe_load(yaml_str)
     return DistributionCache(dist_name, data)
+
+
+def get_extended_distribution_cache(index, dist_name):
+    return get_distribution_cache(index, dist_name, extended=True)
 
 
 def get_package_condition_context(index, dist_name):

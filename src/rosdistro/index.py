@@ -37,6 +37,25 @@ except ImportError:
     from urlparse import urlparse
 
 
+def _derive_extended_cache_url(url):
+    query_suffix = ''
+    base = url
+    if '?' in url:
+        base, query = url.split('?', 1)
+        query_suffix = '?' + query
+    if base.endswith('-cache.yaml.gz'):
+        ext_base = base[:-len('-cache.yaml.gz')] + '-extended-cache.yaml.gz'
+    elif base.endswith('-cache.yaml'):
+        ext_base = base[:-len('-cache.yaml')] + '-extended-cache.yaml'
+    elif base.endswith('.yaml.gz'):
+        ext_base = base[:-len('.yaml.gz')] + '-extended.yaml.gz'
+    elif base.endswith('.yaml'):
+        ext_base = base[:-len('.yaml')] + '-extended.yaml'
+    else:
+        ext_base = base + '-extended'
+    return ext_base + query_suffix
+
+
 class Index(object):
 
     _type = 'index'
@@ -76,7 +95,7 @@ class Index(object):
                             list_value = True
                         else:
                             assert False
-                    elif key in ['distribution_cache']:
+                    elif key in ['distribution_cache', 'extended_distribution_cache']:
                         list_value = False
                     elif key in ['release_builds', 'source_builds', 'doc_builds']:
                         if self.version == 2:
@@ -113,6 +132,11 @@ class Index(object):
                     # for backward compatibility only
                     if key == 'distribution':
                         self.distributions[distro_name]['release'] = self.distributions[distro_name][key]
+
+                if 'distribution_cache' in self.distributions[distro_name] and \
+                        'extended_distribution_cache' not in self.distributions[distro_name]:
+                    self.distributions[distro_name]['extended_distribution_cache'] = \
+                        _derive_extended_cache_url(self.distributions[distro_name]['distribution_cache'])
 
                 # for backward compatibility only
                 for key in ['release_builds', 'source_builds', 'doc_builds']:
