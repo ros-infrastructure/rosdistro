@@ -160,7 +160,11 @@ def generate_distribution_cache(
         else:
             repos_to_scan = all_repos
         for repo_name in repos_to_scan:
-            if dist.repositories[repo_name].source_repository:
+            repo_entry = dist.repositories[repo_name]
+            has_source = repo_entry.source_repository is not None or (
+                cache_config.fallback_src_to_doc and repo_entry.doc_repository is not None
+            )
+            if has_source:
                 dist.get_source_repo_resources(repo_name)
                 if debug:
                     print('  - dist cache source fetch "%s"' % repo_name)
@@ -169,7 +173,7 @@ def generate_distribution_cache(
                     sys.stdout.flush()
             else:
                 if debug:
-                    print('  - skip "%s" since it has no source entry.' % repo_name)
+                    print('  - skip "%s" since it has no source or doc entry.' % repo_name)
                 continue
 
     if not debug:

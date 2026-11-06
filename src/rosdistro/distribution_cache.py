@@ -84,6 +84,7 @@ class CacheConfig(dict):
     """Configuration for rosdistro cache generation and self-documenting Cache Format 3."""
 
     DEFAULT_DOC_MAX_LINES = 100
+    DEFAULT_FALLBACK_SRC_TO_DOC = True
     DEFAULT_MIN_UPDATE_DELTA = 3600
     DEFAULT_YAML_ALIAS_MIN_LENGTH = 300
     DEFAULT_PACKAGE_RESOURCES = ('package.xml', 'README.md', 'CHANGELOG.rst')
@@ -92,6 +93,7 @@ class CacheConfig(dict):
         'release_package_resources',
         'source_package_resources',
         'source_repo_metadata',
+        'fallback_src_to_doc',
         'min_update_delta',
         'yaml_alias_min_length',
         'limit',
@@ -133,6 +135,9 @@ class CacheConfig(dict):
         self['release_package_resources'] = rel_res
         self['source_package_resources'] = src_res
         self['source_repo_metadata'] = src_meta
+        self['fallback_src_to_doc'] = bool(
+            raw.get('fallback_src_to_doc', self.DEFAULT_FALLBACK_SRC_TO_DOC)
+        )
         self['min_update_delta'] = int(raw.get('min_update_delta', self.DEFAULT_MIN_UPDATE_DELTA))
         self['yaml_alias_min_length'] = int(
             raw.get('yaml_alias_min_length', self.DEFAULT_YAML_ALIAS_MIN_LENGTH)
@@ -151,6 +156,10 @@ class CacheConfig(dict):
     @property
     def source_repo_metadata(self):
         return self['source_repo_metadata']
+
+    @property
+    def fallback_src_to_doc(self):
+        return self['fallback_src_to_doc']
 
     @property
     def min_update_delta(self):
@@ -459,6 +468,11 @@ class DistributionCache(object):
             if need_recrawl:
                 self.source_repo_resources = {}
             else:
+                if not new_cfg.fallback_src_to_doc:
+                    for repo_name in list(self.source_repo_resources.keys()):
+                        repo_entry = self.distribution_file.repositories.get(repo_name)
+                        if repo_entry is None or repo_entry.source_repository is None:
+                            del self.source_repo_resources[repo_name]
                 for repo_cache in self.source_repo_resources.values():
                     for key in list(repo_cache._data.keys()):
                         if key.startswith('_'):
@@ -537,7 +551,10 @@ class DistributionCache(object):
                 if repo_name in self.source_repo_resources:
                     return self.config.is_source_resource_enabled(filepath)
                 repo = self.distribution_file.repositories.get(repo_name)
-                if repo is not None and repo.source_repository is not None:
+                if repo is not None and (
+                    repo.source_repository is not None or
+                    (self.config.fallback_src_to_doc and repo.doc_repository is not None)
+                ):
                     return False
         if self.config.is_source_resource_enabled(filepath):
             return True
@@ -560,7 +577,10 @@ class DistributionCache(object):
             if repo_cache is not None:
                 return meta_key in repo_cache._data or self.config.is_source_metadata_enabled(clean_key)
             repo = self.distribution_file.repositories.get(repo_name)
-            if repo is not None and repo.source_repository is not None:
+            if repo is not None and (
+                repo.source_repository is not None or
+                (self.config.fallback_src_to_doc and repo.doc_repository is not None)
+            ):
                 return False
         if self.config.is_source_metadata_enabled(clean_key):
             return True
@@ -658,11 +678,16 @@ class DistributionCache(object):
                 sys.stdout.write('.')
                 sys.stdout.flush()
                 try:
-                    source_repository = dist_file.repositories[repo].source_repository
+                    repo_entry = dist_file.repositories[repo]
+                    source_repository = (
+                        repo_entry.source_repository
+                        if repo_entry.source_repository is not None or not self.config.fallback_src_to_doc
+                        else repo_entry.doc_repository
+                    )
                     if not source_repository:
                         raise AttributeError()
                 except (KeyError, AttributeError):
-                    # The repo entry has been dropped, or the source stanza from it has been dropped,
+                    # The repo entry has been dropped, or the source/doc stanza from it has been dropped,
                     # either way, remove the cache entries associated with this repository.
                     logger.debug('Unable to find source repository info for repo "%s".' % repo)
                     del self.source_repo_resources[repo]

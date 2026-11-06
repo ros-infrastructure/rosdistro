@@ -240,7 +240,17 @@ class Distribution(object):
         if repo_name not in self._source_repo_resources:
             if repo_name not in self._distribution_file.repositories:
                 return None
-            repo = self._distribution_file.repositories[repo_name].source_repository
+            fallback_to_doc = (
+                self.cache_config.fallback_src_to_doc
+                if self.cache_config is not None
+                else True
+            )
+            repo_entry = self._distribution_file.repositories[repo_name]
+            repo = (
+                repo_entry.source_repository
+                if repo_entry.source_repository is not None or not fallback_to_doc
+                else repo_entry.doc_repository
+            )
             if repo is None:
                 return None
             for mp in self._source_manifest_providers:

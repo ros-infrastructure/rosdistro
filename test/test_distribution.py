@@ -243,3 +243,101 @@ def test_get_cached_distribution_resources():
     assert dist.get_source_repo_metadata('unknown_repo', 'stars', require_crawled=True) is None
     assert dist.get_release_readme('unknown_pkg', require_crawled=True) is None
 
+
+def test_distribution_doc_repository_fallback():
+    url = path_to_url(os.path.join(FILES_DIR, 'index_v2.yaml'))
+    index = get_index(url)
+    _, dist_file_data = _load_foo_dist_file()
+
+    # Add a doc-only repository (no 'source' section)
+    dist_file_data['repositories']['soar_ros'] = {
+        'doc': {
+            'type': 'git',
+            'url': 'https://github.com/example-test/soar_ros.git',
+            'version': 'main',
+        },
+    }
+    dist_file = DistributionFile('foo', dist_file_data)
+
+    soar_xml = (
+        '<?xml version="1.0" ?>'
+        '<package format="2">'
+        '<name>soar_ros</name>'
+        '<version>0.2.0</version>'
+        '<description>soar_ros desc</description>'
+        '<maintainer email="test@example.com">Test</maintainer>'
+        '<license>BSD</license>'
+        '<depend>bar_repo</depend>'
+        '</package>'
+    )
+    soar_cache = SourceRepositoryCache.from_ref('feedface1234567890')
+    soar_cache.set_stars(25)
+    soar_cache.set_description('SOAR ROS integration')
+    soar_cache.set_tags(['ros2', 'soar'])
+    soar_cache.add('soar_ros', '', soar_xml, 'package.xml')
+    soar_cache.add('soar_ros', '', '# soar_ros README', 'README.md')
+    soar_cache.add('soar_ros', '', '0.2.0 changelog', 'CHANGELOG.rst')
+
+    provider_calls = []
+
+    def doc_fallback_provider(repo):
+        provider_calls.append((repo.name, repo.url, repo.version))
+        if repo.name == 'soar_ros':
+            return soar_cache
+        return None
+
+    dist = Distribution(dist_file, source_manifest_providers=[doc_fallback_provider])
+
+    # Lazy-loading by package/repo name falls back to doc_repository when source_repository is None
+    assert dist.get_source_package_xml('soar_ros') == soar_xml
+    assert provider_calls == [('soar_ros', 'https://github.com/example-test/soar_ros.git', 'main')]
+    assert 'soar_ros' in dist.source_packages
+    assert dist.get_source_readme('soar_ros') == '# soar_ros README'
+    assert dist.get_source_changelog('soar_ros') == '0.2.0 changelog'
+    assert dist.get_source_repo_metadata('soar_ros', 'stars') == 25
+    assert dist.get_source_repo_metadata('soar_ros', 'description') == 'SOAR ROS integration'
+    assert dist.get_source_repo_metadata('soar_ros', 'tags') == ['ros2', 'soar']
+
+    # Offline cached distribution (allow_lazy_load=False) also resolves doc-only repositories
+    cache_data = {
+        'type': 'cache',
+        'version': 3,
+        'name': 'foo',
+        'distribution_file': dist_file_data,
+        'release_resources': {},
+        'source_repo_resources': {
+            'soar_ros': soar_cache.get_data(version=3),
+            'bar_repo': {
+                '_ref': 'abcdef1234567890',
+                'bar_repo': {
+                    'package_path': '',
+                    'package.xml': soar_xml.replace('<name>soar_ros</name>', '<name>bar_repo</name>').replace('<depend>bar_repo</depend>', ''),
+                },
+            },
+        },
+    }
+    cache = DistributionCache('foo', data=cache_data)
+    cached_dist = get_cached_distribution(index, 'foo', cache=cache, allow_lazy_load=False)
+
+    assert cached_dist.is_source_resource_crawled('package.xml', pkg_name='soar_ros') is True
+    assert cached_dist.is_source_resource_crawled('README.md', pkg_name='soar_ros') is True
+    assert cached_dist.is_source_metadata_crawled('stars', repo_name='soar_ros') is True
+    assert cached_dist.get_source_package_xml('soar_ros', require_crawled=True) == soar_xml
+    assert cached_dist.get_source_readme('soar_ros', require_crawled=True) == '# soar_ros README'
+    assert cached_dist.get_source_changelog('soar_ros', require_crawled=True) == '0.2.0 changelog'
+    assert cached_dist.get_source_repo_metadata('soar_ros', 'stars', require_crawled=True) == 25
+
+    source_walker = SourceDependencyWalker(cached_dist)
+    assert source_walker.get_depends('soar_ros', 'build') == set(['bar_repo'])
+
+    # With fallback_src_to_doc=False on cache config, get_source_repo_resources skips doc-only repos
+    no_fallback_cache = DistributionCache(
+        'foo',
+        distribution_file_data=dist_file_data,
+        config={'fallback_src_to_doc': False, 'source_package_resources': {'package.xml': True}},
+    )
+    no_fallback_dist = get_cached_distribution(index, 'foo', cache=no_fallback_cache, allow_lazy_load=True)
+    assert no_fallback_dist.get_source_repo_resources('soar_ros') is None
+
+
+

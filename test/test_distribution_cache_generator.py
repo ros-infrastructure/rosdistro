@@ -376,4 +376,105 @@ def test_warm_cache_apply_config_upgrades_and_v2_migration_preserves_versions():
     assert 'README.md' not in cache.release_resources['my_pkg']
 
 
+@patch('rosdistro.distribution_cache_generator._get_cached_distribution')
+def test_generate_distribution_cache_crawls_doc_only_repo(mock_get_cached_distribution):
+    mock_index = Mock()
+    mock_dist = Mock()
+    mock_cache = Mock()
+    mock_dist.release_packages = {}
+
+    src_repo = Mock()
+    src_repo.source_repository = Mock()
+    src_repo.doc_repository = None
+
+    doc_only_repo = Mock()
+    doc_only_repo.source_repository = None
+    doc_only_repo.doc_repository = Mock()
+
+    release_only_repo = Mock()
+    release_only_repo.source_repository = None
+    release_only_repo.doc_repository = None
+
+    mock_dist.repositories = {
+        'a_src_repo': src_repo,
+        'b_doc_only_repo': doc_only_repo,
+        'c_release_only_repo': release_only_repo,
+    }
+    mock_get_cached_distribution.return_value = (mock_dist, mock_cache)
+
+    generate_distribution_cache(mock_index, 'rolling', include_source=True)
+
+    crawled_repos = [call.args[0] for call in mock_dist.get_source_repo_resources.call_args_list]
+    assert crawled_repos == ['a_src_repo', 'b_doc_only_repo']
+
+    # When fallback_src_to_doc=False, only repositories with a 'source' entry are crawled
+    mock_dist.get_source_repo_resources.reset_mock()
+    generate_distribution_cache(
+        mock_index, 'rolling', include_source=True, config={'fallback_src_to_doc': False}
+    )
+    crawled_repos_no_fallback = [call.args[0] for call in mock_dist.get_source_repo_resources.call_args_list]
+    assert crawled_repos_no_fallback == ['a_src_repo']
+
+
+
+@patch('rosdistro.distribution_cache.Git')
+def test_distribution_cache_update_distribution_doc_only_repo(mock_git):
+    dist_file_data = {
+        'type': 'distribution',
+        'version': 2,
+        'repositories': {
+            'soar_ros': {
+                'doc': {
+                    'type': 'git',
+                    'url': 'https://example.com/soar_ros.git',
+                    'version': 'main',
+                },
+            },
+        },
+    }
+    cache = DistributionCache('rolling', distribution_file_data=dist_file_data)
+
+    repo_cache = SourceRepositoryCache.from_ref('deadbeef')
+    repo_cache.add('soar_ros', '', '<package><name>soar_ros</name></package>', 'package.xml')
+    expired_time = datetime.datetime.now() - datetime.timedelta(hours=2)
+    repo_cache.set_last_update_time(expired_time)
+    cache.source_repo_resources['soar_ros'] = repo_cache
+
+    # 1. Matching remote commit hash on doc_repository keeps the cache entry
+    mock_git.return_value.command.return_value = {
+        'returncode': 0,
+        'output': 'deadbeef\trefs/heads/main',
+    }
+    cache.update_distribution([dist_file_data])
+    mock_git.return_value.command.assert_called_once_with(
+        'ls-remote', 'https://example.com/soar_ros.git', 'main'
+    )
+    assert 'soar_ros' in cache.source_repo_resources
+    assert 'soar_ros' in cache.distribution_file.source_packages
+
+    # 2. Different remote commit hash on doc_repository invalidates the cache entry
+    mock_git.return_value.command.reset_mock()
+    mock_git.return_value.command.return_value = {
+        'returncode': 0,
+        'output': 'cafebabe\trefs/heads/main',
+    }
+    cache.update_distribution([dist_file_data])
+    mock_git.return_value.command.assert_called_once_with(
+        'ls-remote', 'https://example.com/soar_ros.git', 'main'
+    )
+    assert 'soar_ros' not in cache.source_repo_resources
+
+    # 3. Disabling fallback_src_to_doc drops doc-only entries on apply_config and update_distribution
+    cache.source_repo_resources['soar_ros'] = repo_cache
+    cache.apply_config({'source_package_resources': {'package.xml': True}, 'fallback_src_to_doc': False})
+    assert 'soar_ros' not in cache.source_repo_resources
+
+    cache.source_repo_resources['soar_ros'] = repo_cache
+    mock_git.return_value.command.reset_mock()
+    cache.update_distribution([dist_file_data])
+    mock_git.return_value.command.assert_not_called()
+    assert 'soar_ros' not in cache.source_repo_resources
+
+
+
 

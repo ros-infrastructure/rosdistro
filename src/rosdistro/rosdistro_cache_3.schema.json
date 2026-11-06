@@ -106,6 +106,9 @@
             "$ref": "#/$defs/metadata_option"
           }
         },
+        "fallback_src_to_doc": {
+          "type": "boolean"
+        },
         "min_update_delta": {
           "type": "integer"
         },

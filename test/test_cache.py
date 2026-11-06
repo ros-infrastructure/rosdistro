@@ -52,6 +52,7 @@ def test_cache_config_normalization_and_presets():
     assert minimal.is_source_resource_enabled('package.xml') is False
     assert minimal.is_source_metadata_enabled('stars') is False
     assert minimal.has_any_source_enabled() is False
+    assert minimal.fallback_src_to_doc is True
 
     extended = CacheConfig.extended()
     assert extended == DEFAULT_EXTENDED_CONFIG
@@ -64,6 +65,7 @@ def test_cache_config_normalization_and_presets():
     assert extended.is_source_metadata_enabled('description') is True
     assert extended.is_source_metadata_enabled('tags') is True
     assert extended.has_any_source_enabled() is True
+    assert extended.fallback_src_to_doc is True
 
     # Custom config with shorthand booleans, ints, and custom files/metadata
     custom_dict = {
@@ -78,6 +80,7 @@ def test_cache_config_normalization_and_presets():
             'stars': True,
             'custom_metric': {'enabled': True},
         },
+        'fallback_src_to_doc': False,
         'min_update_delta': 1800,
         'yaml_alias_min_length': 200,
         'limit': 5,
@@ -101,6 +104,7 @@ def test_cache_config_normalization_and_presets():
     assert cfg.is_source_metadata_enabled('stars') is True
     assert cfg.is_source_metadata_enabled('custom_metric') is True
     assert cfg.is_source_metadata_enabled('description') is False
+    assert cfg.fallback_src_to_doc is False
     assert cfg.min_update_delta == 1800
     assert cfg.yaml_alias_min_length == 200
     assert cfg.limit == 5
@@ -234,4 +238,32 @@ def test_not_crawled_vs_not_found():
         ext_dist.get_source_readme('baz_pkg1', require_crawled=True)
     with pytest.raises(ResourceNotCrawledError):
         ext_dist.get_source_repo_metadata('baz-repo', 'stars', require_crawled=True)
+
+    # Doc-only repository skipped due to --limit is also recognized as not crawled when fallback_src_to_doc=True
+    dist_with_doc_only = copy.deepcopy(dist_data)
+    dist_with_doc_only['repositories']['doc_only_repo'] = {
+        'doc': {
+            'type': 'git',
+            'url': 'https://github.com/example-test/doc_only_repo.git',
+            'version': 'main',
+        },
+    }
+    doc_cache = DistributionCache('foo', distribution_file_data=dist_with_doc_only, config=CacheConfig.extended())
+    doc_dist = get_cached_distribution(index, 'foo', cache=doc_cache, allow_lazy_load=False)
+    assert doc_dist.is_source_resource_crawled('README.md', pkg_name='doc_only_repo') is False
+    assert doc_dist.is_source_metadata_crawled('stars', repo_name='doc_only_repo') is False
+    with pytest.raises(ResourceNotCrawledError):
+        doc_dist.get_source_readme('doc_only_repo', require_crawled=True)
+    with pytest.raises(ResourceNotCrawledError):
+        doc_dist.get_source_repo_metadata('doc_only_repo', 'stars', require_crawled=True)
+
+    # When fallback_src_to_doc=False, a doc-only repository is intentionally not crawled (treated like release-only)
+    no_fallback_cfg = CacheConfig.extended().to_dict()
+    no_fallback_cfg['fallback_src_to_doc'] = False
+    doc_cache.apply_config(no_fallback_cfg)
+    assert doc_dist.is_source_resource_crawled('README.md', pkg_name='doc_only_repo') is True
+    assert doc_dist.is_source_metadata_crawled('stars', repo_name='doc_only_repo') is True
+    assert doc_dist.get_source_readme('doc_only_repo', require_crawled=True) is None
+    assert doc_dist.get_source_repo_metadata('doc_only_repo', 'stars', require_crawled=True) is None
+
 
