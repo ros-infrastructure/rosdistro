@@ -40,7 +40,6 @@ from catkin_pkg.package import InvalidPackage, parse_package_string
 from catkin_pkg.packages import find_package_paths
 
 from rosdistro.common import rmtree
-from rosdistro.manifest_provider.cache import sanitize_and_truncate_docs
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro.vcs import Git, ref_is_hash
 from rosdistro import logger
@@ -53,6 +52,8 @@ def git_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
         with _temp_git_clone(repo.url, release_tag) as git_repo_path:
             filename = os.path.join(git_repo_path, filepath)
             if not os.path.exists(filename):
+                if filepath != 'package.xml':
+                    return None
                 raise RuntimeError('Could not find %s in repository "%s"' % (filepath, repo.url))
             with open(filename, 'r') as f:
                 return f.read()
@@ -60,8 +61,8 @@ def git_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
         raise RuntimeError('Unable to fetch %s: %s' % (filepath, e))
 
 
-def git_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md']):
-    xmlpath = 'package.xml' # TODO(tfoote) use filepaths, currently using the package special to get the names
+def git_source_manifest_provider(repo, filepaths=('CHANGELOG.rst', 'README.md')):
+    xmlpath = 'package.xml'
     try:
         with _temp_git_clone(repo.url, repo.version) as git_repo_path:
             logger.debug(f'Cloning repository {repo.url} to get source info')
@@ -81,6 +82,8 @@ def git_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md'])
                     raise RuntimeError('Unable to parse %s file found in %s' % (xmlpath, repo.url))
                 cache.add(name, package_path, package_xml, xmlpath)
                 for filepath in filepaths:
+                    if filepath == xmlpath:
+                        continue
                     repo_filename = os.path.join(git_repo_path, package_path, filepath)
                     if not os.path.exists(repo_filename):
                         logger.debug(f'- git load of {filepath} from {repo.url} at {repo.version} skipped because it did not exist.')
@@ -88,7 +91,6 @@ def git_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md'])
                     with open(repo_filename, 'r') as f:
                         logger.debug('- git load %s from %s' % (filepath, repo_filename))
                         contents = f.read()
-                        contents = sanitize_and_truncate_docs(contents) # TODO(tfoote) Do this later so it doesn't need to be in all manifest providers
                         cache.add(name, package_path, contents, filepath)
 
     except Exception as e:

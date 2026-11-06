@@ -34,7 +34,7 @@
 import base64
 import os
 from urllib.request import urlopen, Request
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 from rosdistro import logger
 
@@ -73,6 +73,12 @@ def bitbucket_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xm
             req.add_header('Authorization', authheader)
         package_xml = urlopen(req).read().decode('utf-8')
         return package_xml
+    except HTTPError as e:
+        if e.code == 404 and filepath != 'package.xml':
+            logger.debug('- File not found (%s), trying "%s"' % (e, url))
+            return None
+        logger.debug('- failed (%s)' % e)
+        raise RuntimeError()
     except URLError as e:
         logger.debug('- failed (%s)' % e)
         raise RuntimeError()

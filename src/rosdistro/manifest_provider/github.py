@@ -45,13 +45,18 @@ from catkin_pkg.package import parse_package_string
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro import logger
 
-from rosdistro.manifest_provider.cache import sanitize_and_truncate_docs
-
 GITHUB_USER = os.getenv('GITHUB_USER', None)
 GITHUB_PASSWORD = os.getenv('GITHUB_PASSWORD', None)
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', None)
 
 ROSDISTRO_RETRY_MAX = int(os.getenv('ROSDISTRO_RETRY_MAX', '120'))
+
+GITHUB_REPO_METADATA_FIELDS = {
+    'stars': 'stargazers_count',
+    'description': 'description',
+    'tags': 'topics',
+}
+
 
 def _get_url_contents(url):
     backoff = 1
@@ -61,11 +66,13 @@ def _get_url_contents(url):
         except HTTPError as e:
             if e.code != 403:
                 raise e
-            logger.debug(f'Fetch of {url.full_url} failed with 403, assuming rate limit, retrying after period {backoff} seconds.')
+            url_str = getattr(url, 'full_url', url)
+            logger.debug(f'Fetch of {url_str} failed with 403, assuming rate limit, retrying after period {backoff} seconds.')
         time.sleep(backoff)
         backoff *= 1.5
     # Last return after timeout to collect the error object again.
     return urlopen(url).read().decode('utf-8')
+
 
 def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     assert repo.version
@@ -82,11 +89,11 @@ def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
     url = 'https://raw.githubusercontent.com/%s/%s/%s' % (path, release_tag, filepath)
     try:
         logger.debug('Load %s file from url "%s"' % (filepath, url))
-        return '\n'.join( _get_url_contents(url).splitlines())
+        return _get_url_contents(url)
     except HTTPError as e:
-        if e.code == 404:
+        if e.code == 404 and filepath != 'package.xml':
             logger.debug('- File not found (%s), trying "%s"' % (e, url))
-            return 'Missing'
+            return None
         logger.debug('- HTTP ERROR (%s), trying "%s"' % (e, url))
         raise e
     except URLError as e:
@@ -94,7 +101,7 @@ def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
         raise RuntimeError()
 
 
-def github_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md']):
+def github_source_manifest_provider(repo, filepaths=('CHANGELOG.rst', 'README.md'), metadata=None):
     server, path = repo.get_url_parts()
     if not server.endswith('github.com'):
         logger.debug('Skip non-github url "%s"' % repo.url)
@@ -120,10 +127,9 @@ def github_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md
 
     package_xml_paths = set()
     for obj in tree_json['tree']:
-        if obj['path'].split('/')[-1] == 'package.xml': # Actually package.xml to find packages instead of filepath
+        if obj['path'].split('/')[-1] == 'package.xml':
             package_xml_paths.add(os.path.dirname(obj['path']))
 
-    # TODO(tfoote) This is not correct for non-package.xml
     # Filter out ones that are inside other packages (eg, part of tests)
     def package_xml_in_parent(path):
         if path == '':
@@ -139,28 +145,23 @@ def github_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md
 
     cache = SourceRepositoryCache.from_ref(tree_json['sha'])
 
-    # Fetch repository info for star count description and tags
-    repo_url = 'https://api.github.com/repos/%s' % path
-    repo_req = Request(repo_url)
-    if GITHUB_TOKEN:
-        repo_req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
-    if GITHUB_USER and GITHUB_PASSWORD:
-        credential_pair = '%s:%s' % (GITHUB_USER, GITHUB_PASSWORD)
-        authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
-        repo_req.add_header('Authorization', authheader)
-    try:
-        repo_json = json.loads(_get_url_contents(repo_req))
-        stars = repo_json.get('stargazers_count')
-        if stars is not None:
-            cache.set_stars(stars)
-        description = repo_json.get('description')
-        if description is not None:
-            cache.set_description(description)
-        tags = repo_json.get('topics')
-        if tags is not None:
-            cache.set_tags(tags)
-    except URLError as e:
-        logger.debug('- failed to load repository info from %s: %s' % (repo_url, e))
+    # Fetch repository info for configured metadata (stars, description, tags, etc.)
+    if metadata is None or len(metadata) > 0:
+        repo_url = 'https://api.github.com/repos/%s' % path
+        repo_req = Request(repo_url)
+        if GITHUB_TOKEN:
+            repo_req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
+        if GITHUB_USER and GITHUB_PASSWORD:
+            credential_pair = '%s:%s' % (GITHUB_USER, GITHUB_PASSWORD)
+            authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
+            repo_req.add_header('Authorization', authheader)
+        try:
+            repo_json = json.loads(_get_url_contents(repo_req))
+            for meta_key, api_field in GITHUB_REPO_METADATA_FIELDS.items():
+                if (metadata is None or meta_key in metadata) and api_field in repo_json:
+                    cache.set_metadata(meta_key, repo_json[api_field])
+        except URLError as e:
+            logger.debug('- failed to load repository info from %s: %s' % (repo_url, e))
 
     for package_xml_path in package_xml_paths:
         package_xml_filename = 'package.xml'
@@ -171,6 +172,8 @@ def github_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md
         name = parse_package_string(package_xml).name
         cache.add(name, package_xml_path, package_xml, package_xml_filename)
         for filepath in filepaths:
+            if filepath == package_xml_filename:
+                continue
             url = 'https://raw.githubusercontent.com/%s/%s/%s' % \
                 (path, cache.ref(), package_xml_path + '/' + filepath if package_xml_path else filepath)
             logger.debug('- load %s from %s' % (filepath, url))
@@ -178,12 +181,10 @@ def github_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md
                 contents = _get_url_contents(url)
             except HTTPError as e:
                 if e.code == 404:
-                    logger.debug('- Recording Missing (%s), hit error "%s"' % (url, e))
-                    contents = 'Missing'
-                else:
-                    logger.debug('- HTTP ERROR (%s), trying "%s"' % (e, url))
-                    raise e
-            contents = sanitize_and_truncate_docs(contents) # TODO(tfoote) Do this later so it doesn't need to be in all manifest providers
+                    logger.debug('- File not found (%s), skipping "%s"' % (e, url))
+                    continue
+                logger.debug('- HTTP ERROR (%s), trying "%s"' % (e, url))
+                raise e
             cache.add(name, package_xml_path, contents, filepath)
 
     return cache

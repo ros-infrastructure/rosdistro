@@ -35,18 +35,23 @@ import json
 import os
 import re
 from urllib.request import urlopen, Request
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote as urlquote
 from urllib.parse import urlencode
 
 from catkin_pkg.package import parse_package_string
 
-from rosdistro.manifest_provider.cache import sanitize_and_truncate_docs
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro import logger
 
 GITLAB_PRIVATE_TOKEN = os.getenv('GITLAB_PRIVATE_TOKEN', None)
 ROSDISTRO_GITLAB_SERVER = os.getenv('ROSDISTRO_GITLAB_SERVER', None)
+
+GITLAB_REPO_METADATA_FIELDS = {
+    'stars': 'star_count',
+    'description': 'description',
+    'tags': 'tag_list',
+}
 
 def _gitlab_urlopen(url):
     req = Request(url)
@@ -104,12 +109,18 @@ def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
     try:
         with _gitlab_api_query(server, path, resource, attrs) as res:
             return res.read().decode('utf-8')
+    except HTTPError as e:
+        if e.code == 404 and filepath != 'package.xml':
+            logger.debug('- File not found (%s), trying "%s"' % (e, e.filename))
+            return None
+        logger.debug('- failed (%s), trying "%s"' % (e, e.filename))
+        raise
     except URLError as e:
         logger.debug('- failed (%s), trying "%s"' % (e, e.filename))
         raise
 
 
-def gitlab_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md']):
+def gitlab_source_manifest_provider(repo, filepaths=('CHANGELOG.rst', 'README.md'), metadata=None):
     assert repo.version
     server, path = repo.get_url_parts()
     if not server.endswith('gitlab.com') and server != ROSDISTRO_GITLAB_SERVER:
@@ -148,21 +159,16 @@ def gitlab_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md
 
     cache = SourceRepositoryCache.from_ref(sha)
 
-    # Fetch project info for star count, description and tags
-    try:
-        with _gitlab_api_query(server, path, '', {}) as res:
-            project_json = json.loads(res.read().decode('utf-8'))
-            stars = project_json.get('star_count')
-            if stars is not None:
-                cache.set_stars(stars)
-            description = project_json.get('description')
-            if description is not None:
-                cache.set_description(description)
-            tags = project_json.get('tag_list')
-            if tags is not None:
-                cache.set_tags(tags)
-    except URLError as e:
-        logger.debug('- failed to load project info from %s: %s' % (path, e))
+    # Fetch project info for configured metadata (stars, description, tags, etc.)
+    if metadata is None or len(metadata) > 0:
+        try:
+            with _gitlab_api_query(server, path, '', {}) as res:
+                project_json = json.loads(res.read().decode('utf-8'))
+                for meta_key, api_field in GITLAB_REPO_METADATA_FIELDS.items():
+                    if (metadata is None or meta_key in metadata) and api_field in project_json:
+                        cache.set_metadata(meta_key, project_json[api_field])
+        except URLError as e:
+            logger.debug('- failed to load project info from %s: %s' % (path, e))
 
     for package_xml_path in package_xml_paths:
         package_xml_filename = 'package.xml'
@@ -185,7 +191,6 @@ def gitlab_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md
             except URLError as e:
                 logger.debug('- failed to load %s from %s: %s' % (filepath, path, e))
                 continue
-            contents = sanitize_and_truncate_docs(contents)
             cache.add(name, package_xml_path, contents, filepath)
 
     return cache

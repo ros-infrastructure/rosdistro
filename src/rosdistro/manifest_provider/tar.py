@@ -42,7 +42,6 @@ from catkin_pkg.package import InvalidPackage, parse_package_string
 from catkin_pkg.packages import find_package_paths
 
 from rosdistro.common import rmtree
-from rosdistro.manifest_provider.cache import sanitize_and_truncate_docs
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro import logger
 
@@ -69,14 +68,18 @@ def tar_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
         try:
             extracted = tar.extractfile(subdir + '/' + filepath)
         except KeyError:
+            if filepath != 'package.xml':
+                return None
             raise RuntimeError('Could not find %s in tarball "%s"' % (subdir + '/' + filepath, repo.url))
         if extracted is None:
+            if filepath != 'package.xml':
+                return None
             raise RuntimeError('Could not extract %s from tarball "%s"' % (subdir + '/' + filepath, repo.url))
         package_xml = extracted.read()
         return package_xml.decode('utf-8')
 
 
-def tar_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md']):
+def tar_source_manifest_provider(repo, filepaths=('CHANGELOG.rst', 'README.md')):
     assert repo.type == 'tar'
     xmlpath = 'package.xml'
 
@@ -119,7 +122,6 @@ def tar_source_manifest_provider(repo, filepaths=['CHANGELOG.rst', 'README.md'])
                         with open(repo_filename, 'r') as f:
                             logger.debug('- tar load %s from %s' % (filepath, repo_filename))
                             contents = f.read()
-                            contents = sanitize_and_truncate_docs(contents)
                             cache.add(name, package_path, contents, filepath)
 
                 return cache
