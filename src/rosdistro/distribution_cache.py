@@ -414,6 +414,64 @@ class DistributionCache(object):
         else:
             self.config = CacheConfig.minimal()
 
+    def apply_config(self, new_config):
+        """Apply a new CacheConfig to an existing (warm) cache, invalidating or stripping
+        entries whose configuration changed so subsequent generation fetches newly enabled
+        or resized resources cleanly.
+        """
+        new_cfg = CacheConfig.from_input(new_config)
+        old_cfg = self.config
+
+        # Reconcile release_resources
+        enabled_rel = set(new_cfg.enabled_release_resources())
+        resized_rel = {
+            r for r in enabled_rel
+            if r != 'package.xml' and (
+                not old_cfg.is_release_resource_enabled(r) or
+                old_cfg.get_release_resource_max_lines(r) != new_cfg.get_release_resource_max_lines(r)
+            )
+        }
+        for pkg_data in self.release_resources.values():
+            if not isinstance(pkg_data, dict):
+                continue
+            for key in list(pkg_data.keys()):
+                if key == 'version':
+                    continue
+                if key not in enabled_rel or key in resized_rel:
+                    del pkg_data[key]
+
+        # Reconcile source_repo_resources
+        if not new_cfg.has_any_source_enabled():
+            self.source_repo_resources = {}
+        else:
+            enabled_src_res = set(new_cfg.enabled_source_resources())
+            enabled_src_meta = set(new_cfg.enabled_source_metadata())
+            need_recrawl = any(
+                not old_cfg.is_source_resource_enabled(r) or (
+                    r != 'package.xml' and
+                    old_cfg.get_source_resource_max_lines(r) != new_cfg.get_source_resource_max_lines(r)
+                )
+                for r in enabled_src_res
+            ) or any(
+                not old_cfg.is_source_metadata_enabled(m)
+                for m in enabled_src_meta
+            )
+            if need_recrawl:
+                self.source_repo_resources = {}
+            else:
+                for repo_cache in self.source_repo_resources.values():
+                    for key in list(repo_cache._data.keys()):
+                        if key.startswith('_'):
+                            if key not in ('_ref', '_last_update_time') and key[1:] not in enabled_src_meta:
+                                del repo_cache._data[key]
+                        elif isinstance(repo_cache._data[key], dict):
+                            pkg_entry = repo_cache._data[key]
+                            for res_key in list(pkg_entry.keys()):
+                                if res_key != 'package_path' and res_key not in enabled_src_res:
+                                    del pkg_entry[res_key]
+
+        self.distribution_file.source_packages = self.get_source_packages()
+        self.config = new_cfg
 
     @property
     def release_package_xmls(self):
@@ -446,16 +504,102 @@ class DistributionCache(object):
         self.source_repo_resources = converted
         self.distribution_file.source_packages = self.get_source_packages()
 
+    def is_release_resource_crawled(self, filepath, pkg_name=None):
+        if pkg_name is not None:
+            pkg_data = self.release_resources.get(pkg_name)
+            if isinstance(pkg_data, dict):
+                return filepath in pkg_data
+            if pkg_name in self.distribution_file.release_packages:
+                pkg = self.distribution_file.release_packages[pkg_name]
+                rel_repo = self.distribution_file.repositories[pkg.repository_name].release_repository
+                if rel_repo is not None and rel_repo.version is not None:
+                    return False
+        if self.config.is_release_resource_enabled(filepath):
+            return True
+        return any(
+            isinstance(pkg_data, dict) and filepath in pkg_data
+            for pkg_data in self.release_resources.values()
+        )
 
-    def get_data(self):
+    def is_source_resource_crawled(self, filepath, pkg_name=None):
+        if pkg_name is not None:
+            for repo_cache in self.source_repo_resources.values():
+                if pkg_name in repo_cache:
+                    return filepath in repo_cache[pkg_name] or self.config.is_source_resource_enabled(filepath)
+            repo_name = None
+            if pkg_name in self.distribution_file.source_packages:
+                repo_name = self.distribution_file.source_packages[pkg_name].repository_name
+            elif pkg_name in self.distribution_file.release_packages:
+                repo_name = self.distribution_file.release_packages[pkg_name].repository_name
+            elif pkg_name in self.distribution_file.repositories:
+                repo_name = pkg_name
+            if repo_name is not None:
+                if repo_name in self.source_repo_resources:
+                    return self.config.is_source_resource_enabled(filepath)
+                repo = self.distribution_file.repositories.get(repo_name)
+                if repo is not None and repo.source_repository is not None:
+                    return False
+        if self.config.is_source_resource_enabled(filepath):
+            return True
+        for repo_cache in self.source_repo_resources.values():
+            for _, pkg_data in repo_cache.items():
+                if filepath in pkg_data:
+                    return True
+        return False
+
+    def is_source_metadata_crawled(self, key, repo_name=None):
+        clean_key = key[1:] if key.startswith('_') else key
+        meta_key = '_' + clean_key
+        if repo_name is not None:
+            if repo_name not in self.distribution_file.repositories:
+                if repo_name in self.distribution_file.source_packages:
+                    repo_name = self.distribution_file.source_packages[repo_name].repository_name
+                elif repo_name in self.distribution_file.release_packages:
+                    repo_name = self.distribution_file.release_packages[repo_name].repository_name
+            repo_cache = self.source_repo_resources.get(repo_name)
+            if repo_cache is not None:
+                return meta_key in repo_cache._data or self.config.is_source_metadata_enabled(clean_key)
+            repo = self.distribution_file.repositories.get(repo_name)
+            if repo is not None and repo.source_repository is not None:
+                return False
+        if self.config.is_source_metadata_enabled(clean_key):
+            return True
+        return any(meta_key in repo_cache._data for repo_cache in self.source_repo_resources.values())
+
+    def get_legacy_data(self, include_source=False):
+        data = {}
+        data['type'] = 'cache'
+        data['version'] = 2
+        data['name'] = self.distribution_file.name
+        data['distribution_file'] = self._distribution_file_data
+        data['release_package_xmls'] = dict([
+            (pkg_name, pkg_data['package.xml'])
+            for pkg_name, pkg_data in self.release_resources.items()
+            if isinstance(pkg_data, dict) and pkg_data.get('package.xml') is not None
+        ])
+        if include_source:
+            data['source_repo_package_xmls'] = dict([
+                (repo_name, repo_cache.get_data(version=2))
+                for repo_name, repo_cache in self.source_repo_resources.items()
+            ])
+        else:
+            data['source_repo_package_xmls'] = {}
+        return data
+
+    def get_data(self, version=3, include_source=False):
+        if version == 2:
+            return self.get_legacy_data(include_source=include_source)
         data = {}
         data['type'] = 'cache'
         data['version'] = 3
         data['name'] = self.distribution_file.name
+        data['config'] = self.config.to_dict()
         data['distribution_file'] = self._distribution_file_data
         data['release_resources'] = self.release_resources
-        data['source_repo_resources'] = dict([(repo_name, repo_cache.get_data())
-            for repo_name, repo_cache in self.source_repo_resources.items()])
+        data['source_repo_resources'] = dict([
+            (repo_name, repo_cache.get_data(version=3))
+            for repo_name, repo_cache in self.source_repo_resources.items()
+        ])
         return data
 
     def update_distribution(self, distribution_file_data):
@@ -478,7 +622,7 @@ class DistributionCache(object):
                                 section in old_data['repositories'][repo_name] and \
                                 old_data['repositories'][repo_name][section] == repo[section]:
                             continue
-                        # section is either different or does't exist before
+                        # section is either different or doesn't exist before
                         print("  - updated '%s' entry for repository '%s'" % (section, repo_name))
 
         self._distribution_file_data = distribution_file_data
@@ -497,8 +641,7 @@ class DistributionCache(object):
                 logger.debug("Dropping release resources package cache for %s" % pkg_name)
                 dropped_count += 1
                 del self.release_resources[pkg_name]
-                
-    
+
         sys.stdout.write('\n')
         sys.stdout.write(f'Dropped {dropped_count} repositories\n')
         sys.stdout.write(f'Skipped {skipped_count} repositories\n')
@@ -509,6 +652,7 @@ class DistributionCache(object):
             start_time = time.perf_counter()
             dropped_count = 0
             skipped_count = 0
+            min_update_delta = self.config.min_update_delta
             print(f"- checking [{len(self.source_repo_resources.keys())}] source repo cache entries without source entries, requires ls-remote")
             for repo in sorted(self.source_repo_resources.keys()):
                 sys.stdout.write('.')
@@ -524,7 +668,6 @@ class DistributionCache(object):
                     del self.source_repo_resources[repo]
                     continue
 
-                min_update_delta = 1 * 60 * 60  # TODO(tfoote) magic number make into a parameter
                 last_update_time = self.source_repo_resources[repo].last_update_time()
                 if last_update_time is not None:
                     now = datetime.datetime.now()
