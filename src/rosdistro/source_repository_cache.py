@@ -33,6 +33,25 @@
 
 from datetime import datetime
 
+import yaml
+
+
+class _PackageResourceDict(dict):
+    """Dictionary of package resources that also supports legacy v2 tuple indexing:
+    pkg_data[0] -> package_path, pkg_data[1] -> package.xml.
+    """
+
+    def __getitem__(self, key):
+        if key == 0:
+            return self.get('package_path', '')
+        if key == 1:
+            return self.get('package.xml')
+        return super(_PackageResourceDict, self).__getitem__(key)
+
+
+yaml.SafeDumper.add_representer(_PackageResourceDict, yaml.SafeDumper.represent_dict)
+
+
 class SourceRepositoryCache(object):
     """
     This class represents a cache of the resource strings for all packages in a single
@@ -46,19 +65,21 @@ class SourceRepositoryCache(object):
         self._data = data
         self._last_update_time = data.get('_last_update_time')
 
-        non_package_keys = ['_ref', '_last_update_time', '_stars', '_description', '_tags']
-        self._package_names = set([name for name in data.keys() if name not in non_package_keys])
+        self._package_names = set([name for name in data.keys() if not name.startswith('_')])
         for pkg_name in self._package_names:
             if isinstance(self._data[pkg_name], (list, tuple)) and len(self._data[pkg_name]) == 2:
                 package_path, package_xml = self._data[pkg_name]
-                self._data[pkg_name] = {
+                self._data[pkg_name] = _PackageResourceDict({
                     'package_path': package_path,
                     'package.xml': package_xml,
-                }
-            elif isinstance(self._data[pkg_name], dict) and '_last_update_time' in self._data[pkg_name]:
-                pkg_update_time = self._data[pkg_name].pop('_last_update_time')
-                if self._last_update_time is None and pkg_update_time is not None:
-                    self._last_update_time = pkg_update_time
+                })
+            elif isinstance(self._data[pkg_name], dict):
+                if '_last_update_time' in self._data[pkg_name]:
+                    pkg_update_time = self._data[pkg_name].pop('_last_update_time')
+                    if self._last_update_time is None and pkg_update_time is not None:
+                        self._last_update_time = pkg_update_time
+                if not isinstance(self._data[pkg_name], _PackageResourceDict):
+                    self._data[pkg_name] = _PackageResourceDict(self._data[pkg_name])
 
     @property
     def _last_update_time(self):
@@ -81,10 +102,16 @@ class SourceRepositoryCache(object):
         else:
             raise TypeError("Expected datetime, ISO-8601 str, or None for _last_update_time")
 
-    def get_data(self):
+    def get_data(self, version=3):
         """
         Return the bare data dict, suitable for serializing into yaml.
         """
+        if version == 2:
+            data = {'_ref': self._ref}
+            for pkg_name in sorted(self._package_names):
+                pkg_data = self._data[pkg_name]
+                data[pkg_name] = [pkg_data.get('package_path', ''), pkg_data.get('package.xml')]
+            return data
         if isinstance(self._data.get('_last_update_time'), datetime):
             self._data['_last_update_time'] = self._data['_last_update_time'].isoformat()
         return self._data
@@ -96,23 +123,64 @@ class SourceRepositoryCache(object):
         """
         return cls({'_ref': ref})
 
+    def get_metadata(self, key, default=None):
+        """
+        Return the value of a repository metadata field (e.g., 'stars', 'description', 'tags').
+        """
+        meta_key = key if key.startswith('_') else '_' + key
+        return self._data.get(meta_key, default)
+
+    def set_metadata(self, key, value):
+        """
+        Set the value of a repository metadata field (e.g., 'stars', 'description', 'tags').
+        """
+        meta_key = key if key.startswith('_') else '_' + key
+        self._data[meta_key] = value
+
+    def get_all_metadata(self):
+        """
+        Return a dictionary of all repository metadata fields (excluding internal '_ref' and '_last_update_time').
+        """
+        return {
+            k[1:]: v for k, v in self._data.items()
+            if k.startswith('_') and k not in ('_ref', '_last_update_time')
+        }
+
+    def stars(self):
+        """
+        Return the repository star count, or None if not available.
+        """
+        return self.get_metadata('stars')
+
     def set_stars(self, stars):
         """
         Set the repository stars.
         """
-        self._data['_stars'] = stars
+        self.set_metadata('stars', stars)
+
+    def description(self):
+        """
+        Return the repository description, or None if not available.
+        """
+        return self.get_metadata('description')
 
     def set_description(self, description):
         """
         Set the repository description.
         """
-        self._data['_description'] = description
+        self.set_metadata('description', description)
+
+    def tags(self):
+        """
+        Return the repository tags/topics list, or None if not available.
+        """
+        return self.get_metadata('tags')
 
     def set_tags(self, tags):
         """
         Set the repository tags.
         """
-        self._data['_tags'] = tags
+        self.set_metadata('tags', tags)
 
     def set_last_update_time(self, update_time):
         """
@@ -126,12 +194,13 @@ class SourceRepositoryCache(object):
         """
         return self._last_update_time
 
-    def add(self, package_name, package_path, payload_string, payload_type='package.xml', increment_update_time=True): # TODO(tfoote) Breaks rosdistro formatting changing from list to dict
+    def add(self, package_name, package_path, payload_string, payload_type='package.xml', increment_update_time=True):
         """
-        Add a package to the cache.
+        Add a package resource to the cache.
         """
-        if package_name not in self._data or not isinstance(self._data[package_name], dict):
-            self._data[package_name] = {}
+        if package_name not in self._data or not isinstance(self._data[package_name], _PackageResourceDict):
+            existing = self._data.get(package_name)
+            self._data[package_name] = _PackageResourceDict(existing if isinstance(existing, dict) else {})
 
         self._data[package_name]['package_path'] = package_path
         self._data[package_name][payload_type] = payload_string
@@ -139,23 +208,22 @@ class SourceRepositoryCache(object):
         if increment_update_time:
             self._last_update_time = datetime.now()
 
-
     def __iter__(self):
         """
         Iterate the list of package names in this cached repo. Returns an iterator of str.
         """
         return iter(self._package_names)
 
-    def __getitem__(self, package_name): #TODO(tfoote) API change
+    def __getitem__(self, package_name):
         """
         Access the cached information about a specific package. Returns a dict of
         path to package relative paths to repo root, and string of the file contents (potentially truncated).
-        """ 
+        """
         if package_name not in self._package_names:
             raise KeyError("Package '%s' not present in SourceRepositoryCache." % package_name)
         return self._data[package_name]
 
-    def items(self):  #TODO(tfoote) API change
+    def items(self):
         """
         Generator of (str, dict) containing the package name, and a dict of
         paths to file contents (potentially truncated).
