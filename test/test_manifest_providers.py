@@ -14,12 +14,18 @@ import rosdistro.manifest_provider.tar
 import rosdistro.vcs
 
 from rosdistro.manifest_provider.bitbucket import bitbucket_manifest_provider
-from rosdistro.manifest_provider.cache import CachedManifestProvider, sanitize_xml
+from rosdistro.manifest_provider.cache import (
+    CachedManifestProvider,
+    CachedSourceManifestProvider,
+    sanitize_and_truncate_docs,
+    sanitize_xml,
+)
 from rosdistro.manifest_provider.git import git_manifest_provider, git_source_manifest_provider
 from rosdistro.manifest_provider.gitlab import gitlab_manifest_provider, gitlab_source_manifest_provider
 from rosdistro.manifest_provider.tar import tar_manifest_provider, tar_source_manifest_provider
 from rosdistro.release_repository_specification import ReleaseRepositorySpecification
 from rosdistro.source_repository_specification import SourceRepositorySpecification
+from rosdistro.distribution_cache import CacheConfig
 
 
 def test_bitbucket():
@@ -240,26 +246,38 @@ def test_gitlab_source_mocked_with_docs():
         raise AssertionError('Unexpected GitLab URL: %s' % url)
 
     with patch('rosdistro.manifest_provider.gitlab.urlopen', side_effect=fake_urlopen):
-        # Test with default args (which defaults to ['CHANGELOG.rst', 'README.md'])
+        # Raw provider returns raw content without truncating at 100 lines
         repo_cache = gitlab_source_manifest_provider(_tracetools_analysis_source_repo())
         assert repo_cache.ref() == 'cd30853005ef3a591cb8594b4aa49f9ef400d30f'
-        assert repo_cache._data.get('_stars') == 17
-        assert repo_cache._data.get('_description') == 'Tools for analysing trace data'
-        assert repo_cache._data.get('_tags') == ['ros2', 'tracing']
+        assert repo_cache.stars() == 17
+        assert repo_cache.description() == 'Tools for analysing trace data'
+        assert repo_cache.tags() == ['ros2', 'tracing']
         assert list(repo_cache.keys()) == ['ros2trace_analysis']
         pkg_entry = repo_cache['ros2trace_analysis']
         assert pkg_entry['package_path'] == 'ros2trace_analysis'
         assert '<version>1.0.3</version>' in pkg_entry['package.xml']
-        assert 'Changelog line 1' in pkg_entry['CHANGELOG.rst']
-        assert 'Truncated content at 100 of 120 lines' in pkg_entry['CHANGELOG.rst']
-        assert pkg_entry['README.md'] == '# ros2trace_analysis\nSome documentation'
+        assert pkg_entry['CHANGELOG.rst'] == long_changelog
+        assert pkg_entry['README.md'] == readme_text
 
-        # Test with explicit filepaths=['CHANGELOG.rst', 'README.md']
-        repo_cache_explicit = gitlab_source_manifest_provider(
-            _tracetools_analysis_source_repo(), filepaths=['CHANGELOG.rst', 'README.md'])
-        assert '<version>1.0.3</version>' in repo_cache_explicit['ros2trace_analysis']['package.xml']
-        assert 'Truncated content at 100 of 120 lines' in repo_cache_explicit['ros2trace_analysis']['CHANGELOG.rst']
-        assert repo_cache_explicit['ros2trace_analysis']['README.md'] == '# ros2trace_analysis\nSome documentation'
+        # CachedSourceManifestProvider truncates according to CacheConfig (default max_lines=100)
+        class FakeCache(object):
+            def __init__(self, config):
+                self.config = config
+                self.release_resources = {}
+                self.source_repo_resources = {}
+
+        fc_100 = FakeCache(CacheConfig.extended())
+        cached_mp_100 = CachedSourceManifestProvider(fc_100, [gitlab_source_manifest_provider])
+        cached_repo_100 = cached_mp_100(_tracetools_analysis_source_repo())
+        assert 'Truncated content at 100 of 120 lines' in cached_repo_100['ros2trace_analysis']['CHANGELOG.rst']
+        assert cached_repo_100['ros2trace_analysis']['README.md'] == '# ros2trace_analysis\nSome documentation'
+
+        # With max_lines=150 (> 100) or max_lines=None, all 120 lines are preserved!
+        fc_150 = FakeCache(CacheConfig({'source_package_resources': {'CHANGELOG.rst': {'max_lines': 150}}}))
+        cached_mp_150 = CachedSourceManifestProvider(fc_150, [gitlab_source_manifest_provider])
+        cached_repo_150 = cached_mp_150(_tracetools_analysis_source_repo())
+        assert 'Truncated content' not in cached_repo_150['ros2trace_analysis']['CHANGELOG.rst']
+        assert len(cached_repo_150['ros2trace_analysis']['CHANGELOG.rst'].splitlines()) == 120
 
         # Test with filepaths=['package.xml']
         repo_cache_xml_only = gitlab_source_manifest_provider(
@@ -316,9 +334,15 @@ def test_tar_manifest_provider_mocked():
             'melodic', _genmsg_release_tarball(), 'genmsg', filepath='README.md')
         assert readme == '# genmsg release\n'
 
+        # Missing optional file returns None
+        assert tar_manifest_provider(
+            'melodic', _genmsg_release_tarball(), 'genmsg', filepath='CHANGELOG.rst'
+        ) is None
+
+        # Missing package.xml raises RuntimeError
         with pytest.raises(RuntimeError, match='Could not find'):
             tar_manifest_provider(
-                'melodic', _genmsg_release_tarball(), 'genmsg', filepath='CHANGELOG.rst')
+                'melodic', _genmsg_release_tarball(), 'nonexistent_pkg', filepath='package.xml')
 
 
 def test_tar_source_mocked_with_docs():
@@ -332,23 +356,27 @@ def test_tar_source_mocked_with_docs():
 
     with patch('rosdistro.manifest_provider.tar.urlopen',
                side_effect=lambda req: _make_mock_http_response(tar_bytes)):
-        # Test with default args (which defaults to ['CHANGELOG.rst', 'README.md'])
+        # Raw provider returns raw content
         repo_cache = tar_source_manifest_provider(_genmsg_source_tarball())
         assert repo_cache.ref() is None
         pkg_entry = repo_cache['genmsg']
         assert pkg_entry['package_path'] == 'genmsg-0.5.16'
         assert '<version>0.5.16</version>' in pkg_entry['package.xml']
-        assert pkg_entry['CHANGELOG.rst'] != pkg_entry['package.xml']
-        assert '0.5.16 (2020-01-01)' in pkg_entry['CHANGELOG.rst']
-        assert 'Truncated content at 100 of 120 lines' in pkg_entry['CHANGELOG.rst']
-        assert pkg_entry['README.md'] == '# genmsg\nMessage generation package'
+        assert pkg_entry['CHANGELOG.rst'] == long_changelog
+        assert pkg_entry['README.md'] == readme_text
 
-        # Test with explicit filepaths=['CHANGELOG.rst', 'README.md']
-        repo_cache_explicit = tar_source_manifest_provider(
-            _genmsg_source_tarball(), filepaths=['CHANGELOG.rst', 'README.md'])
-        assert '<version>0.5.16</version>' in repo_cache_explicit['genmsg']['package.xml']
-        assert '0.5.16 (2020-01-01)' in repo_cache_explicit['genmsg']['CHANGELOG.rst']
-        assert repo_cache_explicit['genmsg']['README.md'] == '# genmsg\nMessage generation package'
+        # CachedSourceManifestProvider truncates according to CacheConfig
+        class FakeCache(object):
+            def __init__(self):
+                self.config = CacheConfig.extended()
+                self.release_resources = {}
+                self.source_repo_resources = {}
+
+        cached_repo = CachedSourceManifestProvider(
+            FakeCache(), [tar_source_manifest_provider]
+        )(_genmsg_source_tarball())
+        assert 'Truncated content at 100 of 120 lines' in cached_repo['genmsg']['CHANGELOG.rst']
+        assert cached_repo['genmsg']['README.md'] == '# genmsg\nMessage generation package'
 
         # Test with filepaths=['package.xml']
         repo_cache_xml_only = tar_source_manifest_provider(
@@ -384,6 +412,43 @@ def test_sanitize():
 
     # subsequent parse calls will collapse empty tags, therefore sanitize should do the same
     assert '<a><empty/></a>' in sanitize_xml('<a> <empty> <!-- comment --> </empty> </a>')
+
+
+def test_github_manifest_provider_404_and_cached_manifest_provider_no_git_fallback():
+    repo = _genmsg_release_repo()
+
+    def fake_get_url(url):
+        raise HTTPError(url, 404, 'Not Found', {}, None)
+
+    with patch.object(repo, 'has_remote_tag', return_value=True), \
+         patch('rosdistro.manifest_provider.github._get_url_contents', side_effect=fake_get_url):
+        res = rosdistro.manifest_provider.github.github_manifest_provider(
+            'melodic', repo, 'genmsg', filepath='README.md'
+        )
+        assert res is None
+
+    # Verify CachedManifestProvider records None on 404 without falling back to git_manifest_provider
+    class FakeDistributionCache(object):
+        def __init__(self):
+            self.release_resources = {'genmsg': {'package.xml': '<package/>'}}
+
+    dc = FakeDistributionCache()
+    git_mock = MagicMock(side_effect=AssertionError('Should not fall back to git_manifest_provider'))
+    github_calls = []
+
+    def fake_github_mp(dist_name, repo, pkg_name, filepath='package.xml'):
+        github_calls.append((pkg_name, filepath))
+        return None
+
+    cached_mp = CachedManifestProvider(dc, [fake_github_mp, git_mock])
+    assert cached_mp('melodic', repo, 'genmsg', 'README.md') is None
+    assert dc.release_resources['genmsg']['README.md'] is None
+    assert len(github_calls) == 1
+
+    # Second call should be a cache hit and not call fake_github_mp again
+    assert cached_mp('melodic', repo, 'genmsg', 'README.md') is None
+    assert len(github_calls) == 1
+
 
 
 def _genmsg_release_repo():
