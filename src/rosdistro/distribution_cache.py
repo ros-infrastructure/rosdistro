@@ -31,15 +31,197 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import copy
 import datetime
 import sys
 import time
+
+import yaml
 
 from . import logger
 from .distribution_file import create_distribution_file
 from .package import Package
 from .source_repository_cache import SourceRepositoryCache
 from .vcs import Git, ref_is_hash
+
+
+class ResourceNotCrawledError(KeyError):
+    """Raised when a caller requests a resource or metadata key with require_crawled=True
+    that was not enabled/crawled in the cache configuration.
+    """
+
+
+def _normalize_resource_entry(name, raw_value, default_max_lines=100):
+    if isinstance(raw_value, bool):
+        entry = {'enabled': raw_value}
+        if name != 'package.xml' and default_max_lines is not None:
+            entry['max_lines'] = default_max_lines
+        return entry
+    if isinstance(raw_value, int):
+        entry = {'enabled': True}
+        if name != 'package.xml':
+            entry['max_lines'] = raw_value
+        return entry
+    if isinstance(raw_value, dict):
+        entry = {'enabled': bool(raw_value.get('enabled', True))}
+        if 'max_lines' in raw_value:
+            entry['max_lines'] = int(raw_value['max_lines']) if raw_value['max_lines'] is not None else None
+        elif name != 'package.xml' and default_max_lines is not None:
+            entry['max_lines'] = default_max_lines
+        return entry
+    raise ValueError("Invalid resource configuration for '%s': %r" % (name, raw_value))
+
+
+def _normalize_metadata_entry(name, raw_value):
+    if isinstance(raw_value, bool):
+        return {'enabled': raw_value}
+    if isinstance(raw_value, dict):
+        return {'enabled': bool(raw_value.get('enabled', True))}
+    raise ValueError("Invalid metadata configuration for '%s': %r" % (name, raw_value))
+
+
+class CacheConfig(dict):
+    """Configuration for rosdistro cache generation and self-documenting Cache Format 3."""
+
+    DEFAULT_DOC_MAX_LINES = 100
+    DEFAULT_MIN_UPDATE_DELTA = 3600
+    DEFAULT_YAML_ALIAS_MIN_LENGTH = 300
+    DEFAULT_PACKAGE_RESOURCES = ('package.xml', 'README.md', 'CHANGELOG.rst')
+    DEFAULT_REPO_METADATA = ('stars', 'description', 'tags')
+    VALID_CONFIG_KEYS = {
+        'release_package_resources',
+        'source_package_resources',
+        'source_repo_metadata',
+        'min_update_delta',
+        'yaml_alias_min_length',
+        'limit',
+    }
+
+    @classmethod
+    def _build_resource_map(cls, raw_map, force_package_xml=False):
+        res = {
+            name: _normalize_resource_entry(name, False, cls.DEFAULT_DOC_MAX_LINES)
+            for name in cls.DEFAULT_PACKAGE_RESOURCES
+        }
+        if isinstance(raw_map, (list, tuple, set)):
+            raw_map = {k: True for k in raw_map}
+        for k, v in (raw_map or {}).items():
+            res[k] = _normalize_resource_entry(k, v, cls.DEFAULT_DOC_MAX_LINES)
+        if force_package_xml or (any(v.get('enabled') for v in res.values()) and 'package.xml' not in (raw_map or {})):
+            res['package.xml'] = {'enabled': True}
+        return res
+
+    def __init__(self, data=None, strict=True):
+        super(CacheConfig, self).__init__()
+        raw = copy.deepcopy(data) if data else {}
+        if strict:
+            unknown_keys = set(raw.keys()) - self.VALID_CONFIG_KEYS
+            if unknown_keys:
+                raise ValueError("Unknown cache configuration keys: %s" % ', '.join(sorted(unknown_keys)))
+
+        rel_res = self._build_resource_map(raw.get('release_package_resources'), force_package_xml=True)
+        src_res = self._build_resource_map(raw.get('source_package_resources'), force_package_xml=False)
+
+        src_meta = {k: {'enabled': False} for k in self.DEFAULT_REPO_METADATA}
+        raw_meta = raw.get('source_repo_metadata', {})
+        if isinstance(raw_meta, (list, tuple, set)):
+            raw_meta = {k: True for k in raw_meta}
+        for k, v in (raw_meta or {}).items():
+            clean_key = k[1:] if k.startswith('_') else k
+            src_meta[clean_key] = _normalize_metadata_entry(clean_key, v)
+
+        self['release_package_resources'] = rel_res
+        self['source_package_resources'] = src_res
+        self['source_repo_metadata'] = src_meta
+        self['min_update_delta'] = int(raw.get('min_update_delta', self.DEFAULT_MIN_UPDATE_DELTA))
+        self['yaml_alias_min_length'] = int(
+            raw.get('yaml_alias_min_length', self.DEFAULT_YAML_ALIAS_MIN_LENGTH)
+        )
+        limit_val = raw.get('limit', None)
+        self['limit'] = int(limit_val) if limit_val is not None else None
+
+    @property
+    def release_package_resources(self):
+        return self['release_package_resources']
+
+    @property
+    def source_package_resources(self):
+        return self['source_package_resources']
+
+    @property
+    def source_repo_metadata(self):
+        return self['source_repo_metadata']
+
+    @property
+    def min_update_delta(self):
+        return self['min_update_delta']
+
+    @property
+    def yaml_alias_min_length(self):
+        return self['yaml_alias_min_length']
+
+    @property
+    def limit(self):
+        return self['limit']
+
+    def to_dict(self):
+        return copy.deepcopy(dict(self))
+
+    def is_release_resource_enabled(self, filepath):
+        return bool(self['release_package_resources'].get(filepath, {}).get('enabled', False))
+
+    def get_release_resource_max_lines(self, filepath, default=DEFAULT_DOC_MAX_LINES):
+        entry = self['release_package_resources'].get(filepath, {})
+        return entry.get('max_lines', default if filepath != 'package.xml' else None)
+
+    def enabled_release_resources(self):
+        enabled = [k for k, v in self['release_package_resources'].items() if v.get('enabled')]
+        if 'package.xml' in enabled:
+            enabled.remove('package.xml')
+        return ['package.xml'] + enabled
+
+    def is_source_resource_enabled(self, filepath):
+        return bool(self['source_package_resources'].get(filepath, {}).get('enabled', False))
+
+    def get_source_resource_max_lines(self, filepath, default=DEFAULT_DOC_MAX_LINES):
+        entry = self['source_package_resources'].get(filepath, {})
+        return entry.get('max_lines', default if filepath != 'package.xml' else None)
+
+    def enabled_source_resources(self):
+        enabled = [k for k, v in self['source_package_resources'].items() if v.get('enabled')]
+        if 'package.xml' in enabled:
+            enabled.remove('package.xml')
+            return ['package.xml'] + enabled
+        return enabled
+
+    def is_source_metadata_enabled(self, key):
+        clean_key = key[1:] if key.startswith('_') else key
+        return bool(self['source_repo_metadata'].get(clean_key, {}).get('enabled', False))
+
+    def enabled_source_metadata(self):
+        return [k for k, v in self['source_repo_metadata'].items() if v.get('enabled')]
+
+    def has_any_source_enabled(self):
+        return bool(self.enabled_source_resources() or self.enabled_source_metadata())
+
+    @classmethod
+    def minimal(cls):
+        return cls()
+
+    @classmethod
+    def extended(cls):
+        return cls({
+            'release_package_resources': {k: True for k in cls.DEFAULT_PACKAGE_RESOURCES},
+            'source_package_resources': {k: True for k in cls.DEFAULT_PACKAGE_RESOURCES},
+            'source_repo_metadata': {k: True for k in cls.DEFAULT_REPO_METADATA},
+        })
+
+    @classmethod
+    def from_file(cls, path):
+        with open(path, 'r') as f:
+            data = yaml.safe_load(f.read()) or {}
+        return cls(data)
+
 
 
 class DistributionCache(object):
