@@ -44,7 +44,9 @@ import yaml
 logging.basicConfig(level=logging.INFO)
 
 
-def parse_args(args=sys.argv[1:]):
+def parse_args(args=None):
+    if args is None:
+        args = sys.argv[1:]
     parser = argparse.ArgumentParser(
         description='Build the cache for rosdistro distributions.'
     )
@@ -65,25 +67,33 @@ def parse_args(args=sys.argv[1:]):
         '--ignore-local', action='store_true', default=False,
         help='Ignore locally available cache')
     add(
+        '-c', '--config', default=None,
+        help='Path to a YAML configuration file (or preset "minimal"/"extended") specifying cache elements to index')
+    add(
+        '--extended', action='store_true', default=False,
+        help='Use the default extended cache configuration when --config is not specified')
+    add(
         '--include-source', action='store_true', default=False,
-        help='Also include source branch package XMLs in the cache')
+        help='Deprecated: use --config instead. Also include source repository resources in the cache')
     add(
         '--limit', type=int, default=None,
-        help='Limit the number of packages to scan (useful for testing)')
+        help='Limit the number of packages/repositories to scan (useful for testing)')
     return parser.parse_args(args)
 
 
-def main():
-    args = parse_args()
+def main(args=None):
+    args = parse_args(args)
 
     if args.debug:
         logger.level = logging.DEBUG
 
+    config = args.config if args.config is not None else ('extended' if args.extended else None)
+
     try:
         caches = generate_distribution_caches(
             args.index, dist_names=args.dist_names, preclean=args.preclean,
-            ignore_local=args.ignore_local, include_source=args.include_source, debug=args.debug,
-            limit=args.limit)
+            ignore_local=args.ignore_local, include_source=args.include_source,
+            debug=args.debug, limit=args.limit, config=config)
     except RuntimeError as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -91,15 +101,28 @@ def main():
     for dist_name, cache in caches.items():
         if args.dist_names and dist_name not in args.dist_names:
             continue
-        # write the cache
-        data = yaml.dump(cache.get_data(), Dumper=CacheYamlDumper).encode()
+        dumper = CacheYamlDumper.with_min_length(cache.config.yaml_alias_min_length)
 
+        # Write the legacy Format 2 minimal cache
+        legacy_data = yaml.dump(
+            cache.get_legacy_data(include_source=args.include_source), Dumper=dumper
+        ).encode()
         with open('%s-cache.yaml' % dist_name, 'wb') as f:
             print('- write cache file "%s-cache.yaml"' % dist_name)
-            f.write(data)
+            f.write(legacy_data)
         with gzip.open('%s-cache.yaml.gz' % dist_name, 'wb') as f:
             print('- write compressed cache file "%s-cache.yaml.gz"' % dist_name)
-            f.write(data)
+            f.write(legacy_data)
+
+        # Write the extended Format 3 cache when --config or --extended is specified
+        if config is not None:
+            extended_data = yaml.dump(cache.get_data(version=3), Dumper=dumper).encode()
+            with open('%s-extended-cache.yaml' % dist_name, 'wb') as f:
+                print('- write extended cache file "%s-extended-cache.yaml"' % dist_name)
+                f.write(extended_data)
+            with gzip.open('%s-extended-cache.yaml.gz' % dist_name, 'wb') as f:
+                print('- write compressed extended cache file "%s-extended-cache.yaml.gz"' % dist_name)
+                f.write(extended_data)
 
 
 if __name__ == '__main__':

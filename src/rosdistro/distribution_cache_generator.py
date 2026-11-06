@@ -41,12 +41,12 @@ from catkin_pkg.package import InvalidPackage, parse_package_string
 import yaml
 
 from . import _get_dist_file_data, get_cached_distribution, get_distribution_cache, get_index
-from .distribution_cache import DistributionCache
+from .distribution_cache import CacheConfig, DistributionCache
 
 
 def generate_distribution_caches(
     index, dist_names=None, preclean=False,
-    ignore_local=False, include_source=False, debug=False, limit=None
+    ignore_local=False, include_source=False, debug=False, limit=None, config=None
 ):
     if os.path.isfile(index):
         index = 'file://' + os.path.abspath(index)
@@ -61,7 +61,8 @@ def generate_distribution_caches(
         try:
             cache = generate_distribution_cache(
                 index, dist_name, preclean=preclean,
-                ignore_local=ignore_local, include_source=include_source, debug=debug, limit=limit)
+                ignore_local=ignore_local, include_source=include_source,
+                debug=debug, limit=limit, config=config)
         except RuntimeError as e:
             errors.append(str(e))
             continue
@@ -71,19 +72,32 @@ def generate_distribution_caches(
     return caches
 
 
-def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=False,
-                                include_source=False, debug=False, limit=None):
+def generate_distribution_cache(
+    index, dist_name, preclean=False, ignore_local=False,
+    include_source=False, debug=False, limit=None, config=None
+):
+    cache_config = CacheConfig.from_input(config, include_source=include_source, limit=limit)
     dist, cache = _get_cached_distribution(
         index, dist_name, preclean=preclean, ignore_local=ignore_local,
-        include_source=include_source)
+        include_source=include_source, config=cache_config)
+    if cache is not None:
+        cache.config = cache_config
 
     print('- fetch missing release manifests')
-    max_source_packages = limit if limit is not None else 100000 # TODO(tfoote) magic number move to config
-    max_source_repos = limit if limit is not None else 10000 # TODO(tfoote) magic number move to config
+    effective_limit = cache_config.limit
+    all_release_pkgs = sorted(dist.release_packages.keys())
+    if effective_limit is not None:
+        if debug and len(all_release_pkgs) > effective_limit:
+            print(f'  - limiting packages scanned to {effective_limit} of {len(all_release_pkgs)} as per config')
+        release_pkgs = all_release_pkgs[:effective_limit]
+    else:
+        release_pkgs = all_release_pkgs
+
     errors = []
-    if debug and (len(dist.release_packages.keys()) > max_source_packages):
-        print(f'  - limiting packages scanned to {max_source_packages} of {len(dist.release_packages.keys())} as per config') 
-    for pkg_name in sorted(dist.release_packages.keys())[:max_source_packages]:
+    enabled_release_resources = [
+        r for r in cache_config.enabled_release_resources() if r != 'package.xml'
+    ]
+    for pkg_name in release_pkgs:
         repo = dist.repositories[dist.release_packages[pkg_name].repository_name].release_repository
         if repo.version is None:
             if debug:
@@ -96,7 +110,8 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
             sys.stdout.flush()
         if cache:
             if pkg_name in cache.release_resources:
-                if cache.release_resources[pkg_name].get('version') != repo.version:
+                cached_ver = cache.release_resources[pkg_name].get('version')
+                if cached_ver is not None and cached_ver != repo.version:
                     print("  - invalidating package '%s' due to version mismatch" % pkg_name)
                     cache.release_resources[pkg_name] = {}
             else:
@@ -124,32 +139,27 @@ def generate_distribution_cache(index, dist_name, preclean=False, ignore_local=F
         if package_xml != old_package_xml:
             print("  - updated manifest of package '%s' to version '%s'" % (pkg_name, pkg.version))
 
-        old_readme = None
-        if cache and pkg_name in cache.release_resources:
-            old_readme = cache.release_resources[pkg_name].get('README.md', None)
-        readme = dist.get_release_resource(pkg_name, 'README.md')
-
-        if readme != old_readme:
-            print("  - updated README.md of package '%s'" % (pkg_name))        
-
-        old_changelog = None
-        if cache and pkg_name in cache.release_resources:
-            old_changelog = cache.release_resources[pkg_name].get('CHANGELOG.rst', None)
-        changelog = dist.get_release_resource(pkg_name, 'CHANGELOG.rst')
-
-        if changelog != old_changelog:
-            print("  - updated CHANGELOG.rst of package '%s'" % (pkg_name))
-
-
+        for resource_name in enabled_release_resources:
+            old_resource = None
+            if cache and pkg_name in cache.release_resources:
+                old_resource = cache.release_resources[pkg_name].get(resource_name, None)
+            resource_content = dist.get_release_resource(pkg_name, resource_name)
+            if resource_content != old_resource:
+                print("  - updated %s of package '%s'" % (resource_name, pkg_name))
 
     if not debug:
         print('')
 
-    if include_source:
+    if include_source or cache_config.has_any_source_enabled():
         print('- fetch source repository manifests')
-        if debug and len(dist.repositories.keys()) > max_source_repos:
-            print(f'  - limiting repositories scanned to {max_source_repos} of {len(dist.repositories.keys())} as per config') 
-        for repo_name in sorted(dist.repositories.keys())[:max_source_repos]:
+        all_repos = sorted(dist.repositories.keys())
+        if effective_limit is not None:
+            if debug and len(all_repos) > effective_limit:
+                print(f'  - limiting repositories scanned to {effective_limit} of {len(all_repos)} as per config')
+            repos_to_scan = all_repos[:effective_limit]
+        else:
+            repos_to_scan = all_repos
+        for repo_name in repos_to_scan:
             if dist.repositories[repo_name].source_repository:
                 dist.get_source_repo_resources(repo_name)
                 if debug:
@@ -179,6 +189,8 @@ class CacheYamlDumper(yaml.SafeDumper):
     long strings to alias each other (by default only objects do).
     """
 
+    yaml_alias_min_length = CacheConfig.DEFAULT_YAML_ALIAS_MIN_LENGTH
+
     def __init__(self, *args, **kwargs):
         kwargs['width'] = 10000
         kwargs['allow_unicode'] = True
@@ -186,7 +198,7 @@ class CacheYamlDumper(yaml.SafeDumper):
 
     def ignore_aliases(self, content):
         """ Allow long strings that look like package XML to alias to each other in the YAML output. """
-        return not (isinstance(content, str) and len(content) > 300) # TODO(tfoote) magic number move to config
+        return not (isinstance(content, str) and len(content) > self.yaml_alias_min_length)
 
     def represent_mapping(self, tag, mapping, flow_style=False):
         """ Gives compact representation for the distribution_file section, while allowing the package
@@ -195,43 +207,60 @@ class CacheYamlDumper(yaml.SafeDumper):
             flow_style = True
         return yaml.SafeDumper.represent_mapping(self, tag, mapping, flow_style)
 
+    @classmethod
+    def with_min_length(cls, min_length):
+        if min_length is None or min_length == cls.yaml_alias_min_length:
+            return cls
+        return type('ConfiguredCacheYamlDumper', (cls,), {'yaml_alias_min_length': int(min_length)})
 
-def _get_cached_distribution(index, dist_name, preclean=False, ignore_local=False, include_source=False):
+
+def _get_cached_distribution(index, dist_name, preclean=False, ignore_local=False, include_source=False, config=None):
     print('Build cache for "%s"' % dist_name)
+    cache_config = CacheConfig.from_input(config, include_source=include_source)
     cache = None
     try:
         if not preclean:
             if not ignore_local:
                 print('- trying to use local cache')
                 yaml_str = None
-                if os.path.exists('%s-cache.yaml' % dist_name):
-                    print('- use local file "%s-cache.yaml"' % dist_name)
-                    with open('%s-cache.yaml' % dist_name, 'r') as f:
-                        yaml_str = f.read()
-                elif os.path.exists('%s-cache.yaml.gz' % dist_name):
-                    print('- use local file "%s-cache.yaml.gz"' % dist_name)
-                    with gzip.open('%s-cache.yaml.gz' % dist_name, 'rb') as f:
-                        yaml_str = f.read()
+                for candidate in (
+                    '%s-extended-cache.yaml' % dist_name,
+                    '%s-extended-cache.yaml.gz' % dist_name,
+                    '%s-cache.yaml' % dist_name,
+                    '%s-cache.yaml.gz' % dist_name,
+                ):
+                    if os.path.exists(candidate):
+                        print('- use local file "%s"' % candidate)
+                        if candidate.endswith('.gz'):
+                            with gzip.open(candidate, 'rb') as f:
+                                yaml_str = f.read()
+                        else:
+                            with open(candidate, 'r') as f:
+                                yaml_str = f.read()
+                        break
                 if yaml_str is not None:
                     data = yaml.safe_load(yaml_str)
                     cache = DistributionCache(dist_name, data)
             if not cache:
                 print('- trying to fetch cache')
-                # get distribution cache
-                cache = get_distribution_cache(index, dist_name)
+                try:
+                    cache = get_distribution_cache(index, dist_name, extended=True)
+                except Exception:
+                    cache = get_distribution_cache(index, dist_name, extended=False)
     except Exception as e:
         print('- failed to fetch old cache: %s' % e)
 
     if cache:
         print('- update cache')
+        cache.apply_config(cache_config)
         # get current distribution file
         rel_file_data = _get_dist_file_data(index, dist_name, 'distribution')
-        # since format 2 of the index file might contain a single value rather then a list
+        # since format 2 of the index file might contain a single value rather than a list
         if not isinstance(rel_file_data, list):
             rel_file_data = [rel_file_data]
         # if we're not including the source portion of the cache, strip it out of the existing cache
         # in order to skip the potentially lengthy cache invalidation process.
-        if not include_source:
+        if not (include_source or cache_config.has_any_source_enabled()):
             cache.source_repo_resources = {}
         # update cache with current distribution file, which filters existing cache by validity.
         cache.update_distribution(rel_file_data)
@@ -239,7 +268,7 @@ def _get_cached_distribution(index, dist_name, preclean=False, ignore_local=Fals
         print('- build cache from scratch')
         # get empty cache with distribution file
         distribution_file_data = _get_dist_file_data(index, dist_name, 'distribution')
-        cache = DistributionCache(dist_name, distribution_file_data=distribution_file_data)
+        cache = DistributionCache(dist_name, distribution_file_data=distribution_file_data, config=cache_config)
 
     # get distribution
     return get_cached_distribution(index, dist_name, cache=cache, allow_lazy_load=True), cache
