@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ros-infrastructure/rosdistro/TODO/rosdistro_cache_3.schema.json",
+  "$id": "https://github.com/ros-infrastructure/rosdistro/rosdistro_cache_3.schema.json",
   "title": "ROSDistro Cache Format 3 Schema",
   "description": "Cache Format 3 for rosdistro",
   "type": "object",
@@ -15,6 +15,9 @@
       "description": "Clarifying the file type",
       "type": "string"
     },
+    "config": {
+      "$ref": "#/$defs/cache_config"
+    },
     "source_repo_resources": {
       "type": "object",
       "patternProperties": {
@@ -27,11 +30,6 @@
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/package_resources"
-      },
-      "properties": {
-        "_last_update_time": {
-          "type": "string"
-        }
       }
     },
     "distribution_file": {
@@ -48,13 +46,86 @@
   },
   "additionalProperties": false,
   "required": [
-    "source_repo_resources",
+    "type",
+    "version",
+    "name",
+    "config",
     "distribution_file",
-    "name"
+    "release_resources",
+    "source_repo_resources"
   ],
   "$defs": {
+    "resource_option": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_lines": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "metadata_option": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "cache_config": {
+      "type": "object",
+      "properties": {
+        "release_package_resources": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/resource_option"
+          }
+        },
+        "source_package_resources": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/resource_option"
+          }
+        },
+        "source_repo_metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/metadata_option"
+          }
+        },
+        "min_update_delta": {
+          "type": "integer"
+        },
+        "yaml_alias_min_length": {
+          "type": "integer"
+        },
+        "limit": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
     "repository_resources": {
       "type": "object",
+      "patternProperties": {
+        "^_.*$": {}
+      },
       "additionalProperties": {
         "$ref": "#/$defs/package_resources"
       },
@@ -69,7 +140,10 @@
           ]
         },
         "_stars": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "_description": {
           "type": [
@@ -78,7 +152,10 @@
           ]
         },
         "_tags": {
-          "type": "array",
+          "type": [
+            "array",
+            "null"
+          ],
           "items": {
             "type": "string"
           }
@@ -90,14 +167,25 @@
     },
     "package_resources": {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "properties": {
         "CHANGELOG.rst": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Contents of the CHANGELOG.rst if it's available"
         },
         "package.xml": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Contents of the package.xml if it's available"
         },
         "package_path": {
@@ -105,7 +193,10 @@
           "description": "The package_path if it's available"
         },
         "README.md": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Contents of the README.md if it's available"
         },
         "version": {
