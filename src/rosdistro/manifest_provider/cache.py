@@ -35,17 +35,23 @@ from xml.dom import minidom
 
 from rosdistro import logger
 
+
 def sanitize_and_truncate_docs(doc_string, max_length=100):
+    if doc_string is None:
+        return None
     # Remove trailing whitespace then truncate
     lines = doc_string.rstrip().splitlines()
-    ending = ''
-    if len(lines) > max_length:
-        ending = f'\nTruncated content at {max_length} of {len(lines)} lines'
-    return '\n'.join(lines[:max_length - 1 ]) + ending
+    if max_length is not None and len(lines) > max_length:
+        msg = f'Truncated content at {max_length} of {len(lines)} lines'
+        if max_length <= 1:
+            return msg
+        return '\n'.join(lines[:max_length - 1]) + '\n' + msg
+    return '\n'.join(lines)
+
 
 def sanitize_xml(xml_string):
     """ Returns a version of the supplied XML string with comments and all whitespace stripped,
-    including runs of spaces internal to text nodes. The returned value will be bytes.
+    including runs of spaces internal to text nodes. The returned value will be a str.
     """
     def _squash(node):
         # remove comment nodes
@@ -59,7 +65,7 @@ def sanitize_xml(xml_string):
                     x.nodeValue = ' '.join(x.nodeValue.strip().split())
                 if not x.nodeValue:
                     node.removeChild(x)
-        # process all tags recusively
+        # process all tags recursively
         for x in node.childNodes:
             if x.nodeType == minidom.Node.ELEMENT_NODE:
                 _squash(x)
@@ -75,37 +81,75 @@ class CachedManifestProvider(object):
         self._distribution_cache = distribution_cache
         self._manifest_providers = manifest_providers
 
+    def _get_max_lines(self, filepath):
+        config = getattr(self._distribution_cache, 'config', None)
+        if config is not None and hasattr(config, 'get_release_resource_max_lines'):
+            return config.get_release_resource_max_lines(filepath)
+        return 100
+
+    def _sanitize_resource(self, filepath, content):
+        if content is None:
+            return None
+        if filepath == 'package.xml':
+            return sanitize_xml(content)
+        return sanitize_and_truncate_docs(content, max_length=self._get_max_lines(filepath))
+
     def __call__(self, dist_name, repo, pkg_name, filepath='package.xml'):
         assert repo.version
 
-        # Load from cache
-        manifest_content = self._distribution_cache.release_resources.get(pkg_name, {}).get(filepath, None)
-        if manifest_content:
+        # Backwards compatibility for legacy ReleaseCache without release_resources
+        if not hasattr(self._distribution_cache, 'release_resources'):
             if filepath != 'package.xml':
-                manifest_content = sanitize_and_truncate_docs(manifest_content)
-            self._distribution_cache.release_resources[pkg_name][filepath] = manifest_content
-            logger.debug('Loading %s for package "%s" from cache' % (filepath, pkg_name) )
-
-        if not manifest_content:
-            # use manifest providers to lazy load
+                return None
+            package_xml = self._distribution_cache.release_package_xmls.get(pkg_name, None)
+            if package_xml:
+                package_xml = sanitize_xml(package_xml)
+                self._distribution_cache.release_package_xmls[pkg_name] = package_xml
+                logger.debug('Loading package.xml for package "%s" from cache' % pkg_name)
+                return package_xml
             for mp in self._manifest_providers or []:
                 try:
-                    manifest_content = mp(dist_name, repo, pkg_name, filepath)
-                    if filepath == 'package.xml':
-                        manifest_content = sanitize_xml(manifest_content)
-                    else:
-                        manifest_content = sanitize_and_truncate_docs(manifest_content)
+                    package_xml = sanitize_xml(mp(dist_name, repo, pkg_name))
                     break
                 except Exception as e:
-                    # pass and try next manifest provider
                     logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
-            if manifest_content is None:
+            if package_xml is None:
                 return None
+            self._distribution_cache.release_package_xmls[pkg_name] = package_xml
+            return package_xml
 
-            # populate the cache
-            if pkg_name not in self._distribution_cache.release_resources:
-                self._distribution_cache.release_resources[pkg_name] = {}
-            self._distribution_cache.release_resources[pkg_name][filepath] = manifest_content
+        pkg_resources = self._distribution_cache.release_resources.get(pkg_name, {})
+        if filepath in pkg_resources:
+            manifest_content = self._sanitize_resource(filepath, pkg_resources[filepath])
+            if manifest_content is not None:
+                self._distribution_cache.release_resources[pkg_name][filepath] = manifest_content
+            logger.debug('Loading %s for package "%s" from cache' % (filepath, pkg_name))
+            return manifest_content
+
+        if not self._manifest_providers:
+            return None
+
+        # Use manifest providers to lazy load
+        fetched = False
+        manifest_content = None
+        for mp in self._manifest_providers:
+            try:
+                manifest_content = self._sanitize_resource(
+                    filepath, mp(dist_name, repo, pkg_name, filepath)
+                )
+                fetched = True
+                break
+            except Exception as e:
+                # pass and try next manifest provider
+                logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', mp), e))
+
+        if not fetched or (filepath == 'package.xml' and manifest_content is None):
+            return None
+
+        # Populate the cache (including None for optional resources confirmed missing)
+        if pkg_name not in self._distribution_cache.release_resources:
+            self._distribution_cache.release_resources[pkg_name] = {}
+        self._distribution_cache.release_resources[pkg_name][filepath] = manifest_content
         return manifest_content
 
 
@@ -115,46 +159,74 @@ class CachedSourceManifestProvider(object):
         self._distribution_cache = distribution_cache
         self._source_manifest_providers = source_manifest_providers
 
+    def _get_source_query_params(self):
+        config = getattr(self._distribution_cache, 'config', None)
+        if config is not None and config.has_any_source_enabled():
+            filepaths = [fp for fp in config.enabled_source_resources() if fp != 'package.xml']
+            metadata = config.enabled_source_metadata()
+            return filepaths, metadata
+        return ['CHANGELOG.rst', 'README.md'], None
+
+    def _get_max_lines(self, filepath):
+        config = getattr(self._distribution_cache, 'config', None)
+        if config is not None and hasattr(config, 'get_source_resource_max_lines'):
+            return config.get_source_resource_max_lines(filepath)
+        return 100
+
+    def _sanitize_resource(self, filepath, content):
+        if content is None:
+            return None
+        if filepath == 'package.xml':
+            return sanitize_xml(content)
+        return sanitize_and_truncate_docs(content, max_length=self._get_max_lines(filepath))
+
     def __call__(self, repo):
         assert repo.url
         repo_cache = self._distribution_cache.source_repo_resources.get(repo.name, None)
         if not repo_cache:
-            logger.debug(f"Internal Cache Miss for {repo.name} Loading from Source Manifset Providers")
+            logger.debug(f"Internal Cache Miss for {repo.name} Loading from Source Manifest Providers")
+            filepaths, metadata = self._get_source_query_params()
             # Use manifest providers to lazy load
             for mp in self._source_manifest_providers or []:
                 try:
-                    repo_cache = mp(repo, filepaths=['CHANGELOG.rst', 'README.md']) # TODO (tfoote) list other files here
+                    try:
+                        repo_cache = mp(repo, filepaths=filepaths, metadata=metadata)
+                    except TypeError:
+                        try:
+                            repo_cache = mp(repo, filepaths=filepaths)
+                        except TypeError:
+                            repo_cache = mp(repo)
                 except Exception as e:
                     # pass and try next manifest provider
-                    logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
+                    logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', mp), e))
                     continue
 
-                self._distribution_cache.source_repo_resources[repo.name] = repo_cache
-                break
+                if repo_cache is not None:
+                    self._distribution_cache.source_repo_resources[repo.name] = repo_cache
+                    break
         else:
             logger.debug('Load package XMLs for repo "%s" from cache' % repo.name)
 
-        # De-duplicate with the release package XMLs. This will cause the YAML writer
-        # to use references for the common strings, saving a lot of space in the cache file.
+        # Sanitize/truncate and de-duplicate with the release resources so the YAML writer uses aliases
         if repo_cache:
             for package_name, pkg_entries in repo_cache._data.items():
-                if package_name.startswith('_'):
+                if package_name.startswith('_') or not isinstance(pkg_entries, dict):
                     continue
-                for resource_type in pkg_entries:
-                    valid_types = ['CHANGELOG.rst', 'README.md', 'package.xml']
-                    if  resource_type not in valid_types:
-                        #TODO(tfoote) clean up this logic with magic values
+                for resource_type in list(pkg_entries.keys()):
+                    if resource_type == 'package_path' or pkg_entries[resource_type] is None:
                         continue
-                    if 'package.xml' == resource_type:
-                        package_xml = sanitize_xml(pkg_entries['package.xml'])  # TODO(tfoote) validate as unnecessary should be sanitized already on insert?
-                        release_package_xml = self._distribution_cache.release_resources.get(package_name, {}).get('package.xml', None)
-                        if package_xml == release_package_xml:
-                            logger.debug(f'{package_name} Linking package.xml of source cache entry for compaction. Lines saved: {len(package_xml.splitlines())}')
-                            repo_cache.add(package_name, pkg_entries['package_path'], release_package_xml, 'package.xml', increment_update_time=False)
-                    else:
-                        content = sanitize_and_truncate_docs(pkg_entries[resource_type])
-                        release_content = self._distribution_cache.release_resources.get(package_name, {}).get(resource_type, None)
-                        if content == release_content:
-                            logger.debug(f'{package_name} Linking {resource_type} of source cache entry for compaction. Lines saved: {len(content.splitlines())}')
-                            repo_cache.add(package_name, pkg_entries['package_path'], release_content, resource_type, increment_update_time=False)
+                    content = self._sanitize_resource(resource_type, pkg_entries[resource_type])
+                    release_content = self._distribution_cache.release_resources.get(
+                        package_name, {}
+                    ).get(resource_type, None)
+                    if content == release_content and release_content is not None:
+                        logger.debug(
+                            f'{package_name} Linking {resource_type} of source cache entry for compaction. '
+                            f'Lines saved: {len(content.splitlines())}'
+                        )
+                        content = release_content
+                    repo_cache.add(
+                        package_name, pkg_entries['package_path'],
+                        content, resource_type, increment_update_time=False
+                    )
         return repo_cache
