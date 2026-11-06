@@ -134,6 +134,9 @@ def test_distribution_source_resources():
         source_manifest_providers=[source_provider_none, source_provider_mock]
     )
 
+    # Calling get_source_package_xml directly before get_source_repo_resources lazy-loads the repo!
+    assert dist.get_source_package_xml('bar_repo') == '<package><name>bar_repo</name><version>0.1.2</version></package>'
+
     # Fetch source repo resources and verify source_packages is populated (excluding '_'-prefixed keys)
     fetched_cache = dist.get_source_repo_resources('bar_repo')
     assert fetched_cache is repo_cache
@@ -175,6 +178,7 @@ def test_get_cached_distribution_resources():
     _, dist_file_data = _load_foo_dist_file()
 
     valid_pkg_xml = (
+        '<?xml version="1.0" ?>'
         '<package format="2">'
         '<name>bar_repo</name>'
         '<version>0.1.2</version>'
@@ -224,3 +228,18 @@ def test_get_cached_distribution_resources():
 
     source_walker = SourceDependencyWalker(dist)
     assert source_walker.get_depends('bar_repo', 'build') == set(['baz_pkg1'])
+
+    # Test get_source_repo_metadata resolution by package name and release-only/unknown repo handling
+    baz_cache = SourceRepositoryCache.from_ref('1234567890abcdef')
+    baz_cache.set_stars(77)
+    baz_cache.add('baz_pkg1', 'baz_pkg1', valid_pkg_xml, 'package.xml')
+    cache.source_repo_resources['baz-repo'] = baz_cache
+    cache.distribution_file.source_packages = cache.get_source_packages()
+    cache.config['source_repo_metadata']['stars'] = {'enabled': True}
+
+    assert dist.get_source_repo_metadata('baz-repo', 'stars', require_crawled=True) == 77
+    assert dist.get_source_repo_metadata('baz_pkg1', 'stars', require_crawled=True) == 77
+    assert dist.get_source_repo_metadata('release_only_repo', 'stars', require_crawled=True) is None
+    assert dist.get_source_repo_metadata('unknown_repo', 'stars', require_crawled=True) is None
+    assert dist.get_release_readme('unknown_pkg', require_crawled=True) is None
+
