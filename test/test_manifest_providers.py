@@ -450,6 +450,243 @@ def test_github_manifest_provider_404_and_cached_manifest_provider_no_git_fallba
     assert len(github_calls) == 1
 
 
+def test_github_source_metadata_assets_and_ignore_markers():
+    long_contributing = '\n'.join(['Contributing line %d' % i for i in range(1, 121)])
+    root_readme = '# Multi-pkg Repository Root README   \n'
+    pkg_a_xml = (
+        '<?xml version="1.0"?><package format="2">'
+        '<name>pkg_a</name><version>1.0.0</version>'
+        '<description>pkg_a</description><maintainer email="a@example.com">a</maintainer>'
+        '<license>BSD</license></package>'
+    )
+    tree_payload = {
+        'sha': '1111222233334444555566667777888899990000',
+        'truncated': False,
+        'tree': [
+            {'path': 'README.md', 'type': 'blob'},
+            {'path': 'CONTRIBUTING.rst', 'type': 'blob'},
+            {'path': 'pkg_a/package.xml', 'type': 'blob'},
+            {'path': 'pkg_a/msg/Alpha.msg', 'type': 'blob'},
+            {'path': 'pkg_a/msg/sub/Beta.msg', 'type': 'blob'},
+            {'path': 'pkg_a/srv/Query.srv', 'type': 'blob'},
+            {'path': 'pkg_a/launch/start.launch.py', 'type': 'blob'},
+            {'path': 'pkg_a/launch/legacy.xml', 'type': 'blob'},
+            {'path': 'pkg_a/config/other.yaml', 'type': 'blob'},
+            # Nested package inside pkg_a: its package.xml and assets must not be indexed under pkg_a
+            {'path': 'pkg_a/test/fixture_pkg/package.xml', 'type': 'blob'},
+            {'path': 'pkg_a/test/fixture_pkg/msg/Fixture.msg', 'type': 'blob'},
+            {'path': 'pkg_a/test/fixture_pkg/launch/fixture.launch.py', 'type': 'blob'},
+            # Ignored subdirectory inside pkg_a
+            {'path': 'pkg_a/experimental/CATKIN_IGNORE', 'type': 'blob'},
+            {'path': 'pkg_a/experimental/msg/IgnoredSub.msg', 'type': 'blob'},
+            # Ignored sibling packages using different ignore markers
+            {'path': 'ignored_colcon/COLCON_IGNORE', 'type': 'blob'},
+            {'path': 'ignored_colcon/package.xml', 'type': 'blob'},
+            {'path': 'ignored_ament/AMENT_IGNORE', 'type': 'blob'},
+            {'path': 'ignored_ament/package.xml', 'type': 'blob'},
+            {'path': 'ignored_rosindex/.rosindex_ignore', 'type': 'blob'},
+            {'path': 'ignored_rosindex/sub/package.xml', 'type': 'blob'},
+        ],
+    }
+    requested_urls = []
+
+    def fake_get_url(req):
+        url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+        requested_urls.append(url)
+        if '/git/trees/' in url:
+            return json.dumps(tree_payload)
+        if url.endswith('/repos/ros/genmsg'):
+            return json.dumps({
+                'stargazers_count': 88,
+                'description': 'Multi-package repo',
+                'topics': ['ros2', 'msgs'],
+                'pushed_at': '2026-03-15T08:30:00Z',
+            })
+        if url.endswith('/CONTRIBUTING.rst'):
+            return long_contributing
+        if url.endswith('/README.md') and '/pkg_a/' not in url:
+            return root_readme
+        if url.endswith('/pkg_a/package.xml'):
+            return pkg_a_xml
+        if url.endswith('/pkg_a/CHANGELOG.rst') or url.endswith('/pkg_a/README.md'):
+            raise HTTPError(url, 404, 'Not Found', {}, None)
+        raise AssertionError('Unexpected GitHub URL: %s' % url)
+
+    with patch('rosdistro.manifest_provider.github._get_url_contents', side_effect=fake_get_url):
+        repo_cache = rosdistro.manifest_provider.github.github_source_manifest_provider(
+            _genmsg_source_repo()
+        )
+        assert list(repo_cache.keys()) == ['pkg_a']
+        assert repo_cache.stars() == 88
+        assert repo_cache.description() == 'Multi-package repo'
+        assert repo_cache.tags() == ['ros2', 'msgs']
+        assert repo_cache.last_commit_time() == '2026-03-15T08:30:00Z'
+        assert repo_cache.readme() == '# Multi-pkg Repository Root README'
+        assert 'Truncated content at 100 of 120 lines' in repo_cache.contributing()
+        # Verify CONTRIBUTING.md was NOT requested because it was not in root_files
+        assert not any(u.endswith('/CONTRIBUTING.md') for u in requested_urls)
+
+        assert repo_cache.msg_files('pkg_a') == ['msg/Alpha.msg', 'msg/sub/Beta.msg']
+        assert repo_cache.srv_files('pkg_a') == ['srv/Query.srv']
+        assert repo_cache.launch_files('pkg_a') == ['launch/legacy.xml', 'launch/start.launch.py']
+
+    # Repository root ignore marker skips indexing all packages in the repository
+    root_ignored_tree = {
+        'sha': '1111222233334444555566667777888899990000',
+        'truncated': False,
+        'tree': [
+            {'path': '.rosindex_ignore', 'type': 'blob'},
+            {'path': 'pkg_a/package.xml', 'type': 'blob'},
+        ],
+    }
+    with patch(
+        'rosdistro.manifest_provider.github._get_url_contents',
+        side_effect=lambda req: json.dumps(root_ignored_tree)
+        if '/git/trees/' in (req.get_full_url() if hasattr(req, 'get_full_url') else str(req))
+        else '{}',
+    ):
+        ignored_cache = rosdistro.manifest_provider.github.github_source_manifest_provider(
+            _genmsg_source_repo()
+        )
+        assert list(ignored_cache.keys()) == []
+
+
+def test_gitlab_source_metadata_assets_and_ignore_markers():
+    def fake_urlopen(req):
+        url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+        if '/repository/commits?' in url:
+            return _make_mock_http_response(json.dumps([{
+                'id': 'cd30853005ef3a591cb8594b4aa49f9ef400d30f',
+                'committed_date': '2026-02-20T14:00:00Z',
+            }]))
+        if '/repository/tree?' in url:
+            return _make_mock_http_response(json.dumps([
+                {'path': 'README.rst', 'type': 'blob'},
+                {'path': 'CONTRIBUTING.md', 'type': 'blob'},
+                {'path': 'ros2trace_analysis/package.xml', 'type': 'blob'},
+                {'path': 'ros2trace_analysis/msg/TraceEvent.msg', 'type': 'blob'},
+                {'path': 'ros2trace_analysis/srv/Analyze.srv', 'type': 'blob'},
+                {'path': 'ros2trace_analysis/launch/trace.launch.xml', 'type': 'blob'},
+                {'path': 'ignored_dir/COLCON_IGNORE', 'type': 'blob'},
+                {'path': 'ignored_dir/package.xml', 'type': 'blob'},
+            ]))
+        if url.endswith('/projects/ros-tracing%2Ftracetools_analysis/'):
+            return _make_mock_http_response(json.dumps({
+                'star_count': 17,
+                'description': 'Tools for analysing trace data',
+                'tag_list': ['ros2', 'tracing'],
+                'last_activity_at': '2026-02-21T00:00:00Z',
+            }))
+        if 'repository/files/CONTRIBUTING.md/raw' in url:
+            return _make_mock_http_response('# GitLab Contributing\n')
+        if 'repository/files/README.rst/raw' in url:
+            return _make_mock_http_response('GitLab Root README\n')
+        if 'ros2trace_analysis%2Fpackage.xml/raw' in url:
+            return _make_mock_http_response(_SAMPLE_GITLAB_PACKAGE_XML)
+        if 'ros2trace_analysis%2FCHANGELOG.rst/raw' in url or 'ros2trace_analysis%2FREADME.md/raw' in url:
+            raise HTTPError(url, 404, 'Not Found', {}, None)
+        raise AssertionError('Unexpected GitLab URL: %s' % url)
+
+    with patch('rosdistro.manifest_provider.gitlab.urlopen', side_effect=fake_urlopen):
+        repo_cache = gitlab_source_manifest_provider(_tracetools_analysis_source_repo())
+        assert list(repo_cache.keys()) == ['ros2trace_analysis']
+        assert repo_cache.last_commit_time() == '2026-02-20T14:00:00Z'
+        assert repo_cache.contributing() == '# GitLab Contributing'
+        assert repo_cache.readme() == 'GitLab Root README'
+        assert repo_cache.msg_files('ros2trace_analysis') == ['msg/TraceEvent.msg']
+        assert repo_cache.srv_files('ros2trace_analysis') == ['srv/Analyze.srv']
+        assert repo_cache.launch_files('ros2trace_analysis') == ['launch/trace.launch.xml']
+
+
+def test_git_and_tar_source_metadata_assets_and_ignore_markers(tmp_path):
+    from contextlib import contextmanager
+
+    repo_dir = tmp_path / 'local_repo'
+    repo_dir.mkdir()
+    (repo_dir / 'README.md').write_text('# Local Repo Root README\n')
+    (repo_dir / 'CONTRIBUTING.md').write_text('# Local Contributing Guide\n')
+
+    pkg_dir = repo_dir / 'my_pkg'
+    (pkg_dir / 'msg').mkdir(parents=True)
+    (pkg_dir / 'srv').mkdir(parents=True)
+    (pkg_dir / 'launch').mkdir(parents=True)
+    (pkg_dir / '.hidden').mkdir(parents=True)
+    (pkg_dir / 'package.xml').write_text(_SAMPLE_TAR_PACKAGE_XML)
+    (pkg_dir / 'msg' / 'State.msg').write_text('int32 state\n')
+    (pkg_dir / 'srv' / 'Trigger.srv').write_text('---\nbool ok\n')
+    (pkg_dir / 'launch' / 'bringup.launch.py').write_text('# launch\n')
+    (pkg_dir / '.hidden' / 'Hidden.msg').write_text('int32 hidden\n')
+
+    ignored_dir = repo_dir / 'ignored_pkg'
+    ignored_dir.mkdir()
+    (ignored_dir / 'CATKIN_IGNORE').write_text('')
+    (ignored_dir / 'package.xml').write_text(_SAMPLE_GITLAB_PACKAGE_XML)
+
+    @contextmanager
+    def fake_temp_git_clone(url, ref):
+        yield str(repo_dir)
+
+    class FakeGit:
+        def __init__(self, cwd=None):
+            self.cwd = cwd
+
+        def command(self, *args):
+            if args == ('rev-parse', 'HEAD'):
+                return {'returncode': 0, 'output': 'deadbeef1234567890'}
+            if args == ('log', '-1', '--format=%cI', 'HEAD'):
+                return {'returncode': 0, 'output': '2026-04-05T16:45:00+00:00\n'}
+            raise AssertionError('Unexpected git command: %r' % (args,))
+
+    with patch('rosdistro.manifest_provider.git._temp_git_clone', fake_temp_git_clone), \
+         patch('rosdistro.manifest_provider.git.Git', FakeGit):
+        git_cache = git_source_manifest_provider(_genmsg_source_repo())
+        assert list(git_cache.keys()) == ['genmsg']
+        assert git_cache.ref() == 'deadbeef1234567890'
+        assert git_cache.last_commit_time() == '2026-04-05T16:45:00+00:00'
+        assert git_cache.contributing() == '# Local Contributing Guide'
+        assert git_cache.readme() == '# Local Repo Root README'
+        assert git_cache.msg_files('genmsg') == ['msg/State.msg']
+        assert git_cache.srv_files('genmsg') == ['srv/Trigger.srv']
+        assert git_cache.launch_files('genmsg') == ['launch/bringup.launch.py']
+
+    # Also verify tar_source_manifest_provider on the same structure
+    tar_bytes = _build_tar_bytes({
+        'README.md': '# Tar Root README\n',
+        'CONTRIBUTING.md': '# Tar Contributing\n',
+        'my_pkg/package.xml': _SAMPLE_TAR_PACKAGE_XML,
+        'my_pkg/msg/State.msg': 'int32 state\n',
+        'my_pkg/srv/Trigger.srv': '---\nbool ok\n',
+        'my_pkg/launch/bringup.launch.py': '# launch\n',
+        'ignored_pkg/CATKIN_IGNORE': '',
+        'ignored_pkg/package.xml': _SAMPLE_GITLAB_PACKAGE_XML,
+    })
+    with patch('rosdistro.manifest_provider.tar.urlopen',
+               side_effect=lambda req: _make_mock_http_response(tar_bytes)):
+        tar_cache = tar_source_manifest_provider(_genmsg_source_tarball())
+        assert list(tar_cache.keys()) == ['genmsg']
+        assert tar_cache.contributing() == '# Tar Contributing'
+        assert tar_cache.readme() == '# Tar Root README'
+        assert tar_cache.msg_files('genmsg') == ['msg/State.msg']
+        assert tar_cache.srv_files('genmsg') == ['srv/Trigger.srv']
+        assert tar_cache.launch_files('genmsg') == ['launch/bringup.launch.py']
+
+        # Verify CachedSourceManifestProvider preserves list-valued resources
+        class FakeCache(object):
+            def __init__(self):
+                self.config = CacheConfig.extended()
+                self.release_resources = {}
+                self.source_repo_resources = {}
+
+        cached_repo = CachedSourceManifestProvider(
+            FakeCache(), [tar_source_manifest_provider]
+        )(_genmsg_source_tarball())
+        assert cached_repo.msg_files('genmsg') == ['msg/State.msg']
+        assert cached_repo.srv_files('genmsg') == ['srv/Trigger.srv']
+        assert cached_repo.launch_files('genmsg') == ['launch/bringup.launch.py']
+        assert cached_repo.contributing() == '# Tar Contributing'
+        assert cached_repo.readme() == '# Tar Root README'
+
+
 
 def _genmsg_release_repo():
     return ReleaseRepositorySpecification('genmsg', {

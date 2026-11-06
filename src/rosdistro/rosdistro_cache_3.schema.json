@@ -78,6 +78,12 @@
       "properties": {
         "enabled": {
           "type": "boolean"
+        },
+        "max_lines": {
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -162,6 +168,24 @@
           "items": {
             "type": "string"
           }
+        },
+        "_last_commit_time": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "_contributing": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "_readme": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -173,6 +197,7 @@
       "additionalProperties": {
         "type": [
           "string",
+          "array",
           "null"
         ]
       },
@@ -201,6 +226,36 @@
             "null"
           ],
           "description": "Contents of the README.md if it's available"
+        },
+        "launch_files": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Relative paths of launch files within the package"
+        },
+        "msg_files": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Relative paths of .msg files within the package"
+        },
+        "srv_files": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Relative paths of .srv files within the package"
         },
         "version": {
           "type": "string",

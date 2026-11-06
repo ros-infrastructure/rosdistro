@@ -51,22 +51,25 @@ class ResourceNotCrawledError(KeyError):
     """
 
 
+NO_MAX_LINES_RESOURCES = ('package.xml', 'launch_files', 'msg_files', 'srv_files')
+
+
 def _normalize_resource_entry(name, raw_value, default_max_lines=100):
     if isinstance(raw_value, bool):
         entry = {'enabled': raw_value}
-        if name != 'package.xml' and default_max_lines is not None:
+        if name not in NO_MAX_LINES_RESOURCES and default_max_lines is not None:
             entry['max_lines'] = default_max_lines
         return entry
     if isinstance(raw_value, int):
         entry = {'enabled': True}
-        if name != 'package.xml':
+        if name not in NO_MAX_LINES_RESOURCES:
             entry['max_lines'] = raw_value
         return entry
     if isinstance(raw_value, dict):
         entry = {'enabled': bool(raw_value.get('enabled', True))}
         if 'max_lines' in raw_value:
             entry['max_lines'] = int(raw_value['max_lines']) if raw_value['max_lines'] is not None else None
-        elif name != 'package.xml' and default_max_lines is not None:
+        elif name not in NO_MAX_LINES_RESOURCES and default_max_lines is not None:
             entry['max_lines'] = default_max_lines
         return entry
     raise ValueError("Invalid resource configuration for '%s': %r" % (name, raw_value))
@@ -75,8 +78,13 @@ def _normalize_resource_entry(name, raw_value, default_max_lines=100):
 def _normalize_metadata_entry(name, raw_value):
     if isinstance(raw_value, bool):
         return {'enabled': raw_value}
+    if isinstance(raw_value, int):
+        return {'enabled': True, 'max_lines': raw_value}
     if isinstance(raw_value, dict):
-        return {'enabled': bool(raw_value.get('enabled', True))}
+        entry = {'enabled': bool(raw_value.get('enabled', True))}
+        if 'max_lines' in raw_value:
+            entry['max_lines'] = int(raw_value['max_lines']) if raw_value['max_lines'] is not None else None
+        return entry
     raise ValueError("Invalid metadata configuration for '%s': %r" % (name, raw_value))
 
 
@@ -88,7 +96,22 @@ class CacheConfig(dict):
     DEFAULT_MIN_UPDATE_DELTA = 3600
     DEFAULT_YAML_ALIAS_MIN_LENGTH = 300
     DEFAULT_PACKAGE_RESOURCES = ('package.xml', 'README.md', 'CHANGELOG.rst')
-    DEFAULT_REPO_METADATA = ('stars', 'description', 'tags')
+    DEFAULT_SOURCE_PACKAGE_RESOURCES = (
+        'package.xml',
+        'README.md',
+        'CHANGELOG.rst',
+        'launch_files',
+        'msg_files',
+        'srv_files',
+    )
+    DEFAULT_REPO_METADATA = (
+        'stars',
+        'description',
+        'tags',
+        'last_commit_time',
+        'contributing',
+        'readme',
+    )
     VALID_CONFIG_KEYS = {
         'release_package_resources',
         'source_package_resources',
@@ -100,10 +123,11 @@ class CacheConfig(dict):
     }
 
     @classmethod
-    def _build_resource_map(cls, raw_map, force_package_xml=False):
+    def _build_resource_map(cls, raw_map, force_package_xml=False, default_resources=None):
+        defaults = default_resources if default_resources is not None else cls.DEFAULT_PACKAGE_RESOURCES
         res = {
             name: _normalize_resource_entry(name, False, cls.DEFAULT_DOC_MAX_LINES)
-            for name in cls.DEFAULT_PACKAGE_RESOURCES
+            for name in defaults
         }
         if isinstance(raw_map, (list, tuple, set)):
             raw_map = {k: True for k in raw_map}
@@ -121,8 +145,16 @@ class CacheConfig(dict):
             if unknown_keys:
                 raise ValueError("Unknown cache configuration keys: %s" % ', '.join(sorted(unknown_keys)))
 
-        rel_res = self._build_resource_map(raw.get('release_package_resources'), force_package_xml=True)
-        src_res = self._build_resource_map(raw.get('source_package_resources'), force_package_xml=False)
+        rel_res = self._build_resource_map(
+            raw.get('release_package_resources'),
+            force_package_xml=True,
+            default_resources=self.DEFAULT_PACKAGE_RESOURCES,
+        )
+        src_res = self._build_resource_map(
+            raw.get('source_package_resources'),
+            force_package_xml=False,
+            default_resources=self.DEFAULT_SOURCE_PACKAGE_RESOURCES,
+        )
 
         src_meta = {k: {'enabled': False} for k in self.DEFAULT_REPO_METADATA}
         raw_meta = raw.get('source_repo_metadata', {})
@@ -181,7 +213,7 @@ class CacheConfig(dict):
 
     def get_release_resource_max_lines(self, filepath, default=DEFAULT_DOC_MAX_LINES):
         entry = self['release_package_resources'].get(filepath, {})
-        return entry.get('max_lines', default if filepath != 'package.xml' else None)
+        return entry.get('max_lines', default if filepath not in NO_MAX_LINES_RESOURCES else None)
 
     def enabled_release_resources(self):
         enabled = [k for k, v in self['release_package_resources'].items() if v.get('enabled')]
@@ -194,7 +226,7 @@ class CacheConfig(dict):
 
     def get_source_resource_max_lines(self, filepath, default=DEFAULT_DOC_MAX_LINES):
         entry = self['source_package_resources'].get(filepath, {})
-        return entry.get('max_lines', default if filepath != 'package.xml' else None)
+        return entry.get('max_lines', default if filepath not in NO_MAX_LINES_RESOURCES else None)
 
     def enabled_source_resources(self):
         enabled = [k for k, v in self['source_package_resources'].items() if v.get('enabled')]
@@ -206,6 +238,11 @@ class CacheConfig(dict):
     def is_source_metadata_enabled(self, key):
         clean_key = key[1:] if key.startswith('_') else key
         return bool(self['source_repo_metadata'].get(clean_key, {}).get('enabled', False))
+
+    def get_source_metadata_max_lines(self, key, default=DEFAULT_DOC_MAX_LINES):
+        clean_key = key[1:] if key.startswith('_') else key
+        entry = self['source_repo_metadata'].get(clean_key, {})
+        return entry.get('max_lines', default)
 
     def enabled_source_metadata(self):
         return [k for k, v in self['source_repo_metadata'].items() if v.get('enabled')]
@@ -221,7 +258,7 @@ class CacheConfig(dict):
     def extended(cls):
         return cls({
             'release_package_resources': {k: True for k in cls.DEFAULT_PACKAGE_RESOURCES},
-            'source_package_resources': {k: True for k in cls.DEFAULT_PACKAGE_RESOURCES},
+            'source_package_resources': {k: True for k in cls.DEFAULT_SOURCE_PACKAGE_RESOURCES},
             'source_repo_metadata': {k: True for k in cls.DEFAULT_REPO_METADATA},
         })
 
@@ -435,7 +472,7 @@ class DistributionCache(object):
         enabled_rel = set(new_cfg.enabled_release_resources())
         resized_rel = {
             r for r in enabled_rel
-            if r != 'package.xml' and (
+            if r not in NO_MAX_LINES_RESOURCES and (
                 not old_cfg.is_release_resource_enabled(r) or
                 old_cfg.get_release_resource_max_lines(r) != new_cfg.get_release_resource_max_lines(r)
             )
@@ -457,7 +494,7 @@ class DistributionCache(object):
             enabled_src_meta = set(new_cfg.enabled_source_metadata())
             need_recrawl = any(
                 not old_cfg.is_source_resource_enabled(r) or (
-                    r != 'package.xml' and
+                    r not in NO_MAX_LINES_RESOURCES and
                     old_cfg.get_source_resource_max_lines(r) != new_cfg.get_source_resource_max_lines(r)
                 )
                 for r in enabled_src_res

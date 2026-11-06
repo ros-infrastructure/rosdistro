@@ -37,9 +37,16 @@ import tempfile
 from contextlib import contextmanager
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
-from catkin_pkg.packages import find_package_paths
 
 from rosdistro.common import rmtree
+from rosdistro.manifest_provider.cache import (
+    DEFAULT_SOURCE_FILEPATHS,
+    PACKAGE_ASSET_LIST_RESOURCES,
+    ROOT_DOC_CANDIDATES,
+    list_local_repo_files,
+    partition_repo_tree,
+    sanitize_and_truncate_docs,
+)
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro.vcs import Git, ref_is_hash
 from rosdistro import logger
@@ -61,19 +68,38 @@ def git_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
         raise RuntimeError('Unable to fetch %s: %s' % (filepath, e))
 
 
-def git_source_manifest_provider(repo, filepaths=('CHANGELOG.rst', 'README.md')):
+def git_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metadata=None):
     xmlpath = 'package.xml'
     try:
         with _temp_git_clone(repo.url, repo.version) as git_repo_path:
             logger.debug(f'Cloning repository {repo.url} to get source info')
+            git_client = Git(git_repo_path)
             # Include the git hash in our cache dictionary.
-            git_hash = Git(git_repo_path).command('rev-parse', 'HEAD')['output']
+            git_hash = git_client.command('rev-parse', 'HEAD')['output']
             cache = SourceRepositoryCache.from_ref(git_hash)
 
+            package_xml_paths, package_assets, root_files = partition_repo_tree(
+                list_local_repo_files(git_repo_path)
+            )
+
+            if metadata is None or 'last_commit_time' in metadata:
+                commit_time_res = git_client.command('log', '-1', '--format=%cI', 'HEAD')
+                if commit_time_res.get('returncode', 0) == 0 and commit_time_res.get('output'):
+                    cache.set_metadata('last_commit_time', commit_time_res['output'].strip())
+
+            for meta_key, candidates in ROOT_DOC_CANDIDATES.items():
+                if metadata is None or meta_key in metadata:
+                    for candidate in candidates:
+                        if candidate not in root_files:
+                            continue
+                        candidate_path = os.path.join(git_repo_path, candidate)
+                        if os.path.isfile(candidate_path):
+                            with open(candidate_path, 'r') as f:
+                                cache.set_metadata(meta_key, sanitize_and_truncate_docs(f.read()))
+                            break
+
             # Find filepath files inside the repo.
-            for package_path in find_package_paths(git_repo_path):
-                if package_path == '.':
-                    package_path = ''
+            for package_path in package_xml_paths:
                 with open(os.path.join(git_repo_path, package_path, xmlpath), 'r') as f:
                     package_xml = f.read()
                 try:
@@ -83,6 +109,14 @@ def git_source_manifest_provider(repo, filepaths=('CHANGELOG.rst', 'README.md'))
                 cache.add(name, package_path, package_xml, xmlpath)
                 for filepath in filepaths:
                     if filepath == xmlpath:
+                        continue
+                    if filepath in PACKAGE_ASSET_LIST_RESOURCES:
+                        cache.add(
+                            name,
+                            package_path,
+                            package_assets.get(package_path, {}).get(filepath, []),
+                            filepath,
+                        )
                         continue
                     repo_filename = os.path.join(git_repo_path, package_path, filepath)
                     if not os.path.exists(repo_filename):

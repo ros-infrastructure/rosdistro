@@ -41,6 +41,13 @@ from urllib.parse import urlencode
 
 from catkin_pkg.package import parse_package_string
 
+from rosdistro.manifest_provider.cache import (
+    DEFAULT_SOURCE_FILEPATHS,
+    PACKAGE_ASSET_LIST_RESOURCES,
+    ROOT_DOC_CANDIDATES,
+    partition_repo_tree,
+    sanitize_and_truncate_docs,
+)
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro import logger
 
@@ -51,6 +58,7 @@ GITLAB_REPO_METADATA_FIELDS = {
     'stars': 'star_count',
     'description': 'description',
     'tags': 'tag_list',
+    'last_commit_time': 'last_activity_at',
 }
 
 def _gitlab_urlopen(url):
@@ -120,7 +128,7 @@ def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
         raise
 
 
-def gitlab_source_manifest_provider(repo, filepaths=('CHANGELOG.rst', 'README.md'), metadata=None):
+def gitlab_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metadata=None):
     assert repo.version
     server, path = repo.get_url_parts()
     if not server.endswith('gitlab.com') and server != ROSDISTRO_GITLAB_SERVER:
@@ -132,43 +140,55 @@ def gitlab_source_manifest_provider(repo, filepaths=('CHANGELOG.rst', 'README.md
         'per_page': 1,
         'ref_name': repo.version,
     }
-    sha = next(_gitlab_paged_api_query(server, path, 'repository/commits', attrs))['id']
+    commit_obj = next(_gitlab_paged_api_query(server, path, 'repository/commits', attrs))
+    sha = commit_obj['id']
+    commit_date = commit_obj.get('committed_date') or commit_obj.get('created_at')
 
-    # Look for package.xml files in the tree
+    # Look for package.xml files and assets in the tree
     attrs = {
         'recursive': 'true',
         'ref': sha,
     }
-    package_xml_paths = set()
-    for obj in _gitlab_paged_api_query(server, path, 'repository/tree', attrs):
-        if obj['path'].split('/')[-1] == 'package.xml':
-            package_xml_paths.add(os.path.dirname(obj['path']))
-
-    # Filter out ones that are inside other packages (eg, part of tests)
-    def package_xml_in_parent(path):
-        if path == '':
-            return True
-        parent = path
-        while True:
-            parent = os.path.dirname(parent)
-            if parent in package_xml_paths:
-                return False
-            if parent == '':
-                return True
-    package_xml_paths = list(filter(package_xml_in_parent, package_xml_paths))
+    blob_paths = [
+        obj['path']
+        for obj in _gitlab_paged_api_query(server, path, 'repository/tree', attrs)
+        if obj.get('type', 'blob') not in ('tree', 'commit')
+    ]
+    package_xml_paths, package_assets, root_files = partition_repo_tree(blob_paths)
 
     cache = SourceRepositoryCache.from_ref(sha)
 
+    if (metadata is None or 'last_commit_time' in metadata) and commit_date is not None:
+        cache.set_metadata('last_commit_time', commit_date)
+
     # Fetch project info for configured metadata (stars, description, tags, etc.)
     if metadata is None or len(metadata) > 0:
-        try:
-            with _gitlab_api_query(server, path, '', {}) as res:
-                project_json = json.loads(res.read().decode('utf-8'))
-                for meta_key, api_field in GITLAB_REPO_METADATA_FIELDS.items():
-                    if (metadata is None or meta_key in metadata) and api_field in project_json:
-                        cache.set_metadata(meta_key, project_json[api_field])
-        except URLError as e:
-            logger.debug('- failed to load project info from %s: %s' % (path, e))
+        if metadata is None or any(k in metadata for k in GITLAB_REPO_METADATA_FIELDS):
+            try:
+                with _gitlab_api_query(server, path, '', {}) as res:
+                    project_json = json.loads(res.read().decode('utf-8'))
+                    for meta_key, api_field in GITLAB_REPO_METADATA_FIELDS.items():
+                        if meta_key == 'last_commit_time' and cache.get_metadata('last_commit_time') is not None:
+                            continue
+                        if (metadata is None or meta_key in metadata) and api_field in project_json:
+                            cache.set_metadata(meta_key, project_json[api_field])
+            except URLError as e:
+                logger.debug('- failed to load project info from %s: %s' % (path, e))
+
+        for meta_key, candidates in ROOT_DOC_CANDIDATES.items():
+            if metadata is None or meta_key in metadata:
+                for candidate in candidates:
+                    if candidate not in root_files:
+                        continue
+                    resource = 'repository/files/' + urlquote(candidate, safe='') + '/raw'
+                    try:
+                        with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
+                            doc_contents = res.read().decode('utf-8')
+                    except URLError as e:
+                        logger.debug('- failed to load %s from %s: %s' % (candidate, path, e))
+                        continue
+                    cache.set_metadata(meta_key, sanitize_and_truncate_docs(doc_contents))
+                    break
 
     for package_xml_path in package_xml_paths:
         package_xml_filename = 'package.xml'
@@ -181,6 +201,14 @@ def gitlab_source_manifest_provider(repo, filepaths=('CHANGELOG.rst', 'README.md
         cache.add(name, package_xml_path, package_xml, package_xml_filename)
         for filepath in filepaths:
             if filepath == package_xml_filename:
+                continue
+            if filepath in PACKAGE_ASSET_LIST_RESOURCES:
+                cache.add(
+                    name,
+                    package_xml_path,
+                    package_assets.get(package_xml_path, {}).get(filepath, []),
+                    filepath,
+                )
                 continue
             resource_path = urlquote(
                 package_xml_path + '/' + filepath if package_xml_path else filepath, safe='')

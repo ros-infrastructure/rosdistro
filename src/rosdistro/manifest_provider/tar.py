@@ -39,9 +39,16 @@ import urllib
 from urllib.request import urlopen, Request
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
-from catkin_pkg.packages import find_package_paths
 
 from rosdistro.common import rmtree
+from rosdistro.manifest_provider.cache import (
+    DEFAULT_SOURCE_FILEPATHS,
+    IGNORE_MARKERS,
+    PACKAGE_ASSET_LIST_RESOURCES,
+    ROOT_DOC_CANDIDATES,
+    partition_repo_tree,
+    sanitize_and_truncate_docs,
+)
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro import logger
 
@@ -79,7 +86,7 @@ def tar_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
         return package_xml.decode('utf-8')
 
 
-def tar_source_manifest_provider(repo, filepaths=('CHANGELOG.rst', 'README.md')):
+def tar_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metadata=None):
     assert repo.type == 'tar'
     xmlpath = 'package.xml'
 
@@ -98,13 +105,29 @@ def tar_source_manifest_provider(repo, filepaths=('CHANGELOG.rst', 'README.md'))
         with tarfile.open(fileobj=io.BytesIO(response.read())) as tar:
             tmpdir = tempfile.mkdtemp()
             try:
+                blob_paths = [
+                    m.name.lstrip('./')
+                    for m in tar.getmembers()
+                    if m.isfile()
+                ]
+                package_xml_paths, package_assets, root_files = partition_repo_tree(blob_paths)
+
                 # Extract the package.xmls and requested filepaths
                 tar.extractall(path=tmpdir, members=_package_xml_members(tar, filepaths))
                 cache = SourceRepositoryCache.from_ref(None)
 
-                for package_path in find_package_paths(tmpdir):
-                    if package_path == '.':
-                        package_path = ''
+                for meta_key, candidates in ROOT_DOC_CANDIDATES.items():
+                    if metadata is None or meta_key in metadata:
+                        for candidate in candidates:
+                            if candidate not in root_files:
+                                continue
+                            candidate_path = os.path.join(tmpdir, candidate)
+                            if os.path.isfile(candidate_path):
+                                with open(candidate_path, 'r') as f:
+                                    cache.set_metadata(meta_key, sanitize_and_truncate_docs(f.read()))
+                                break
+
+                for package_path in package_xml_paths:
                     with open(os.path.join(tmpdir, package_path, xmlpath), 'r') as f:
                         package_xml = f.read()
                     try:
@@ -114,6 +137,14 @@ def tar_source_manifest_provider(repo, filepaths=('CHANGELOG.rst', 'README.md'))
                     cache.add(name, package_path, package_xml, xmlpath)
                     for filepath in filepaths:
                         if filepath == xmlpath:
+                            continue
+                        if filepath in PACKAGE_ASSET_LIST_RESOURCES:
+                            cache.add(
+                                name,
+                                package_path,
+                                package_assets.get(package_path, {}).get(filepath, []),
+                                filepath,
+                            )
                             continue
                         repo_filename = os.path.join(tmpdir, package_path, filepath)
                         if not os.path.isfile(repo_filename):
@@ -132,9 +163,13 @@ def tar_source_manifest_provider(repo, filepaths=('CHANGELOG.rst', 'README.md'))
 
 
 def _package_xml_members(tar, filepaths=None):
-    target_filenames = {'package.xml'}
+    target_filenames = {'package.xml'} | set(IGNORE_MARKERS)
+    for candidates in ROOT_DOC_CANDIDATES.values():
+        target_filenames.update(candidates)
     if filepaths:
-        target_filenames.update(filepaths)
+        target_filenames.update(
+            fp for fp in filepaths if fp not in PACKAGE_ASSET_LIST_RESOURCES
+        )
     for tarinfo in tar:
         if os.path.basename(tarinfo.name) in target_filenames or any(
             tarinfo.name == fp or tarinfo.name.endswith('/' + fp) for fp in target_filenames

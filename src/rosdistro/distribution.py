@@ -210,8 +210,26 @@ class Distribution(object):
     def get_source_changelog(self, pkg_name, require_crawled=False):
         return self.get_source_resource(pkg_name, 'CHANGELOG.rst', require_crawled=require_crawled)
 
+    def get_source_launch_files(self, pkg_name, require_crawled=False):
+        return self.get_source_resource(pkg_name, 'launch_files', require_crawled=require_crawled)
+
+    def get_source_msg_files(self, pkg_name, require_crawled=False):
+        return self.get_source_resource(pkg_name, 'msg_files', require_crawled=require_crawled)
+
+    def get_source_srv_files(self, pkg_name, require_crawled=False):
+        return self.get_source_resource(pkg_name, 'srv_files', require_crawled=require_crawled)
+
     def get_source_repo_package_xmls(self, repo_name):
         return self.get_source_repo_resources(repo_name)
+
+    def get_source_repo_last_commit_time(self, repo_name, require_crawled=False):
+        return self.get_source_repo_metadata(repo_name, 'last_commit_time', require_crawled=require_crawled)
+
+    def get_source_repo_contributing(self, repo_name, require_crawled=False):
+        return self.get_source_repo_metadata(repo_name, 'contributing', require_crawled=require_crawled)
+
+    def get_source_repo_readme(self, repo_name, require_crawled=False):
+        return self.get_source_repo_metadata(repo_name, 'readme', require_crawled=require_crawled)
 
     def get_source_repo_metadata(self, repo_name, key=None, require_crawled=False):
         if repo_name not in self._distribution_file.repositories:

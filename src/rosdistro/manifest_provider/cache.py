@@ -31,9 +31,176 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import os
 from xml.dom import minidom
 
 from rosdistro import logger
+
+IGNORE_MARKERS = frozenset((
+    'CATKIN_IGNORE',
+    'AMENT_IGNORE',
+    'COLCON_IGNORE',
+    '.rosindex_ignore',
+))
+
+PACKAGE_ASSET_LIST_RESOURCES = ('launch_files', 'msg_files', 'srv_files')
+
+DEFAULT_SOURCE_FILEPATHS = (
+    'CHANGELOG.rst',
+    'README.md',
+    'launch_files',
+    'msg_files',
+    'srv_files',
+)
+
+ROOT_DOC_CANDIDATES = {
+    'contributing': ('CONTRIBUTING.md', 'CONTRIBUTING.rst'),
+    'readme': ('README.md', 'README.rst'),
+}
+
+
+def is_launch_file(rel_path):
+    """Return True if *rel_path* (relative to a package directory) is a launch file."""
+    parts = rel_path.replace('\\', '/').strip('/').split('/')
+    if not parts or not parts[-1]:
+        return False
+    filename = parts[-1].lower()
+    if filename in ('package.xml', '__init__.py'):
+        return False
+    if filename.endswith(('.launch', '.launch.xml', '.launch.py', '.launch.yaml', '.launch.yml')):
+        return True
+    dir_parts = [p.lower() for p in parts[:-1]]
+    if any('launch' in d for d in dir_parts) and filename.endswith(('.xml', '.py', '.yaml', '.yml')):
+        return True
+    return False
+
+
+def partition_repo_tree(blob_paths):
+    """Scan a list of repository-relative file paths, respecting ignore markers and nested
+    package boundaries.
+
+    Returns ``(package_xml_paths, package_assets, root_files)`` where:
+    - ``package_xml_paths`` is the list of non-ignored top-level package directories
+      (e.g. ``''`` for a root package or ``'my_pkg'`` for ``my_pkg/package.xml``).
+    - ``package_assets`` maps each ``package_xml_path`` in ``package_xml_paths`` to
+      ``{'launch_files': [...], 'msg_files': [...], 'srv_files': [...]}`` with sorted
+      package-relative paths.
+    - ``root_files`` is the set of top-level file names at the repository root.
+    """
+    normalized = [p.replace('\\', '/').strip('/') for p in blob_paths if p and p.strip('/')]
+    root_files = {p for p in normalized if '/' not in p}
+
+    # Check if repository root itself contains an ignore marker
+    if IGNORE_MARKERS.intersection(root_files):
+        return [], {}, root_files
+
+    ignored_dirs = set()
+    for p in normalized:
+        parts = p.split('/')
+        if parts[-1] in IGNORE_MARKERS and len(parts) > 1:
+            ignored_dirs.add('/'.join(parts[:-1]))
+
+    def _is_ignored(path_or_dir):
+        if not ignored_dirs or not path_or_dir:
+            return False
+        for ig in ignored_dirs:
+            if path_or_dir == ig or path_or_dir.startswith(ig + '/'):
+                return True
+        return False
+
+    all_pkg_dirs_list = []
+    all_pkg_dirs_set = set()
+    for p in normalized:
+        parts = p.split('/')
+        if parts[-1] != 'package.xml':
+            continue
+        parent_dir = '/'.join(parts[:-1])
+        if _is_ignored(parent_dir):
+            continue
+        if any(part.startswith('.') for part in parts[:-1]):
+            continue
+        if parent_dir not in all_pkg_dirs_set:
+            all_pkg_dirs_list.append(parent_dir)
+            all_pkg_dirs_set.add(parent_dir)
+
+    # Filter out nested packages inside other packages (matching find_package_paths)
+    def _package_xml_in_parent(pkg_dir):
+        if pkg_dir == '':
+            return True
+        parent = pkg_dir
+        while True:
+            parent = os.path.dirname(parent)
+            if parent in all_pkg_dirs_set:
+                return False
+            if parent == '':
+                return True
+
+    package_xml_paths = [d for d in all_pkg_dirs_list if _package_xml_in_parent(d)]
+
+    # Sort all package dirs (including nested ones) deepest-first so nested package
+    # directories claim their own files and prevent them from leaking into parent packages.
+    sorted_all_pkg_dirs = sorted(
+        all_pkg_dirs_list,
+        key=lambda d: (len(d.split('/')) if d else 0, len(d)),
+        reverse=True,
+    )
+    package_assets = {
+        pkg_dir: {'launch_files': [], 'msg_files': [], 'srv_files': []}
+        for pkg_dir in package_xml_paths
+    }
+
+    if sorted_all_pkg_dirs:
+        for p in normalized:
+            if _is_ignored(p):
+                continue
+            owning_pkg_dir = None
+            rel_path = None
+            for pkg_dir in sorted_all_pkg_dirs:
+                if pkg_dir == '':
+                    owning_pkg_dir = ''
+                    rel_path = p
+                    break
+                if p.startswith(pkg_dir + '/'):
+                    owning_pkg_dir = pkg_dir
+                    rel_path = p[len(pkg_dir) + 1:]
+                    break
+            if owning_pkg_dir is None or owning_pkg_dir not in package_assets or not rel_path:
+                continue
+            if any(part.startswith('.') for part in rel_path.split('/')):
+                continue
+            assets = package_assets[owning_pkg_dir]
+            if rel_path.endswith('.msg'):
+                assets['msg_files'].append(rel_path)
+            elif rel_path.endswith('.srv'):
+                assets['srv_files'].append(rel_path)
+            elif is_launch_file(rel_path):
+                assets['launch_files'].append(rel_path)
+
+    for assets in package_assets.values():
+        assets['launch_files'] = sorted(set(assets['launch_files']))
+        assets['msg_files'] = sorted(set(assets['msg_files']))
+        assets['srv_files'] = sorted(set(assets['srv_files']))
+
+    return package_xml_paths, package_assets, root_files
+
+
+def list_local_repo_files(repo_root):
+    """Walk *repo_root* on disk (excluding hidden directories like ``.git``) and return
+    a list of repository-relative POSIX file paths.
+    """
+    rel_files = []
+    for root, dirs, files in os.walk(repo_root):
+        dirs[:] = sorted(d for d in dirs if not d.startswith('.'))
+        rel_dir = os.path.relpath(root, repo_root)
+        if rel_dir == '.':
+            rel_dir = ''
+        else:
+            rel_dir = rel_dir.replace(os.sep, '/')
+        for fname in sorted(files):
+            rel_files.append(f'{rel_dir}/{fname}' if rel_dir else fname)
+        if IGNORE_MARKERS.intersection(files):
+            dirs[:] = []
+    return rel_files
 
 
 def sanitize_and_truncate_docs(doc_string, max_length=100):
@@ -165,7 +332,7 @@ class CachedSourceManifestProvider(object):
             filepaths = [fp for fp in config.enabled_source_resources() if fp != 'package.xml']
             metadata = config.enabled_source_metadata()
             return filepaths, metadata
-        return ['CHANGELOG.rst', 'README.md'], None
+        return list(DEFAULT_SOURCE_FILEPATHS), None
 
     def _get_max_lines(self, filepath):
         config = getattr(self._distribution_cache, 'config', None)
@@ -173,9 +340,17 @@ class CachedSourceManifestProvider(object):
             return config.get_source_resource_max_lines(filepath)
         return 100
 
+    def _get_metadata_max_lines(self, key):
+        config = getattr(self._distribution_cache, 'config', None)
+        if config is not None and hasattr(config, 'get_source_metadata_max_lines'):
+            return config.get_source_metadata_max_lines(key)
+        return 100
+
     def _sanitize_resource(self, filepath, content):
         if content is None:
             return None
+        if isinstance(content, list):
+            return list(content)
         if filepath == 'package.xml':
             return sanitize_xml(content)
         return sanitize_and_truncate_docs(content, max_length=self._get_max_lines(filepath))
@@ -209,6 +384,13 @@ class CachedSourceManifestProvider(object):
 
         # Sanitize/truncate and de-duplicate with the release resources so the YAML writer uses aliases
         if repo_cache:
+            for meta_doc in ('contributing', 'readme'):
+                meta_val = repo_cache.get_metadata(meta_doc)
+                if isinstance(meta_val, str):
+                    repo_cache.set_metadata(
+                        meta_doc,
+                        sanitize_and_truncate_docs(meta_val, max_length=self._get_metadata_max_lines(meta_doc)),
+                    )
             for package_name, pkg_entries in repo_cache._data.items():
                 if package_name.startswith('_') or not isinstance(pkg_entries, dict):
                     continue
@@ -216,15 +398,16 @@ class CachedSourceManifestProvider(object):
                     if resource_type == 'package_path' or pkg_entries[resource_type] is None:
                         continue
                     content = self._sanitize_resource(resource_type, pkg_entries[resource_type])
-                    release_content = self._distribution_cache.release_resources.get(
-                        package_name, {}
-                    ).get(resource_type, None)
-                    if content == release_content and release_content is not None:
-                        logger.debug(
-                            f'{package_name} Linking {resource_type} of source cache entry for compaction. '
-                            f'Lines saved: {len(content.splitlines())}'
-                        )
-                        content = release_content
+                    if isinstance(content, str):
+                        release_content = self._distribution_cache.release_resources.get(
+                            package_name, {}
+                        ).get(resource_type, None)
+                        if content == release_content and release_content is not None:
+                            logger.debug(
+                                f'{package_name} Linking {resource_type} of source cache entry for compaction. '
+                                f'Lines saved: {len(content.splitlines())}'
+                            )
+                            content = release_content
                     repo_cache.add(
                         package_name, pkg_entries['package_path'],
                         content, resource_type, increment_update_time=False

@@ -215,9 +215,15 @@ def test_distribution_cache_schema_validation_and_yaml_roundtrip(mock_git):
     repo_cache.set_stars(42)
     repo_cache.set_description('Test repository')
     repo_cache.set_tags(['ros2', 'test'])
+    repo_cache.set_last_commit_time('2026-04-01T12:00:00Z')
+    repo_cache.set_contributing('# Contributing Guide')
+    repo_cache.set_readme('# Repo Root README')
     repo_cache.add('my_pkg', 'src/my_pkg', '<package format="2"><name>my_pkg</name></package>', 'package.xml')
     repo_cache.add('my_pkg', 'src/my_pkg', '# my_pkg', 'README.md')
     repo_cache.add('my_pkg', 'src/my_pkg', 'Changelog', 'CHANGELOG.rst')
+    repo_cache.add('my_pkg', 'src/my_pkg', ['launch/my_pkg.launch.py'], 'launch_files')
+    repo_cache.add('my_pkg', 'src/my_pkg', ['msg/MyMsg.msg'], 'msg_files')
+    repo_cache.add('my_pkg', 'src/my_pkg', ['srv/MySrv.srv'], 'srv_files')
     cache.source_repo_resources['my_repo'] = repo_cache
 
     tar_repo_cache = SourceRepositoryCache.from_ref(None)

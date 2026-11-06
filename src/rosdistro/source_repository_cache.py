@@ -182,6 +182,60 @@ class SourceRepositoryCache(object):
         """
         self.set_metadata('tags', tags)
 
+    def last_commit_time(self):
+        """
+        Return the repository last commit timestamp string, or None if not available.
+        """
+        return self.get_metadata('last_commit_time')
+
+    def set_last_commit_time(self, last_commit_time):
+        """
+        Set the repository last commit timestamp string.
+        """
+        self.set_metadata('last_commit_time', last_commit_time)
+
+    def contributing(self):
+        """
+        Return the repository root CONTRIBUTING contents, or None if not available.
+        """
+        return self.get_metadata('contributing')
+
+    def set_contributing(self, contributing):
+        """
+        Set the repository root CONTRIBUTING contents.
+        """
+        self.set_metadata('contributing', contributing)
+
+    def readme(self):
+        """
+        Return the repository root README contents, or None if not available.
+        """
+        return self.get_metadata('readme')
+
+    def set_readme(self, readme):
+        """
+        Set the repository root README contents.
+        """
+        self.set_metadata('readme', readme)
+
+    def launch_files(self, package_name):
+        """
+        Return the list of relative launch file paths for package_name, or None.
+        """
+        return self[package_name].get('launch_files')
+
+    def msg_files(self, package_name):
+        """
+        Return the list of relative .msg file paths for package_name, or None.
+        """
+        return self[package_name].get('msg_files')
+
+    def srv_files(self, package_name):
+        """
+        Return the list of relative .srv file paths for package_name, or None.
+        """
+        return self[package_name].get('srv_files')
+
     def set_last_update_time(self, update_time):
         """
         Set the repository last update time.

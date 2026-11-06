@@ -203,11 +203,17 @@ def test_get_cached_distribution_resources():
         'source_repo_resources': {
             'bar_repo': {
                 '_ref': 'abcdef1234567890',
+                '_last_commit_time': '2026-04-01T10:20:30Z',
+                '_contributing': '# Contributing to bar_repo',
+                '_readme': '# Top-level bar_repo README',
                 'bar_repo': {
                     'package_path': '',
                     'package.xml': valid_pkg_xml,
                     'README.md': '# Cached Source README',
                     'CHANGELOG.rst': 'Cached Source Changelog',
+                    'launch_files': ['launch/bar.launch.py'],
+                    'msg_files': ['msg/Bar.msg'],
+                    'srv_files': ['srv/GetBar.srv'],
                 }
             }
         }
@@ -221,6 +227,18 @@ def test_get_cached_distribution_resources():
     assert dist.get_source_package_xml('bar_repo') == valid_pkg_xml
     assert dist.get_source_readme('bar_repo') == '# Cached Source README'
     assert dist.get_source_changelog('bar_repo') == 'Cached Source Changelog'
+    assert dist.get_source_resource('bar_repo', 'launch_files', require_crawled=True) == ['launch/bar.launch.py']
+    assert dist.get_source_launch_files('bar_repo', require_crawled=True) == ['launch/bar.launch.py']
+    assert dist.get_source_resource('bar_repo', 'msg_files', require_crawled=True) == ['msg/Bar.msg']
+    assert dist.get_source_msg_files('bar_repo', require_crawled=True) == ['msg/Bar.msg']
+    assert dist.get_source_resource('bar_repo', 'srv_files', require_crawled=True) == ['srv/GetBar.srv']
+    assert dist.get_source_srv_files('bar_repo', require_crawled=True) == ['srv/GetBar.srv']
+    assert dist.get_source_repo_metadata('bar_repo', 'last_commit_time', require_crawled=True) == '2026-04-01T10:20:30Z'
+    assert dist.get_source_repo_last_commit_time('bar_repo', require_crawled=True) == '2026-04-01T10:20:30Z'
+    assert dist.get_source_repo_metadata('bar_repo', 'contributing', require_crawled=True) == '# Contributing to bar_repo'
+    assert dist.get_source_repo_contributing('bar_repo', require_crawled=True) == '# Contributing to bar_repo'
+    assert dist.get_source_repo_metadata('bar_repo', 'readme', require_crawled=True) == '# Top-level bar_repo README'
+    assert dist.get_source_repo_readme('bar_repo', require_crawled=True) == '# Top-level bar_repo README'
     assert dist.get_source_repo_resources('bar_repo').ref() == 'abcdef1234567890'
 
     walker = DependencyWalker(dist)

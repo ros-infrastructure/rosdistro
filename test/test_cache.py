@@ -61,9 +61,18 @@ def test_cache_config_normalization_and_presets():
     assert extended.get_release_resource_max_lines('README.md') == 100
     assert extended.is_source_resource_enabled('package.xml') is True
     assert extended.is_source_resource_enabled('CHANGELOG.rst') is True
+    assert extended.is_source_resource_enabled('launch_files') is True
+    assert extended.is_source_resource_enabled('msg_files') is True
+    assert extended.is_source_resource_enabled('srv_files') is True
+    assert extended.get_source_resource_max_lines('launch_files') is None
+    assert extended.get_source_resource_max_lines('msg_files') is None
+    assert extended.get_source_resource_max_lines('srv_files') is None
     assert extended.is_source_metadata_enabled('stars') is True
     assert extended.is_source_metadata_enabled('description') is True
     assert extended.is_source_metadata_enabled('tags') is True
+    assert extended.is_source_metadata_enabled('last_commit_time') is True
+    assert extended.is_source_metadata_enabled('contributing') is True
+    assert extended.is_source_metadata_enabled('readme') is True
     assert extended.has_any_source_enabled() is True
     assert extended.fallback_src_to_doc is True
 
@@ -130,8 +139,14 @@ def test_distribution_cache_dual_v2_and_v3_export():
     repo_cache.set_stars(12)
     repo_cache.set_description('Bar repository')
     repo_cache.set_tags(['ros', 'bar'])
+    repo_cache.set_last_commit_time('2026-03-01T12:00:00Z')
+    repo_cache.set_contributing('# Contributing')
+    repo_cache.set_readme('# Repo Root README')
     repo_cache.add('bar_repo', 'src/bar_repo', bar_xml, 'package.xml')
     repo_cache.add('bar_repo', 'src/bar_repo', '# bar_repo source', 'README.md')
+    repo_cache.add('bar_repo', 'src/bar_repo', ['launch/demo.launch.py'], 'launch_files')
+    repo_cache.add('bar_repo', 'src/bar_repo', ['msg/Bar.msg'], 'msg_files')
+    repo_cache.add('bar_repo', 'src/bar_repo', ['srv/GetBar.srv'], 'srv_files')
     cache.source_repo_resources['bar_repo'] = repo_cache
 
     # Backwards compatible release_package_xmls live view and v2 tuple indexing on SourceRepositoryCache
@@ -148,6 +163,12 @@ def test_distribution_cache_dual_v2_and_v3_export():
     assert cache.source_repo_package_xmls['bar_repo'].stars() == 12
     assert cache.source_repo_package_xmls['bar_repo'].description() == 'Bar repository'
     assert cache.source_repo_package_xmls['bar_repo'].tags() == ['ros', 'bar']
+    assert cache.source_repo_package_xmls['bar_repo'].last_commit_time() == '2026-03-01T12:00:00Z'
+    assert cache.source_repo_package_xmls['bar_repo'].contributing() == '# Contributing'
+    assert cache.source_repo_package_xmls['bar_repo'].readme() == '# Repo Root README'
+    assert cache.source_repo_package_xmls['bar_repo'].launch_files('bar_repo') == ['launch/demo.launch.py']
+    assert cache.source_repo_package_xmls['bar_repo'].msg_files('bar_repo') == ['msg/Bar.msg']
+    assert cache.source_repo_package_xmls['bar_repo'].srv_files('bar_repo') == ['srv/GetBar.srv']
 
     # Export v3 (extended)
     v3_data = cache.get_data(version=3)
@@ -156,6 +177,12 @@ def test_distribution_cache_dual_v2_and_v3_export():
     assert v3_data['release_resources']['bar_repo']['README.md'] == '# bar_repo'
     assert v3_data['release_resources']['bar_repo']['CHANGELOG.rst'] is None
     assert v3_data['source_repo_resources']['bar_repo']['_stars'] == 12
+    assert v3_data['source_repo_resources']['bar_repo']['_last_commit_time'] == '2026-03-01T12:00:00Z'
+    assert v3_data['source_repo_resources']['bar_repo']['_contributing'] == '# Contributing'
+    assert v3_data['source_repo_resources']['bar_repo']['_readme'] == '# Repo Root README'
+    assert v3_data['source_repo_resources']['bar_repo']['bar_repo']['launch_files'] == ['launch/demo.launch.py']
+    assert v3_data['source_repo_resources']['bar_repo']['bar_repo']['msg_files'] == ['msg/Bar.msg']
+    assert v3_data['source_repo_resources']['bar_repo']['bar_repo']['srv_files'] == ['srv/GetBar.srv']
 
     # Export v2 (minimal legacy)
     v2_data = cache.get_legacy_data()
