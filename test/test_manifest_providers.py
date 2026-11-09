@@ -469,12 +469,14 @@ def test_github_source_metadata_assets_and_ignore_markers():
             {'path': 'pkg_a/msg/Alpha.msg', 'type': 'blob'},
             {'path': 'pkg_a/msg/sub/Beta.msg', 'type': 'blob'},
             {'path': 'pkg_a/srv/Query.srv', 'type': 'blob'},
+            {'path': 'pkg_a/action/Execute.action', 'type': 'blob'},
             {'path': 'pkg_a/launch/start.launch.py', 'type': 'blob'},
             {'path': 'pkg_a/launch/legacy.xml', 'type': 'blob'},
             {'path': 'pkg_a/config/other.yaml', 'type': 'blob'},
             # Nested package inside pkg_a: its package.xml and assets must not be indexed under pkg_a
             {'path': 'pkg_a/test/fixture_pkg/package.xml', 'type': 'blob'},
             {'path': 'pkg_a/test/fixture_pkg/msg/Fixture.msg', 'type': 'blob'},
+            {'path': 'pkg_a/test/fixture_pkg/action/Fixture.action', 'type': 'blob'},
             {'path': 'pkg_a/test/fixture_pkg/launch/fixture.launch.py', 'type': 'blob'},
             # Ignored subdirectory inside pkg_a
             {'path': 'pkg_a/experimental/CATKIN_IGNORE', 'type': 'blob'},
@@ -528,6 +530,7 @@ def test_github_source_metadata_assets_and_ignore_markers():
 
         assert repo_cache.msg_files('pkg_a') == ['msg/Alpha.msg', 'msg/sub/Beta.msg']
         assert repo_cache.srv_files('pkg_a') == ['srv/Query.srv']
+        assert repo_cache.action_files('pkg_a') == ['action/Execute.action']
         assert repo_cache.launch_files('pkg_a') == ['launch/legacy.xml', 'launch/start.launch.py']
 
     # Repository root ignore marker skips indexing all packages in the repository
@@ -566,6 +569,7 @@ def test_gitlab_source_metadata_assets_and_ignore_markers():
                 {'path': 'ros2trace_analysis/package.xml', 'type': 'blob'},
                 {'path': 'ros2trace_analysis/msg/TraceEvent.msg', 'type': 'blob'},
                 {'path': 'ros2trace_analysis/srv/Analyze.srv', 'type': 'blob'},
+                {'path': 'ros2trace_analysis/action/RunTrace.action', 'type': 'blob'},
                 {'path': 'ros2trace_analysis/launch/trace.launch.xml', 'type': 'blob'},
                 {'path': 'ignored_dir/COLCON_IGNORE', 'type': 'blob'},
                 {'path': 'ignored_dir/package.xml', 'type': 'blob'},
@@ -595,6 +599,7 @@ def test_gitlab_source_metadata_assets_and_ignore_markers():
         assert repo_cache.readme() == 'GitLab Root README'
         assert repo_cache.msg_files('ros2trace_analysis') == ['msg/TraceEvent.msg']
         assert repo_cache.srv_files('ros2trace_analysis') == ['srv/Analyze.srv']
+        assert repo_cache.action_files('ros2trace_analysis') == ['action/RunTrace.action']
         assert repo_cache.launch_files('ros2trace_analysis') == ['launch/trace.launch.xml']
 
 
@@ -609,13 +614,16 @@ def test_git_and_tar_source_metadata_assets_and_ignore_markers(tmp_path):
     pkg_dir = repo_dir / 'my_pkg'
     (pkg_dir / 'msg').mkdir(parents=True)
     (pkg_dir / 'srv').mkdir(parents=True)
+    (pkg_dir / 'action').mkdir(parents=True)
     (pkg_dir / 'launch').mkdir(parents=True)
     (pkg_dir / '.hidden').mkdir(parents=True)
     (pkg_dir / 'package.xml').write_text(_SAMPLE_TAR_PACKAGE_XML)
     (pkg_dir / 'msg' / 'State.msg').write_text('int32 state\n')
     (pkg_dir / 'srv' / 'Trigger.srv').write_text('---\nbool ok\n')
+    (pkg_dir / 'action' / 'Move.action').write_text('---\n---\n')
     (pkg_dir / 'launch' / 'bringup.launch.py').write_text('# launch\n')
     (pkg_dir / '.hidden' / 'Hidden.msg').write_text('int32 hidden\n')
+    (pkg_dir / '.hidden' / 'Hidden.action').write_text('---\n---\n')
 
     ignored_dir = repo_dir / 'ignored_pkg'
     ignored_dir.mkdir()
@@ -647,6 +655,7 @@ def test_git_and_tar_source_metadata_assets_and_ignore_markers(tmp_path):
         assert git_cache.readme() == '# Local Repo Root README'
         assert git_cache.msg_files('genmsg') == ['msg/State.msg']
         assert git_cache.srv_files('genmsg') == ['srv/Trigger.srv']
+        assert git_cache.action_files('genmsg') == ['action/Move.action']
         assert git_cache.launch_files('genmsg') == ['launch/bringup.launch.py']
 
     # Also verify tar_source_manifest_provider on the same structure
@@ -656,6 +665,7 @@ def test_git_and_tar_source_metadata_assets_and_ignore_markers(tmp_path):
         'my_pkg/package.xml': _SAMPLE_TAR_PACKAGE_XML,
         'my_pkg/msg/State.msg': 'int32 state\n',
         'my_pkg/srv/Trigger.srv': '---\nbool ok\n',
+        'my_pkg/action/Move.action': '---\n---\n',
         'my_pkg/launch/bringup.launch.py': '# launch\n',
         'ignored_pkg/CATKIN_IGNORE': '',
         'ignored_pkg/package.xml': _SAMPLE_GITLAB_PACKAGE_XML,
@@ -668,6 +678,7 @@ def test_git_and_tar_source_metadata_assets_and_ignore_markers(tmp_path):
         assert tar_cache.readme() == '# Tar Root README'
         assert tar_cache.msg_files('genmsg') == ['msg/State.msg']
         assert tar_cache.srv_files('genmsg') == ['srv/Trigger.srv']
+        assert tar_cache.action_files('genmsg') == ['action/Move.action']
         assert tar_cache.launch_files('genmsg') == ['launch/bringup.launch.py']
 
         # Verify CachedSourceManifestProvider preserves list-valued resources
@@ -682,6 +693,7 @@ def test_git_and_tar_source_metadata_assets_and_ignore_markers(tmp_path):
         )(_genmsg_source_tarball())
         assert cached_repo.msg_files('genmsg') == ['msg/State.msg']
         assert cached_repo.srv_files('genmsg') == ['srv/Trigger.srv']
+        assert cached_repo.action_files('genmsg') == ['action/Move.action']
         assert cached_repo.launch_files('genmsg') == ['launch/bringup.launch.py']
         assert cached_repo.contributing() == '# Tar Contributing'
         assert cached_repo.readme() == '# Tar Root README'

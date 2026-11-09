@@ -224,6 +224,7 @@ def test_distribution_cache_schema_validation_and_yaml_roundtrip(mock_git):
     repo_cache.add('my_pkg', 'src/my_pkg', ['launch/my_pkg.launch.py'], 'launch_files')
     repo_cache.add('my_pkg', 'src/my_pkg', ['msg/MyMsg.msg'], 'msg_files')
     repo_cache.add('my_pkg', 'src/my_pkg', ['srv/MySrv.srv'], 'srv_files')
+    repo_cache.add('my_pkg', 'src/my_pkg', ['action/MyAction.action'], 'action_files')
     cache.source_repo_resources['my_repo'] = repo_cache
 
     tar_repo_cache = SourceRepositoryCache.from_ref(None)

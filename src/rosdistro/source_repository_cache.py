@@ -236,6 +236,12 @@ class SourceRepositoryCache(object):
         """
         return self[package_name].get('srv_files')
 
+    def action_files(self, package_name):
+        """
+        Return the list of relative .action file paths for package_name, or None.
+        """
+        return self[package_name].get('action_files')
+
     def set_last_update_time(self, update_time):
         """
         Set the repository last update time.

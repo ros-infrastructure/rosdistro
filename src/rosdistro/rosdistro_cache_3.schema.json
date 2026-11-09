@@ -257,6 +257,16 @@
           },
           "description": "Relative paths of .srv files within the package"
         },
+        "action_files": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Relative paths of .action files within the package"
+        },
         "version": {
           "type": "string",
           "description": "The release version of the package"

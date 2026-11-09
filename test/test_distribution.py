@@ -214,6 +214,7 @@ def test_get_cached_distribution_resources():
                     'launch_files': ['launch/bar.launch.py'],
                     'msg_files': ['msg/Bar.msg'],
                     'srv_files': ['srv/GetBar.srv'],
+                    'action_files': ['action/DoBar.action'],
                 }
             }
         }
@@ -233,6 +234,8 @@ def test_get_cached_distribution_resources():
     assert dist.get_source_msg_files('bar_repo', require_crawled=True) == ['msg/Bar.msg']
     assert dist.get_source_resource('bar_repo', 'srv_files', require_crawled=True) == ['srv/GetBar.srv']
     assert dist.get_source_srv_files('bar_repo', require_crawled=True) == ['srv/GetBar.srv']
+    assert dist.get_source_resource('bar_repo', 'action_files', require_crawled=True) == ['action/DoBar.action']
+    assert dist.get_source_action_files('bar_repo', require_crawled=True) == ['action/DoBar.action']
     assert dist.get_source_repo_metadata('bar_repo', 'last_commit_time', require_crawled=True) == '2026-04-01T10:20:30Z'
     assert dist.get_source_repo_last_commit_time('bar_repo', require_crawled=True) == '2026-04-01T10:20:30Z'
     assert dist.get_source_repo_metadata('bar_repo', 'contributing', require_crawled=True) == '# Contributing to bar_repo'

@@ -64,9 +64,11 @@ def test_cache_config_normalization_and_presets():
     assert extended.is_source_resource_enabled('launch_files') is True
     assert extended.is_source_resource_enabled('msg_files') is True
     assert extended.is_source_resource_enabled('srv_files') is True
+    assert extended.is_source_resource_enabled('action_files') is True
     assert extended.get_source_resource_max_lines('launch_files') is None
     assert extended.get_source_resource_max_lines('msg_files') is None
     assert extended.get_source_resource_max_lines('srv_files') is None
+    assert extended.get_source_resource_max_lines('action_files') is None
     assert extended.is_source_metadata_enabled('stars') is True
     assert extended.is_source_metadata_enabled('description') is True
     assert extended.is_source_metadata_enabled('tags') is True
@@ -147,6 +149,7 @@ def test_distribution_cache_dual_v2_and_v3_export():
     repo_cache.add('bar_repo', 'src/bar_repo', ['launch/demo.launch.py'], 'launch_files')
     repo_cache.add('bar_repo', 'src/bar_repo', ['msg/Bar.msg'], 'msg_files')
     repo_cache.add('bar_repo', 'src/bar_repo', ['srv/GetBar.srv'], 'srv_files')
+    repo_cache.add('bar_repo', 'src/bar_repo', ['action/DoBar.action'], 'action_files')
     cache.source_repo_resources['bar_repo'] = repo_cache
 
     # Backwards compatible release_package_xmls live view and v2 tuple indexing on SourceRepositoryCache
@@ -169,6 +172,7 @@ def test_distribution_cache_dual_v2_and_v3_export():
     assert cache.source_repo_package_xmls['bar_repo'].launch_files('bar_repo') == ['launch/demo.launch.py']
     assert cache.source_repo_package_xmls['bar_repo'].msg_files('bar_repo') == ['msg/Bar.msg']
     assert cache.source_repo_package_xmls['bar_repo'].srv_files('bar_repo') == ['srv/GetBar.srv']
+    assert cache.source_repo_package_xmls['bar_repo'].action_files('bar_repo') == ['action/DoBar.action']
 
     # Export v3 (extended)
     v3_data = cache.get_data(version=3)
@@ -183,6 +187,7 @@ def test_distribution_cache_dual_v2_and_v3_export():
     assert v3_data['source_repo_resources']['bar_repo']['bar_repo']['launch_files'] == ['launch/demo.launch.py']
     assert v3_data['source_repo_resources']['bar_repo']['bar_repo']['msg_files'] == ['msg/Bar.msg']
     assert v3_data['source_repo_resources']['bar_repo']['bar_repo']['srv_files'] == ['srv/GetBar.srv']
+    assert v3_data['source_repo_resources']['bar_repo']['bar_repo']['action_files'] == ['action/DoBar.action']
 
     # Export v2 (minimal legacy)
     v2_data = cache.get_legacy_data()

@@ -43,7 +43,7 @@ IGNORE_MARKERS = frozenset((
     '.rosindex_ignore',
 ))
 
-PACKAGE_ASSET_LIST_RESOURCES = ('launch_files', 'msg_files', 'srv_files')
+PACKAGE_ASSET_LIST_RESOURCES = ('launch_files', 'msg_files', 'srv_files', 'action_files')
 
 DEFAULT_SOURCE_FILEPATHS = (
     'CHANGELOG.rst',
@@ -51,6 +51,7 @@ DEFAULT_SOURCE_FILEPATHS = (
     'launch_files',
     'msg_files',
     'srv_files',
+    'action_files',
 )
 
 ROOT_DOC_CANDIDATES = {
@@ -145,7 +146,7 @@ def partition_repo_tree(blob_paths):
         reverse=True,
     )
     package_assets = {
-        pkg_dir: {'launch_files': [], 'msg_files': [], 'srv_files': []}
+        pkg_dir: {'launch_files': [], 'msg_files': [], 'srv_files': [], 'action_files': []}
         for pkg_dir in package_xml_paths
     }
 
@@ -173,6 +174,8 @@ def partition_repo_tree(blob_paths):
                 assets['msg_files'].append(rel_path)
             elif rel_path.endswith('.srv'):
                 assets['srv_files'].append(rel_path)
+            elif rel_path.endswith('.action'):
+                assets['action_files'].append(rel_path)
             elif is_launch_file(rel_path):
                 assets['launch_files'].append(rel_path)
 
@@ -180,6 +183,7 @@ def partition_repo_tree(blob_paths):
         assets['launch_files'] = sorted(set(assets['launch_files']))
         assets['msg_files'] = sorted(set(assets['msg_files']))
         assets['srv_files'] = sorted(set(assets['srv_files']))
+        assets['action_files'] = sorted(set(assets['action_files']))
 
     return package_xml_paths, package_assets, root_files
 

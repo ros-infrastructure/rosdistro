@@ -219,6 +219,9 @@ class Distribution(object):
     def get_source_srv_files(self, pkg_name, require_crawled=False):
         return self.get_source_resource(pkg_name, 'srv_files', require_crawled=require_crawled)
 
+    def get_source_action_files(self, pkg_name, require_crawled=False):
+        return self.get_source_resource(pkg_name, 'action_files', require_crawled=require_crawled)
+
     def get_source_repo_package_xmls(self, repo_name):
         return self.get_source_repo_resources(repo_name)
 

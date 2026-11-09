@@ -51,7 +51,7 @@ class ResourceNotCrawledError(KeyError):
     """
 
 
-NO_MAX_LINES_RESOURCES = ('package.xml', 'launch_files', 'msg_files', 'srv_files')
+NO_MAX_LINES_RESOURCES = ('package.xml', 'launch_files', 'msg_files', 'srv_files', 'action_files')
 
 
 def _normalize_resource_entry(name, raw_value, default_max_lines=100):
@@ -103,6 +103,7 @@ class CacheConfig(dict):
         'launch_files',
         'msg_files',
         'srv_files',
+        'action_files',
     )
     DEFAULT_REPO_METADATA = (
         'stars',
