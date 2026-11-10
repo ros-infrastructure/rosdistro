@@ -135,7 +135,14 @@ class DistributionCache(object):
                     result = Git().command('ls-remote', source_repository.url, source_repository.version)
                     if result['returncode'] != 0 or not result['output']:
                         # Error checking remote, or unable to find remote reference. Drop the cache entry.
-                        logger.debug("Unable to check hash for branch %s of %s, dropping cache entry." % (source_repository.version, source_repository.url))
+                        if result['returncode'] != 0 and result.get('error'):
+                            logger.warning(
+                                "Unable to check hash for branch %s of %s (%s), dropping cache entry." %
+                                (source_repository.version, source_repository.url, result['error']))
+                        else:
+                            logger.warning(
+                                "Unable to check hash for branch %s of %s, dropping cache entry." %
+                                (source_repository.version, source_repository.url))
                         del self.source_repo_package_xmls[repo]
                         continue
                     # Split by line first and take the last line, to squelch any preamble output, for example
