@@ -40,7 +40,9 @@ from urllib.request import urlopen, Request
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
 
+from rosdistro import logger
 from rosdistro.common import rmtree
+from rosdistro.manifest_provider import SkipManifestProvider
 from rosdistro.manifest_provider.cache import (
     DEFAULT_SOURCE_FILEPATHS,
     IGNORE_MARKERS,
@@ -50,13 +52,13 @@ from rosdistro.manifest_provider.cache import (
     sanitize_and_truncate_docs,
 )
 from rosdistro.source_repository_cache import SourceRepositoryCache
-from rosdistro import logger
 
 _TAR_USER = os.getenv('TAR_USER', None)
 _TAR_PASSWORD = os.getenv('TAR_PASSWORD', None)
 
 def tar_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
-    assert repo.type == 'tar'
+    if repo.type != 'tar':
+        raise SkipManifestProvider('Cannot handle non-tar repository.')
 
     subdir = repo.get_release_tag(pkg_name)
 
@@ -87,7 +89,8 @@ def tar_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
 
 
 def tar_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metadata=None):
-    assert repo.type == 'tar'
+    if repo.type != 'tar':
+        raise SkipManifestProvider('Cannot handle non-tar repository.')
     xmlpath = 'package.xml'
 
     try:

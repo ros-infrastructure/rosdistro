@@ -35,6 +35,7 @@ import os
 from xml.dom import minidom
 
 from rosdistro import logger
+from rosdistro.manifest_provider import SkipManifestProvider
 
 IGNORE_MARKERS = frozenset((
     'CATKIN_IGNORE',
@@ -278,13 +279,24 @@ class CachedManifestProvider(object):
                 self._distribution_cache.release_package_xmls[pkg_name] = package_xml
                 logger.debug('Loading package.xml for package "%s" from cache' % pkg_name)
                 return package_xml
+            errors = []
             for mp in self._manifest_providers or []:
                 try:
                     package_xml = sanitize_xml(mp(dist_name, repo, pkg_name))
                     break
                 except Exception as e:
-                    logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
+                    mp_name = getattr(mp, '__name__', str(mp))
+                    logger.debug('Skipped "%s()": %s' % (mp_name, e))
+                    errors.append((mp_name, e, isinstance(e, SkipManifestProvider)))
             if package_xml is None:
+                if self._manifest_providers:
+                    relevant = [(name, err) for name, err, skipped in errors if not skipped]
+                    if not relevant:
+                        relevant = [(name, err) for name, err, _ in errors]
+                    details = '\n'.join('  - %s(): %s' % (name, err) for name, err in relevant)
+                    logger.error(
+                        'Failed to fetch package.xml for package "%s" from "%s":\n%s' %
+                        (pkg_name, repo.url, details))
                 return None
             self._distribution_cache.release_package_xmls[pkg_name] = package_xml
             return package_xml
@@ -303,6 +315,7 @@ class CachedManifestProvider(object):
         # Use manifest providers to lazy load
         fetched = False
         manifest_content = None
+        errors = []
         for mp in self._manifest_providers:
             try:
                 manifest_content = self._sanitize_resource(
@@ -312,9 +325,23 @@ class CachedManifestProvider(object):
                 break
             except Exception as e:
                 # pass and try next manifest provider
-                logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', mp), e))
+                mp_name = getattr(mp, '__name__', str(mp))
+                logger.debug('Skipped "%s()": %s' % (mp_name, e))
+                errors.append((mp_name, e, isinstance(e, SkipManifestProvider)))
 
         if not fetched or (filepath == 'package.xml' and manifest_content is None):
+            relevant = [(name, err) for name, err, skipped in errors if not skipped]
+            if not relevant:
+                relevant = [(name, err) for name, err, _ in errors]
+            if relevant:
+                details = '\n'.join('  - %s(): %s' % (name, err) for name, err in relevant)
+                logger.error(
+                    'Failed to fetch %s for package "%s" from "%s":\n%s' %
+                    (filepath, pkg_name, repo.url, details))
+            else:
+                logger.error(
+                    'Failed to fetch %s for package "%s" from "%s"' %
+                    (filepath, pkg_name, repo.url))
             return None
 
         # Populate the cache (including None for optional resources confirmed missing)
@@ -366,6 +393,7 @@ class CachedSourceManifestProvider(object):
             logger.debug(f"Internal Cache Miss for {repo.name} Loading from Source Manifest Providers")
             filepaths, metadata = self._get_source_query_params()
             # Use manifest providers to lazy load
+            errors = []
             for mp in self._source_manifest_providers or []:
                 try:
                     try:
@@ -377,12 +405,27 @@ class CachedSourceManifestProvider(object):
                             repo_cache = mp(repo)
                 except Exception as e:
                     # pass and try next manifest provider
-                    logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', mp), e))
+                    mp_name = getattr(mp, '__name__', str(mp))
+                    logger.debug('Skipped "%s()": %s' % (mp_name, e))
+                    errors.append((mp_name, e, isinstance(e, SkipManifestProvider)))
                     continue
 
                 if repo_cache is not None:
                     self._distribution_cache.source_repo_resources[repo.name] = repo_cache
                     break
+            if repo_cache is None and self._source_manifest_providers:
+                relevant = [(name, err) for name, err, skipped in errors if not skipped]
+                if not relevant:
+                    relevant = [(name, err) for name, err, _ in errors]
+                if relevant:
+                    details = '\n'.join('  - %s(): %s' % (name, err) for name, err in relevant)
+                    logger.error(
+                        'Failed to fetch source package.xml files for repo "%s" from "%s":\n%s' %
+                        (repo.name, repo.url, details))
+                else:
+                    logger.error(
+                        'Failed to fetch source package.xml files for repo "%s" from "%s"' %
+                        (repo.name, repo.url))
         else:
             logger.debug('Load package XMLs for repo "%s" from cache' % repo.name)
 

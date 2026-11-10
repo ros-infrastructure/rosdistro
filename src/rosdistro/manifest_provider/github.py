@@ -42,6 +42,8 @@ from urllib.error import URLError
 
 from catkin_pkg.package import parse_package_string
 
+from rosdistro import logger
+from rosdistro.manifest_provider import SkipManifestProvider
 from rosdistro.manifest_provider.cache import (
     DEFAULT_SOURCE_FILEPATHS,
     PACKAGE_ASSET_LIST_RESOURCES,
@@ -50,7 +52,6 @@ from rosdistro.manifest_provider.cache import (
     sanitize_and_truncate_docs,
 )
 from rosdistro.source_repository_cache import SourceRepositoryCache
-from rosdistro import logger
 
 GITHUB_USER = os.getenv('GITHUB_USER', None)
 GITHUB_PASSWORD = os.getenv('GITHUB_PASSWORD', None)
@@ -84,10 +85,12 @@ def _get_url_contents(url):
 
 def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     assert repo.version
+    if getattr(repo, 'type', 'git') != 'git':
+        raise SkipManifestProvider('Cannot handle non-git repository.')
     server, path = repo.get_url_parts()
     if not server.endswith('github.com'):
         logger.debug('Skip non-github url "%s"' % repo.url)
-        raise RuntimeError('can not handle non github urls')
+        raise SkipManifestProvider('can not handle non github urls')
 
     release_tag = repo.get_release_tag(pkg_name)
 
@@ -110,10 +113,12 @@ def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
 
 
 def github_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metadata=None):
+    if getattr(repo, 'type', 'git') != 'git':
+        raise SkipManifestProvider('Cannot handle non-git repository.')
     server, path = repo.get_url_parts()
     if not server.endswith('github.com'):
         logger.debug('Skip non-github url "%s"' % repo.url)
-        raise RuntimeError('can not handle non github urls')
+        raise SkipManifestProvider('can not handle non github urls')
 
     tree_url = 'https://api.github.com/repos/%s/git/trees/%s?recursive=1' % (path, repo.version)
     req = Request(tree_url)

@@ -41,6 +41,8 @@ from urllib.parse import urlencode
 
 from catkin_pkg.package import parse_package_string
 
+from rosdistro import logger
+from rosdistro.manifest_provider import SkipManifestProvider
 from rosdistro.manifest_provider.cache import (
     DEFAULT_SOURCE_FILEPATHS,
     PACKAGE_ASSET_LIST_RESOURCES,
@@ -49,7 +51,6 @@ from rosdistro.manifest_provider.cache import (
     sanitize_and_truncate_docs,
 )
 from rosdistro.source_repository_cache import SourceRepositoryCache
-from rosdistro import logger
 
 GITLAB_PRIVATE_TOKEN = os.getenv('GITLAB_PRIVATE_TOKEN', None)
 ROSDISTRO_GITLAB_SERVER = os.getenv('ROSDISTRO_GITLAB_SERVER', None)
@@ -105,10 +106,12 @@ def _gitlab_paged_api_query(server, path, resource, attrs):
 
 def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     assert repo.version
+    if getattr(repo, 'type', 'git') != 'git':
+        raise SkipManifestProvider('Cannot handle non-git repository.')
     server, path = repo.get_url_parts()
     if not server.endswith('gitlab.com') and server != ROSDISTRO_GITLAB_SERVER:
         logger.debug('Skip non-gitlab url "%s"' % repo.url)
-        raise RuntimeError('can not handle non gitlab urls')
+        raise SkipManifestProvider('can not handle non gitlab urls')
 
     resource = 'repository/files/%s/raw' % urlquote(filepath, safe='')
     attrs = {
@@ -130,10 +133,12 @@ def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
 
 def gitlab_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metadata=None):
     assert repo.version
+    if getattr(repo, 'type', 'git') != 'git':
+        raise SkipManifestProvider('Cannot handle non-git repository.')
     server, path = repo.get_url_parts()
     if not server.endswith('gitlab.com') and server != ROSDISTRO_GITLAB_SERVER:
         logger.debug('Skip non-gitlab url "%s"' % repo.url)
-        raise RuntimeError('can not handle non gitlab urls')
+        raise SkipManifestProvider('can not handle non gitlab urls')
 
     # Resolve the version ref to a sha since we need to make multiple queries
     attrs = {

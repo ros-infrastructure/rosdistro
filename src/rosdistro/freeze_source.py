@@ -41,6 +41,8 @@ try:
 except ImportError:
     import Queue as queue
 
+from .vcs import non_interactive_git_env
+
 CONCURRENT_DEFAULT = 16
 
 
@@ -82,7 +84,9 @@ def freeze_distribution_sources(dist, release_version=False, release_tag=False,
 def _get_repo_info(url, retry=2, retry_period=1):
     cmd = ['git', 'ls-remote', url]
     try:
-        return subprocess.check_output(cmd).decode().splitlines()
+        return subprocess.check_output(
+            cmd, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            env=non_interactive_git_env()).decode().splitlines()
     except subprocess.CalledProcessError as err:
         if not retry:
             raise
@@ -110,8 +114,10 @@ def _worker(work_queue):
             work_queue.task_done()
 
         except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode('utf-8', errors='replace').rstrip() if getattr(e, 'stderr', None) else ''
+            error_msg = '%s: %s' % (e, stderr) if stderr else str(e)
             print("No information could be retrieved for repo %s with error: %s" %
-                  (source_repo.url, e), file=sys.stderr)
+                  (source_repo.url, error_msg), file=sys.stderr)
             work_queue.task_done()
 
         except queue.Empty:

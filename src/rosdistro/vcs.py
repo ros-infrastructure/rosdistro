@@ -38,6 +38,8 @@ import subprocess
 
 from distutils.version import LooseVersion
 
+from . import logger
+
 
 class Git(object):
     _client_executable = None
@@ -50,7 +52,21 @@ class Git(object):
 
     def command(self, *args):
         assert self._client_executable is not None, "'git' not found"
-        return _run_command((self._client_executable,) + args, self.cwd)
+        result = _run_command(
+            (self._client_executable,) + args,
+            self.cwd,
+            env=non_interactive_git_env())
+        if result['returncode'] != 0:
+            error_output = result.get('error') or result.get('output')
+            if error_output:
+                logger.debug(
+                    'Git command "%s" failed with return code %s:\n%s' %
+                    (result['cmd'], result['returncode'], error_output))
+            else:
+                logger.debug(
+                    'Git command "%s" failed with return code %s' %
+                    (result['cmd'], result['returncode']))
+        return result
 
     @classmethod
     def version_gte(cls, version):
@@ -60,6 +76,15 @@ class Git(object):
         return LooseVersion(cls._client_version) >= LooseVersion(version)
 
 
+def non_interactive_git_env(base_env=None):
+    env = (base_env if base_env is not None else os.environ).copy()
+    env['GIT_TERMINAL_PROMPT'] = '0'
+    env.setdefault('GCM_INTERACTIVE', 'never')
+    env['SSH_ASKPASS_REQUIRE'] = 'never'
+    env.pop('SSH_ASKPASS', None)
+    return env
+
+
 def ref_is_hash(ref):
     return re.match('^[0-9a-f]{40}$', ref) is not None
 
@@ -67,15 +92,21 @@ def ref_is_hash(ref):
 def _run_command(cmd, cwd=None, env=None):
     result = {'cmd': ' '.join(cmd), 'cwd': cwd}
     try:
-        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, env=env)
-        output, _ = proc.communicate()
+        proc = subprocess.Popen(
+            cmd, cwd=cwd, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        output, error = proc.communicate()
         result['output'] = output.rstrip()
+        result['error'] = error.rstrip()
         result['returncode'] = proc.returncode
     except subprocess.CalledProcessError as e:
         result['output'] = e.output
+        result['error'] = getattr(e, 'stderr', '') or ''
         result['returncode'] = e.returncode
     if not isinstance(result['output'], str):
-        result['output'] = result['output'].decode('utf-8')
+        result['output'] = result['output'].decode('utf-8', errors='replace')
+    if not isinstance(result['error'], str):
+        result['error'] = result['error'].decode('utf-8', errors='replace')
     return result
 
 
