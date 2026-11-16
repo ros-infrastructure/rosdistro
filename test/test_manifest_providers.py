@@ -775,6 +775,126 @@ def test_git_and_tar_nested_package_path_posix(tmp_path):
         assert pkg_paths == ['core/roslib']
 
 
+def test_temp_git_clone_shallow_fallback_and_single_slash_file_url(tmp_path):
+    import os as _os
+    from rosdistro.manifest_provider.git import _temp_git_clone
+    from rosdistro.vcs import Git
+    from . import path_to_url
+
+    def _pkg_xml(version):
+        return (
+            '<?xml version="1.0"?>\n'
+            '<package format="2">\n'
+            '  <name>roslib</name>\n'
+            f'  <version>{version}</version>\n'
+            '  <description>roslib package</description>\n'
+            '  <maintainer email="test@example.com">Maintainer</maintainer>\n'
+            '  <license>BSD</license>\n'
+            '</package>\n'
+        )
+
+    repo_dir = tmp_path / 'ros_repo'
+    repo_dir.mkdir()
+    git = Git(cwd=str(repo_dir))
+    assert git.command('init', '-b', 'kinetic-devel')['returncode'] == 0 or (
+        git.command('init')['returncode'] == 0 and
+        git.command('checkout', '-b', 'kinetic-devel')['returncode'] == 0
+    )
+    assert git.command('config', 'user.email', 'test@example.com')['returncode'] == 0
+    assert git.command('config', 'user.name', 'Test User')['returncode'] == 0
+
+    (repo_dir / 'package.xml').write_text(_pkg_xml('0.1.0'))
+    assert git.command('add', '.')['returncode'] == 0
+    assert git.command('commit', '-m', 'First commit')['returncode'] == 0
+    c1_sha = git.command('rev-parse', 'HEAD')['output'].strip()
+
+    (repo_dir / 'package.xml').write_text(_pkg_xml('1.0.0'))
+    assert git.command('add', '.')['returncode'] == 0
+    assert git.command('commit', '-m', 'Second commit')['returncode'] == 0
+    c2_sha = git.command('rev-parse', 'HEAD')['output'].strip()
+    assert git.command('tag', 'release/kinetic/roslib/1.0.0-1')['returncode'] == 0
+
+    url = path_to_url(str(repo_dir))
+    assert url.startswith('file:///')
+
+    # 1. Simulate shallow clone failing (and leaving stale files) and verify graceful fallback
+    orig_command = Git.command
+    clone_calls = []
+
+    def fail_shallow_clone(self, *args):
+        if args and args[0] == 'clone':
+            clone_calls.append(args)
+            if '--depth' in args:
+                with open(_os.path.join(self.cwd, 'stale_file'), 'w') as f:
+                    f.write('partial')
+                return {
+                    'cmd': 'git clone',
+                    'cwd': self.cwd,
+                    'output': '',
+                    'error': 'fatal: dumb http transport does not support shallow capabilities',
+                    'returncode': 128,
+                }
+        return orig_command(self, *args)
+
+    source_repo = SourceRepositorySpecification('ros', {
+        'url': url,
+        'version': 'kinetic-devel',
+    })
+    release_repo = ReleaseRepositorySpecification('roslib', {
+        'tags': {'release': 'release/kinetic/{package}/{version}'},
+        'url': url,
+        'version': '1.0.0-1',
+    })
+
+    with patch.object(Git, 'command', fail_shallow_clone):
+        with _temp_git_clone(url, 'kinetic-devel') as cloned_path:
+            assert _os.path.exists(_os.path.join(cloned_path, 'package.xml'))
+            assert not _os.path.exists(_os.path.join(cloned_path, 'stale_file'))
+        assert not _os.path.exists(cloned_path)
+        assert len(clone_calls) == 2
+        assert '--depth' in clone_calls[0]
+        assert clone_calls[1] == ('clone', url, '.')
+
+        clone_calls.clear()
+        src_cache = git_source_manifest_provider(source_repo)
+        assert src_cache.ref() == c2_sha
+        assert '<version>1.0.0</version>' in src_cache['roslib']['package.xml']
+        assert len(clone_calls) == 2
+
+        clone_calls.clear()
+        rel_xml = git_manifest_provider('kinetic', release_repo, 'roslib')
+        assert '<version>1.0.0</version>' in rel_xml
+        assert len(clone_calls) == 2
+
+    # 2. Real git shallow clone failure on short SHA ref degrades to full clone + checkout
+    short_sha_repo = SourceRepositorySpecification('ros', {
+        'url': url,
+        'version': c1_sha[:7],
+    })
+    short_sha_cache = git_source_manifest_provider(short_sha_repo)
+    assert short_sha_cache.ref() == c1_sha
+    assert '<version>0.1.0</version>' in short_sha_cache['roslib']['package.xml']
+
+    # 3. Single-slash RFC 8089 file:/ URL (as produced by urljoin('file:', ...) in Python 3.14)
+    single_slash_url = 'file:/' + repo_dir.as_posix().lstrip('/')
+    single_slash_repo = SourceRepositorySpecification('ros', {
+        'url': single_slash_url,
+        'version': 'kinetic-devel',
+    })
+    single_slash_cache = git_source_manifest_provider(single_slash_repo)
+    assert single_slash_cache.ref() == c2_sha
+    assert '<version>1.0.0</version>' in single_slash_cache['roslib']['package.xml']
+    assert single_slash_repo.remote_refs['refs/heads/kinetic-devel'] == c2_sha
+
+    # 4. Nonexistent ref still raises RuntimeError after fallback
+    bad_ref_repo = SourceRepositorySpecification('ros', {
+        'url': url,
+        'version': 'nonexistent-branch',
+    })
+    with pytest.raises(RuntimeError, match='Could not checkout ref "nonexistent-branch"'):
+        git_source_manifest_provider(bad_ref_repo)
+
+
 def _genmsg_release_repo():
     return ReleaseRepositorySpecification('genmsg', {
         'url': 'https://github.com/ros-gbp/genmsg-release.git',

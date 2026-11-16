@@ -17,7 +17,7 @@ from rosdistro.repository_specification import RepositorySpecification
 from rosdistro.source_repository_specification import SourceRepositorySpecification
 import pytest
 
-from rosdistro.vcs import _version_gte, Git, non_interactive_git_env
+from rosdistro.vcs import _version_gte, Git, non_interactive_git_env, normalize_git_url, ref_is_hash
 
 
 class _AuthChallengeHandler(BaseHTTPRequestHandler):
@@ -301,3 +301,25 @@ def test_tar_repo_does_not_invoke_git_providers():
 ])
 def test_version_gte(version: str, required_version: str, expected: bool):
     assert _version_gte(version, required_version) == expected
+
+
+@pytest.mark.parametrize("raw_url, expected_url", [
+    ("file:/C:/Users/runneradmin/AppData/Local/Temp/ros_repo",
+     "file:///C:/Users/runneradmin/AppData/Local/Temp/ros_repo"),
+    ("file:/tmp/pytest-0/ros_repo", "file:///tmp/pytest-0/ros_repo"),
+    ("FILE:/C:/Users/ros_repo", "file:///C:/Users/ros_repo"),
+    ("file:///C:/Users/ros_repo", "file:///C:/Users/ros_repo"),
+    ("file:///tmp/ros_repo", "file:///tmp/ros_repo"),
+    ("https://github.com/ros/ros.git", "https://github.com/ros/ros.git"),
+    ("git@github.com:ros/ros.git", "git@github.com:ros/ros.git"),
+    ("/tmp/ros_repo", "/tmp/ros_repo"),
+])
+def test_normalize_git_url(raw_url, expected_url):
+    assert normalize_git_url(raw_url) == expected_url
+
+
+def test_ref_is_hash():
+    assert ref_is_hash('0123456789abcdef0123456789abcdef01234567') is True
+    assert ref_is_hash('0123456') is False
+    assert ref_is_hash('kinetic-devel') is False
+    assert ref_is_hash(None) is False

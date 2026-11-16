@@ -151,8 +151,14 @@ def non_interactive_git_env(base_env=None):
     return env
 
 
+def normalize_git_url(url):
+    if url and url[:6].lower() == 'file:/' and url[:7].lower() != 'file://':
+        return 'file://' + url[5:]
+    return url
+
+
 def ref_is_hash(ref):
-    return re.match('^[0-9a-f]{40}$', ref) is not None
+    return bool(ref) and re.match('^[0-9a-f]{40}$', ref) is not None
 
 
 def _run_command(cmd, cwd=None, env=None):

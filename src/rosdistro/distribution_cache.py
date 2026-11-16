@@ -42,7 +42,7 @@ from . import logger
 from .distribution_file import create_distribution_file
 from .package import Package
 from .source_repository_cache import SourceRepositoryCache
-from .vcs import Git, ref_is_hash
+from .vcs import Git, normalize_git_url, ref_is_hash
 
 
 class ResourceNotCrawledError(KeyError):
@@ -745,7 +745,11 @@ class DistributionCache(object):
                 if ref_is_hash(source_repository.version):
                     source_hash = source_repository.version
                 else:
-                    result = Git().command('ls-remote', source_repository.url, source_repository.version)
+                    result = Git().command(
+                        'ls-remote',
+                        normalize_git_url(source_repository.url),
+                        source_repository.version,
+                    )
                     if result['returncode'] != 0 or not result['output']:
                         # Error checking remote, or unable to find remote reference. Drop the cache entry.
                         if result['returncode'] != 0 and result.get('error'):
