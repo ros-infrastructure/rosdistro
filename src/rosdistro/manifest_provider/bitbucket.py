@@ -34,7 +34,7 @@
 import base64
 import os
 from urllib.request import urlopen, Request
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 from rosdistro import logger
 from rosdistro.manifest_provider import SkipManifestProvider
@@ -50,7 +50,7 @@ BITBUCKET_USER = os.getenv('BITBUCKET_USER', None)
 BITBUCKET_PASSWORD = os.getenv('BITBUCKET_PASSWORD', None)
 
 
-def bitbucket_manifest_provider(_dist_name, repo, pkg_name):
+def bitbucket_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     assert repo.version
     if getattr(repo, 'type', 'git') != 'git':
         raise SkipManifestProvider('Cannot handle non-git repository.')
@@ -65,7 +65,7 @@ def bitbucket_manifest_provider(_dist_name, repo, pkg_name):
     if not repo.has_remote_tag(release_tag):
         raise RuntimeError('specified tag "%s" is not a git tag' % release_tag)
 
-    url = 'https://bitbucket.org/%s/raw/%s/package.xml' % (path, release_tag)
+    url = 'https://bitbucket.org/%s/raw/%s/%s' % (path, release_tag, filepath)
     try:
         logger.debug('Load package.xml file from url "%s"' % url)
         req = Request(url)
@@ -76,6 +76,12 @@ def bitbucket_manifest_provider(_dist_name, repo, pkg_name):
             req.add_header('Authorization', authheader)
         package_xml = urlopen(req).read().decode('utf-8')
         return package_xml
+    except HTTPError as e:
+        if e.code == 404 and filepath != 'package.xml':
+            logger.debug('- File not found (%s), trying "%s"' % (e, url))
+            return None
+        logger.debug('- failed (%s)' % e)
+        raise RuntimeError()
     except URLError as e:
         logger.debug('- failed (%s)' % e)
         raise RuntimeError()
