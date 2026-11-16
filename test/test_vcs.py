@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import logging
 import os
+import subprocess
 import tempfile
 import threading
 from unittest.mock import patch
@@ -12,6 +13,11 @@ from rosdistro.common import rmtree
 from rosdistro.distribution import Distribution
 from rosdistro.distribution_cache import DistributionCache
 from rosdistro.manifest_provider.cache import CachedManifestProvider, CachedSourceManifestProvider
+from rosdistro.manifest_provider.git import (
+    _temp_git_clone,
+    git_manifest_provider,
+    git_source_manifest_provider,
+)
 from rosdistro.release_repository_specification import ReleaseRepositorySpecification
 from rosdistro.repository_specification import RepositorySpecification
 from rosdistro.source_repository_specification import SourceRepositorySpecification
@@ -279,3 +285,145 @@ def test_tar_repo_does_not_invoke_git_providers():
         assert '<name>genmsg</name>' in pkg_xml
         mock_git_cmd.assert_not_called()
         assert records == []
+
+
+def _make_pkg_xml(name, version='1.0.0', desc='Package description'):
+    return (
+        '<?xml version="1.0"?>\n'
+        '<package format="2">\n'
+        '  <name>%s</name>\n'
+        '  <version>%s</version>\n'
+        '  <description>%s</description>\n'
+        '  <maintainer email="maintainer@example.com">Maintainer</maintainer>\n'
+        '  <license>BSD</license>\n'
+        '</package>\n'
+    ) % (name, version, desc)
+
+
+def _git_run(cwd, *args, **kwargs):
+    env = non_interactive_git_env()
+    extra = kwargs.pop('extra_env', None)
+    if extra:
+        env.update(extra)
+    return subprocess.run(
+        ['git'] + list(args),
+        cwd=cwd,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        **kwargs,
+    )
+
+
+def test_temp_git_clone_shallow_blobless_and_hash():
+    if not Git.version_gte('2.19.0'):
+        return
+    tmp = tempfile.mkdtemp(prefix='rosdistro_blobless_')
+    try:
+        work = os.path.join(tmp, 'work')
+        upstream = os.path.join(tmp, 'upstream.git')
+        os.makedirs(work)
+        _git_run(work, 'init', '.')
+        _git_run(work, 'checkout', '-b', 'main')
+        _git_run(work, 'config', 'user.email', 'test@example.com')
+        _git_run(work, 'config', 'user.name', 'Test')
+
+        with open(os.path.join(work, 'package.xml'), 'w') as f:
+            f.write(_make_pkg_xml('my_pkg', '0.1.0'))
+        with open(os.path.join(work, 'old.bin'), 'wb') as f:
+            f.write(b'x' * 4096)
+        _git_run(work, 'add', '.')
+        _git_run(work, 'commit', '-m', 'c1')
+        c1_sha = _git_run(work, 'rev-parse', 'HEAD').stdout.decode().strip()
+
+        os.remove(os.path.join(work, 'old.bin'))
+        with open(os.path.join(work, 'package.xml'), 'w') as f:
+            f.write(_make_pkg_xml('my_pkg', '1.0.0'))
+        _git_run(work, 'add', '-A')
+        _git_run(work, 'commit', '-m', 'c2')
+        c2_sha = _git_run(work, 'rev-parse', 'HEAD').stdout.decode().strip()
+
+        _git_run(tmp, 'clone', '--bare', work, upstream)
+        _git_run(upstream, '--git-dir=.', 'config', 'uploadpack.allowfilter', 'true')
+        url = 'file://' + upstream
+
+        orig_cmd = Git.command
+        calls = []
+
+        def spy_cmd(self, *args):
+            calls.append(args)
+            return orig_cmd(self, *args)
+
+        with patch.object(Git, 'command', spy_cmd):
+            repo = SourceRepositorySpecification('my_pkg', {'url': url, 'version': 'main'})
+            cache = git_source_manifest_provider(repo)
+            assert cache.ref() == c2_sha
+            assert '<version>1.0.0</version>' in cache['my_pkg']['package.xml']
+            assert any('--filter=blob:none' in c and '--depth' in c for c in calls)
+
+            calls.clear()
+            hash_repo = SourceRepositorySpecification('my_pkg', {'url': url, 'version': c1_sha})
+            hash_cache = git_source_manifest_provider(hash_repo)
+            assert hash_cache.ref() == c1_sha
+            assert '<version>0.1.0</version>' in hash_cache['my_pkg']['package.xml']
+            assert any('--filter=blob:none' in c and '--no-checkout' in c for c in calls)
+    finally:
+        rmtree(tmp)
+
+
+def test_temp_git_clone_fallback_when_blobless_fails():
+    tmp = tempfile.mkdtemp(prefix='rosdistro_fallback_')
+    try:
+        work = os.path.join(tmp, 'work')
+        upstream = os.path.join(tmp, 'upstream.git')
+        os.makedirs(work)
+        _git_run(work, 'init', '.')
+        _git_run(work, 'checkout', '-b', 'main')
+        _git_run(work, 'config', 'user.email', 'test@example.com')
+        _git_run(work, 'config', 'user.name', 'Test')
+
+        with open(os.path.join(work, 'package.xml'), 'w') as f:
+            f.write(_make_pkg_xml('my_pkg', '1.0.0'))
+        _git_run(work, 'add', '.')
+        _git_run(work, 'commit', '-m', 'c1')
+        c1_sha = _git_run(work, 'rev-parse', 'HEAD').stdout.decode().strip()
+        _git_run(work, 'tag', 'release/rolling/my_pkg/1.0.0-1')
+        _git_run(tmp, 'clone', '--bare', work, upstream)
+        url = 'file://' + upstream
+
+        orig_cmd = Git.command
+        clone_calls = []
+
+        def fail_blobless(self, *args):
+            if args and args[0] == 'clone':
+                clone_calls.append(args)
+                if '--filter=blob:none' in args:
+                    # Simulate a partial/failed blobless clone leaving files in the temp dir
+                    with open(os.path.join(self.cwd, 'stale_file'), 'w') as f:
+                        f.write('stale')
+                    return {'cmd': 'git clone', 'cwd': self.cwd, 'output': '', 'error': 'filter unsupported', 'returncode': 128}
+            return orig_cmd(self, *args)
+
+        rel_repo = ReleaseRepositorySpecification('my_pkg', {
+            'tags': {'release': 'release/rolling/{package}/{version}'},
+            'url': url,
+            'version': '1.0.0-1',
+        })
+        with patch.object(Git, 'command', fail_blobless):
+            xml = git_manifest_provider('rolling', rel_repo, 'my_pkg')
+            assert '<version>1.0.0</version>' in xml
+            assert len(clone_calls) == 2
+            assert '--filter=blob:none' in clone_calls[0]
+            assert '--filter=blob:none' not in clone_calls[1]
+            assert '--depth' in clone_calls[1]
+
+            clone_calls.clear()
+            with _temp_git_clone(url, c1_sha) as repo_path:
+                assert os.path.exists(os.path.join(repo_path, 'package.xml'))
+                assert not os.path.exists(os.path.join(repo_path, 'stale_file'))
+            assert len(clone_calls) == 2
+            assert '--filter=blob:none' in clone_calls[0]
+            assert clone_calls[1] == ('clone', url, '.')
+    finally:
+        rmtree(tmp)

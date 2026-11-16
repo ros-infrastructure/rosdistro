@@ -143,31 +143,48 @@ def _temp_git_clone(url, ref):
     base = tempfile.mkdtemp('rosdistro')
     git = Git(cwd=base)
     try:
-        if git.version_gte('1.8.0') and not ref_is_hash(ref):
-            # Directly clone the required ref with least amount of additional history.
-            # Available since git 1.8.0, but only works for tags and branches, not hashes:
-            # https://git.kernel.org/cgit/git/git.git/tree/Documentation/git-clone.txt?h=v1.8.0#n158
-            result = git.command('clone', url, '.', '--depth', '1', '--branch', ref)
-            if result['returncode'] != 0:
-                error_msg = 'Could not clone repository "%s" at reference "%s"' % (url, ref)
-                if result.get('error'):
-                    error_msg += ': %s' % result['error']
-                raise RuntimeError(error_msg)
-        else:
-            # Old git doesn't support cloning a tag/branch directly, so full clone and checkout.
-            result = git.command('clone', url, '.')
-            if result['returncode'] != 0:
-                error_msg = 'Could not clone repository "%s"' % url
-                if result.get('error'):
-                    error_msg += ': %s' % result['error']
-                raise RuntimeError(error_msg)
+        cloned = False
+        if git.version_gte('2.19.0'):
+            # Attempt a shallow blobless clone first (available since git 2.19.0).
+            if not ref_is_hash(ref):
+                result = git.command(
+                    'clone', url, '.', '--depth', '1', '--filter=blob:none', '--branch', ref)
+            else:
+                result = git.command('clone', url, '.', '--filter=blob:none', '--no-checkout')
+                if result['returncode'] == 0:
+                    result = git.command('checkout', ref)
+            cloned = result['returncode'] == 0
+            if not cloned:
+                rmtree(base)
+                base = tempfile.mkdtemp('rosdistro')
+                git = Git(cwd=base)
 
-            result = git.command('checkout', ref)
-            if result['returncode'] != 0:
-                error_msg = 'Could not checkout ref "%s" of repository "%s"' % (ref, url)
-                if result.get('error'):
-                    error_msg += ': %s' % result['error']
-                raise RuntimeError(error_msg)
+        if not cloned:
+            if git.version_gte('1.8.0') and not ref_is_hash(ref):
+                # Directly clone the required ref with least amount of additional history.
+                # Available since git 1.8.0, but only works for tags and branches, not hashes:
+                # https://git.kernel.org/cgit/git/git.git/tree/Documentation/git-clone.txt?h=v1.8.0#n158
+                result = git.command('clone', url, '.', '--depth', '1', '--branch', ref)
+                if result['returncode'] != 0:
+                    error_msg = 'Could not clone repository "%s" at reference "%s"' % (url, ref)
+                    if result.get('error'):
+                        error_msg += ': %s' % result['error']
+                    raise RuntimeError(error_msg)
+            else:
+                # Old git doesn't support cloning a tag/branch directly, so full clone and checkout.
+                result = git.command('clone', url, '.')
+                if result['returncode'] != 0:
+                    error_msg = 'Could not clone repository "%s"' % url
+                    if result.get('error'):
+                        error_msg += ': %s' % result['error']
+                    raise RuntimeError(error_msg)
+
+                result = git.command('checkout', ref)
+                if result['returncode'] != 0:
+                    error_msg = 'Could not checkout ref "%s" of repository "%s"' % (ref, url)
+                    if result.get('error'):
+                        error_msg += ': %s' % result['error']
+                    raise RuntimeError(error_msg)
 
         yield base
     finally:
