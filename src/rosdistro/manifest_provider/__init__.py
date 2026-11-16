@@ -32,6 +32,10 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+class SkipManifestProvider(RuntimeError):
+    """Raised when a manifest provider cannot handle a given repository."""
+
+
 # This function remains here as a compatibility shim because there is code
 # in older rosinstall_generator versions which uses it in this location.
 def get_release_tag(repo, pkg_name):

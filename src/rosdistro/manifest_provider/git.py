@@ -40,12 +40,15 @@ from catkin_pkg.package import InvalidPackage, parse_package_string
 from catkin_pkg.packages import find_package_paths
 
 from rosdistro.common import rmtree
+from rosdistro.manifest_provider import SkipManifestProvider
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro.vcs import Git, ref_is_hash
 
 
 def git_manifest_provider(_dist_name, repo, pkg_name):
     assert repo.version
+    if getattr(repo, 'type', 'git') != 'git':
+        raise SkipManifestProvider('Cannot handle non-git repository.')
     try:
         release_tag = repo.get_release_tag(pkg_name)
         with _temp_git_clone(repo.url, release_tag) as git_repo_path:
@@ -59,6 +62,8 @@ def git_manifest_provider(_dist_name, repo, pkg_name):
 
 
 def git_source_manifest_provider(repo):
+    if getattr(repo, 'type', 'git') != 'git':
+        raise SkipManifestProvider('Cannot handle non-git repository.')
     try:
         with _temp_git_clone(repo.url, repo.version) as git_repo_path:
             # Include the git hash in our cache dictionary.
@@ -94,16 +99,25 @@ def _temp_git_clone(url, ref):
             # https://git.kernel.org/cgit/git/git.git/tree/Documentation/git-clone.txt?h=v1.8.0#n158
             result = git.command('clone', url, '.', '--depth', '1', '--branch', ref)
             if result['returncode'] != 0:
-                raise RuntimeError('Could not clone repository "%s" at reference "%s"' % (url, ref))
+                error_msg = 'Could not clone repository "%s" at reference "%s"' % (url, ref)
+                if result.get('error'):
+                    error_msg += ': %s' % result['error']
+                raise RuntimeError(error_msg)
         else:
             # Old git doesn't support cloning a tag/branch directly, so full clone and checkout.
             result = git.command('clone', url, '.')
             if result['returncode'] != 0:
-                raise RuntimeError('Could not clone repository "%s"' % url)
+                error_msg = 'Could not clone repository "%s"' % url
+                if result.get('error'):
+                    error_msg += ': %s' % result['error']
+                raise RuntimeError(error_msg)
 
             result = git.command('checkout', ref)
             if result['returncode'] != 0:
-                raise RuntimeError('Could not checkout ref "%s" of repository "%s"' % (ref, url))
+                error_msg = 'Could not checkout ref "%s" of repository "%s"' % (ref, url)
+                if result.get('error'):
+                    error_msg += ': %s' % result['error']
+                raise RuntimeError(error_msg)
 
         yield base
     finally:

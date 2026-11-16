@@ -37,6 +37,7 @@ from urllib.request import urlopen, Request
 from urllib.error import URLError
 
 from rosdistro import logger
+from rosdistro.manifest_provider import SkipManifestProvider
 
 # This Bitbucket provider can optionally send basic auth to fetch from
 # private repositories if you supply the environment variables
@@ -51,11 +52,13 @@ BITBUCKET_PASSWORD = os.getenv('BITBUCKET_PASSWORD', None)
 
 def bitbucket_manifest_provider(_dist_name, repo, pkg_name):
     assert repo.version
+    if getattr(repo, 'type', 'git') != 'git':
+        raise SkipManifestProvider('Cannot handle non-git repository.')
     server, path = repo.get_url_parts()
 
     if not server.endswith('bitbucket.org'):
         logger.debug('Skip non-bitbucket url "%s"' % repo.url)
-        raise RuntimeError('Cannot handle non bitbucket url.')
+        raise SkipManifestProvider('Cannot handle non bitbucket url.')
 
     release_tag = repo.get_release_tag(pkg_name)
 
