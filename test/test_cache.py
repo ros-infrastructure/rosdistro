@@ -162,6 +162,7 @@ def test_distribution_cache_dual_v2_and_v3_export():
     assert view.pop('baz_pkg1') == '<package><name>baz_pkg1</name></package>'
     assert 'baz_pkg1' not in cache.release_resources
     assert repo_cache['bar_repo'][0] == 'src/bar_repo'
+    assert repo_cache['bar_repo']['package_path'] == 'src/bar_repo'
     assert repo_cache['bar_repo'][1] == bar_xml
     assert cache.source_repo_package_xmls['bar_repo'].stars() == 12
     assert cache.source_repo_package_xmls['bar_repo'].description() == 'Bar repository'
@@ -184,6 +185,7 @@ def test_distribution_cache_dual_v2_and_v3_export():
     assert v3_data['source_repo_resources']['bar_repo']['_last_commit_time'] == '2026-03-01T12:00:00Z'
     assert v3_data['source_repo_resources']['bar_repo']['_contributing'] == '# Contributing'
     assert v3_data['source_repo_resources']['bar_repo']['_readme'] == '# Repo Root README'
+    assert v3_data['source_repo_resources']['bar_repo']['bar_repo']['package_path'] == 'src/bar_repo'
     assert v3_data['source_repo_resources']['bar_repo']['bar_repo']['launch_files'] == ['launch/demo.launch.py']
     assert v3_data['source_repo_resources']['bar_repo']['bar_repo']['msg_files'] == ['msg/Bar.msg']
     assert v3_data['source_repo_resources']['bar_repo']['bar_repo']['srv_files'] == ['srv/GetBar.srv']
@@ -299,3 +301,66 @@ def test_not_crawled_vs_not_found():
     assert doc_dist.get_source_repo_metadata('doc_only_repo', 'stars', require_crawled=True) is None
 
 
+def test_package_path_posix_normalization():
+    from rosdistro.distribution_cache_generator import CacheYamlDumper
+
+    url = path_to_url(os.path.join(FILES_DIR, 'index_v2.yaml'))
+    index = get_index(url)
+    dist_data = _load_foo_distribution_data()
+    bar_xml = (
+        '<?xml version="1.0" ?><package format="2"><name>bar_repo</name><version>0.1.2</version>'
+        '<description>bar package</description><maintainer email="a@b.c">a</maintainer>'
+        '<license>BSD</license></package>'
+    )
+    root_xml = (
+        '<?xml version="1.0" ?><package format="2"><name>root_pkg</name><version>0.1.2</version>'
+        '<description>root package</description><maintainer email="a@b.c">a</maintainer>'
+        '<license>BSD</license></package>'
+    )
+
+    repo_cache = SourceRepositoryCache.from_ref('deadbeef')
+    repo_cache.add('bar_repo', r'core\bar_repo', bar_xml, 'package.xml')
+    repo_cache.add('bar_repo', r'core\bar_repo', [r'launch\sub\demo.launch.py'], 'launch_files')
+    repo_cache.add('posix_pkg', 'nested/posix_pkg', bar_xml, 'package.xml')
+    repo_cache.add('root_pkg', '', root_xml, 'package.xml')
+
+    # Both backslash and forward-slash inputs are recorded and returned as POSIX '/'
+    assert repo_cache['bar_repo']['package_path'] == 'core/bar_repo'
+    assert repo_cache['bar_repo'].get('package_path') == 'core/bar_repo'
+    assert repo_cache['bar_repo'][0] == 'core/bar_repo'
+    assert repo_cache.launch_files('bar_repo') == ['launch/sub/demo.launch.py']
+    assert repo_cache['posix_pkg']['package_path'] == 'nested/posix_pkg'
+    assert repo_cache['root_pkg']['package_path'] == ''
+    assert repo_cache['root_pkg'][0] == ''
+
+    # Direct mutation and v2/v3 dict loading also normalize backslashes to POSIX '/'
+    repo_cache['bar_repo']['package_path'] = r'updated\bar_repo'
+    assert repo_cache['bar_repo']['package_path'] == 'updated/bar_repo'
+    repo_cache['bar_repo'].update({'package_path': r'core\bar_repo'})
+    assert repo_cache['bar_repo']['package_path'] == 'core/bar_repo'
+
+    v2_loaded = SourceRepositoryCache({
+        '_ref': 'deadbeef',
+        'p_posix': ['a/b', bar_xml],
+        'p_win': [r'c\d', bar_xml],
+    })
+    assert v2_loaded['p_posix']['package_path'] == 'a/b'
+    assert v2_loaded['p_win']['package_path'] == 'c/d'
+    assert v2_loaded['p_win'][0] == 'c/d'
+    assert v2_loaded.get_data(version=2)['p_win'][0] == 'c/d'
+    assert v2_loaded.get_data(version=3)['p_win']['package_path'] == 'c/d'
+
+    cache = DistributionCache('foo', distribution_file_data=dist_data, config=CacheConfig.extended())
+    cache.source_repo_resources['bar_repo'] = repo_cache
+    cache.distribution_file.source_packages = cache.get_source_packages()
+
+    dist = get_cached_distribution(index, 'foo', cache=cache, allow_lazy_load=False)
+    assert dist.get_source_resource('bar_repo', 'package_path') == 'core/bar_repo'
+
+    v3_data = cache.get_data(version=3)
+    assert v3_data['source_repo_resources']['bar_repo']['bar_repo']['package_path'] == 'core/bar_repo'
+    v2_data = cache.get_legacy_data(include_source=True)
+    assert v2_data['source_repo_package_xmls']['bar_repo']['bar_repo'] == ['core/bar_repo', bar_xml]
+
+    reloaded_v3 = yaml.safe_load(yaml.dump(v3_data, Dumper=CacheYamlDumper))
+    assert reloaded_v3['source_repo_resources']['bar_repo']['bar_repo']['package_path'] == 'core/bar_repo'

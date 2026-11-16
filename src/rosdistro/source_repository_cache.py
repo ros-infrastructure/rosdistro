@@ -36,10 +36,55 @@ from datetime import datetime
 import yaml
 
 
+_PATH_LIST_KEYS = ('launch_files', 'msg_files', 'srv_files', 'action_files')
+_NORMALIZED_KEYS = ('package_path',) + _PATH_LIST_KEYS
+
+
+def _normalize_posix_path(path):
+    if isinstance(path, str):
+        return path.replace('\\', '/')
+    return path
+
+
+def _normalize_resource_value(key, value):
+    if key == 'package_path':
+        return _normalize_posix_path(value)
+    if key in _PATH_LIST_KEYS and isinstance(value, (list, tuple)):
+        return [_normalize_posix_path(p) for p in value]
+    return value
+
+
 class _PackageResourceDict(dict):
-    """Dictionary of package resources that also supports legacy v2 tuple indexing:
+    """Dictionary of package resources that stores ``package_path`` and relative asset
+    paths normalized with POSIX forward slashes and supports legacy v2 tuple indexing:
     pkg_data[0] -> package_path, pkg_data[1] -> package.xml.
     """
+
+    def __init__(self, *args, **kwargs):
+        super(_PackageResourceDict, self).__init__(*args, **kwargs)
+        for key in _NORMALIZED_KEYS:
+            if key in self:
+                super(_PackageResourceDict, self).__setitem__(
+                    key,
+                    _normalize_resource_value(key, super(_PackageResourceDict, self).__getitem__(key)),
+                )
+
+    def __setitem__(self, key, value):
+        super(_PackageResourceDict, self).__setitem__(key, _normalize_resource_value(key, value))
+
+    def update(self, *args, **kwargs):
+        super(_PackageResourceDict, self).update(*args, **kwargs)
+        for key in _NORMALIZED_KEYS:
+            if key in self:
+                super(_PackageResourceDict, self).__setitem__(
+                    key,
+                    _normalize_resource_value(key, super(_PackageResourceDict, self).__getitem__(key)),
+                )
+
+    def setdefault(self, key, default=None):
+        return super(_PackageResourceDict, self).setdefault(
+            key, _normalize_resource_value(key, default)
+        )
 
     def __getitem__(self, key):
         if key == 0:
@@ -110,7 +155,10 @@ class SourceRepositoryCache(object):
             data = {'_ref': self._ref}
             for pkg_name in sorted(self._package_names):
                 pkg_data = self._data[pkg_name]
-                data[pkg_name] = [pkg_data.get('package_path', ''), pkg_data.get('package.xml')]
+                data[pkg_name] = [
+                    _normalize_posix_path(pkg_data.get('package_path', '')),
+                    pkg_data.get('package.xml'),
+                ]
             return data
         if isinstance(self._data.get('_last_update_time'), datetime):
             self._data['_last_update_time'] = self._data['_last_update_time'].isoformat()

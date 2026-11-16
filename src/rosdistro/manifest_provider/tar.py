@@ -33,6 +33,7 @@
 import base64
 import io
 import os
+import posixpath
 import tarfile
 import tempfile
 import urllib
@@ -131,7 +132,8 @@ def tar_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metad
                                 break
 
                 for package_path in package_xml_paths:
-                    with open(os.path.join(tmpdir, package_path, xmlpath), 'r') as f:
+                    local_pkg_dir = os.path.join(tmpdir, *package_path.split('/')) if package_path else tmpdir
+                    with open(os.path.join(local_pkg_dir, xmlpath), 'r') as f:
                         package_xml = f.read()
                     try:
                         name = parse_package_string(package_xml).name
@@ -149,7 +151,7 @@ def tar_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metad
                                 filepath,
                             )
                             continue
-                        repo_filename = os.path.join(tmpdir, package_path, filepath)
+                        repo_filename = os.path.join(local_pkg_dir, *filepath.split('/'))
                         if not os.path.isfile(repo_filename):
                             logger.debug(f'- tar load of {filepath} from {repo.url} skipped because it did not exist.')
                             continue
@@ -174,7 +176,7 @@ def _package_xml_members(tar, filepaths=None):
             fp for fp in filepaths if fp not in PACKAGE_ASSET_LIST_RESOURCES
         )
     for tarinfo in tar:
-        if os.path.basename(tarinfo.name) in target_filenames or any(
+        if posixpath.basename(tarinfo.name) in target_filenames or any(
             tarinfo.name == fp or tarinfo.name.endswith('/' + fp) for fp in target_filenames
         ):
             yield tarinfo

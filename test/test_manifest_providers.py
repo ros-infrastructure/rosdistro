@@ -2,7 +2,6 @@
 
 import io
 import json
-import os
 import tarfile
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
@@ -132,7 +131,7 @@ def test_gitlab_source():
 def test_git_source_multi():
     repo_cache = git_source_manifest_provider(_ros_source_repo())
     assert repo_cache.ref()
-    assert repo_cache['roslib']['package_path'] == os.path.join('core', 'roslib')
+    assert repo_cache['roslib']['package_path'] == 'core/roslib'
 
 
 def test_tar_source():
@@ -698,6 +697,82 @@ def test_git_and_tar_source_metadata_assets_and_ignore_markers(tmp_path):
         assert cached_repo.contributing() == '# Tar Contributing'
         assert cached_repo.readme() == '# Tar Root README'
 
+
+def test_git_and_tar_nested_package_path_posix(tmp_path):
+    from rosdistro.vcs import Git
+    from . import path_to_url
+
+    roslib_xml = """<?xml version="1.0"?>
+<package format="2">
+  <name>roslib</name>
+  <version>1.14.0</version>
+  <description>roslib package</description>
+  <maintainer email="test@example.com">Maintainer</maintainer>
+  <license>BSD</license>
+</package>
+"""
+    repo_dir = tmp_path / 'ros_repo'
+    nested_dir = repo_dir / 'core' / 'roslib'
+    nested_dir.mkdir(parents=True)
+    (nested_dir / 'package.xml').write_text(roslib_xml)
+    (nested_dir / 'README.md').write_text('# roslib\n')
+
+    git = Git(cwd=str(repo_dir))
+    assert git.command('init', '-b', 'kinetic-devel')['returncode'] == 0 or (
+        git.command('init')['returncode'] == 0 and
+        git.command('checkout', '-b', 'kinetic-devel')['returncode'] == 0
+    )
+    assert git.command('config', 'user.email', 'test@example.com')['returncode'] == 0
+    assert git.command('config', 'user.name', 'Test User')['returncode'] == 0
+    assert git.command('add', '.')['returncode'] == 0
+    assert git.command('commit', '-m', 'Initial commit')['returncode'] == 0
+
+    local_source_repo = SourceRepositorySpecification('ros', {
+        'url': path_to_url(str(repo_dir)),
+        'version': 'kinetic-devel',
+    })
+
+    tar_bytes = _build_tar_bytes({
+        'core/roslib/package.xml': roslib_xml,
+        'core/roslib/README.md': '# roslib\n',
+    })
+
+    with patch('rosdistro.manifest_provider.tar.urlopen',
+               side_effect=lambda req: _make_mock_http_response(tar_bytes)):
+        git_cache = git_source_manifest_provider(local_source_repo)
+        tar_cache = tar_source_manifest_provider(_genmsg_source_tarball())
+
+        assert git_cache.ref()
+        assert git_cache['roslib']['package_path'] == 'core/roslib'
+        assert git_cache['roslib'][0] == 'core/roslib'
+        assert tar_cache['roslib']['package_path'] == 'core/roslib'
+        assert tar_cache['roslib'][0] == 'core/roslib'
+        assert git_cache['roslib']['README.md'] == '# roslib\n'
+        assert tar_cache['roslib']['README.md'] == '# roslib\n'
+        assert git_cache.get_data(version=3)['roslib']['package_path'] == 'core/roslib'
+        assert git_cache.get_data(version=2)['roslib'][0] == 'core/roslib'
+        assert tar_cache.get_data(version=3)['roslib']['package_path'] == 'core/roslib'
+        assert tar_cache.get_data(version=2)['roslib'][0] == 'core/roslib'
+
+    # Simulate Windows os.sep / os.path.relpath in list_local_repo_files + partition_repo_tree
+    import os as _os
+    from rosdistro.manifest_provider.cache import list_local_repo_files, partition_repo_tree
+
+    class _FakeWinOs:
+        sep = '\\'
+        walk = staticmethod(_os.walk)
+
+        class path:
+            @staticmethod
+            def relpath(p, start):
+                return _os.path.relpath(p, start).replace('/', '\\')
+
+    with patch('rosdistro.manifest_provider.cache.os', _FakeWinOs):
+        rel_files = list_local_repo_files(str(repo_dir))
+        assert 'core/roslib/package.xml' in rel_files
+        assert all('\\' not in f for f in rel_files)
+        pkg_paths, _, _ = partition_repo_tree(rel_files)
+        assert pkg_paths == ['core/roslib']
 
 
 def _genmsg_release_repo():

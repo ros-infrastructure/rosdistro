@@ -60,7 +60,7 @@ def git_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     try:
         release_tag = repo.get_release_tag(pkg_name)
         with _temp_git_clone(repo.url, release_tag) as git_repo_path:
-            filename = os.path.join(git_repo_path, filepath)
+            filename = os.path.join(git_repo_path, *filepath.split('/'))
             if not os.path.exists(filename):
                 if filepath != 'package.xml':
                     return None
@@ -105,7 +105,8 @@ def git_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metad
 
             # Find filepath files inside the repo.
             for package_path in package_xml_paths:
-                with open(os.path.join(git_repo_path, package_path, xmlpath), 'r') as f:
+                local_pkg_dir = os.path.join(git_repo_path, *package_path.split('/')) if package_path else git_repo_path
+                with open(os.path.join(local_pkg_dir, xmlpath), 'r') as f:
                     package_xml = f.read()
                 try:
                     name = parse_package_string(package_xml).name
@@ -123,7 +124,7 @@ def git_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metad
                             filepath,
                         )
                         continue
-                    repo_filename = os.path.join(git_repo_path, package_path, filepath)
+                    repo_filename = os.path.join(local_pkg_dir, *filepath.split('/'))
                     if not os.path.exists(repo_filename):
                         logger.debug(f'- git load of {filepath} from {repo.url} at {repo.version} skipped because it did not exist.')
                         continue

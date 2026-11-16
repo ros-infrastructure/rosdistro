@@ -32,6 +32,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import os
+import posixpath
 from xml.dom import minidom
 
 from rosdistro import logger
@@ -131,7 +132,7 @@ def partition_repo_tree(blob_paths):
             return True
         parent = pkg_dir
         while True:
-            parent = os.path.dirname(parent)
+            parent = posixpath.dirname(parent)
             if parent in all_pkg_dirs_set:
                 return False
             if parent == '':
