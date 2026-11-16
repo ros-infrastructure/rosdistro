@@ -143,8 +143,9 @@ class DependencyWalker(object):
 class SourceDependencyWalker(DependencyWalker):
     def _get_package(self, pkg_name):
         if pkg_name not in self._packages:
-            repo = self._distribution_instance.repositories[self._distribution_instance.source_packages[pkg_name].repository_name].source_repository
-            assert repo is not None, "Package '%s' in repository '%s' is missing a source entry." % (pkg_name, repo.name)
+            repo_entry = self._distribution_instance.repositories[self._distribution_instance.source_packages[pkg_name].repository_name]
+            repo = self._get_package_repo(pkg_name)
+            assert repo is not None, "Package '%s' in repository '%s' is missing a source or doc entry." % (pkg_name, repo_entry.name)
             pkg_xml = self._distribution_instance.get_source_package_xml(pkg_name)
             try:
                 pkg = parse_package_string(pkg_xml)
@@ -157,4 +158,11 @@ class SourceDependencyWalker(DependencyWalker):
         return self._distribution_instance.source_packages.keys()
 
     def _get_package_repo(self, name):
-        return self._distribution_instance.repositories[self._distribution_instance.source_packages[name].repository_name].source_repository
+        repo_entry = self._distribution_instance.repositories[self._distribution_instance.source_packages[name].repository_name]
+        cache_cfg = getattr(self._distribution_instance, 'cache_config', None)
+        fallback_to_doc = cache_cfg.fallback_src_to_doc if cache_cfg is not None else True
+        return (
+            repo_entry.source_repository
+            if repo_entry.source_repository is not None or not fallback_to_doc
+            else repo_entry.doc_repository
+        )
