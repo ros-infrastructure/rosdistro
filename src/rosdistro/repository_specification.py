@@ -33,7 +33,7 @@
 
 import re
 
-from .vcs import Git
+from .vcs import Git, normalize_git_url
 
 
 class RepositorySpecification(object):
@@ -68,9 +68,12 @@ class RepositorySpecification(object):
     @property
     def remote_refs(self):
         if not self._remote_refs:
-            result = Git().command('ls-remote', self.url)
+            result = Git().command('ls-remote', normalize_git_url(self.url))
             if result['returncode'] != 0:
-                raise RuntimeError('Could not git ls-remote repository "%s"' % self.url)
+                error_msg = 'Could not git ls-remote repository "%s"' % self.url
+                if result.get('error'):
+                    error_msg += ': %s' % result['error']
+                raise RuntimeError(error_msg)
             self._remote_refs = {}
             for row in result['output'].strip().splitlines():
                 sha, name = row.split('\t')
