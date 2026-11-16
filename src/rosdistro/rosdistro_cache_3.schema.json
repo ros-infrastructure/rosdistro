@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ros-infrastructure/rosdistro/rosdistro_cache_3.schema.json",
+  "title": "ROSDistro Cache Format 3 Schema",
+  "description": "Cache Format 3 for rosdistro",
+  "type": "object",
+  "properties": {
+    "version": {
+      "description": "The version of the rosdistro cache",
+      "type": "integer",
+      "minimum": 3,
+      "maximum": 3
+    },
+    "type": {
+      "description": "Clarifying the file type",
+      "type": "string"
+    },
+    "config": {
+      "$ref": "#/$defs/cache_config"
+    },
+    "source_repo_resources": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "$ref": "#/$defs/repository_resources"
+        }
+      }
+    },
+    "release_resources": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/package_resources"
+      }
+    },
+    "distribution_file": {
+      "type": [
+        "object",
+        "array"
+      ],
+      "description": "rosdistro distribution_file"
+    },
+    "name": {
+      "type": "string",
+      "description": "The name of the distribution being cached"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "version",
+    "name",
+    "config",
+    "distribution_file",
+    "release_resources",
+    "source_repo_resources"
+  ],
+  "$defs": {
+    "resource_option": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_lines": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "metadata_option": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_lines": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "cache_config": {
+      "type": "object",
+      "properties": {
+        "release_package_resources": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/resource_option"
+          }
+        },
+        "source_package_resources": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/resource_option"
+          }
+        },
+        "source_repo_metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/metadata_option"
+          }
+        },
+        "fallback_src_to_doc": {
+          "type": "boolean"
+        },
+        "min_update_delta": {
+          "type": "integer"
+        },
+        "yaml_alias_min_length": {
+          "type": "integer"
+        },
+        "limit": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "repository_resources": {
+      "type": "object",
+      "patternProperties": {
+        "^_.*$": {}
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/package_resources"
+      },
+      "properties": {
+        "_last_update_time": {
+          "type": "string"
+        },
+        "_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "_stars": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "_description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "_tags": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "_last_commit_time": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "_contributing": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "_readme": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_ref"
+      ]
+    },
+    "package_resources": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "array",
+          "null"
+        ]
+      },
+      "properties": {
+        "CHANGELOG.rst": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Contents of the CHANGELOG.rst if it's available"
+        },
+        "package.xml": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Contents of the package.xml if it's available"
+        },
+        "package_path": {
+          "type": "string",
+          "description": "The package_path if it's available"
+        },
+        "README.md": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Contents of the README.md if it's available"
+        },
+        "launch_files": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Relative paths of launch files within the package"
+        },
+        "msg_files": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Relative paths of .msg files within the package"
+        },
+        "srv_files": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Relative paths of .srv files within the package"
+        },
+        "action_files": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Relative paths of .action files within the package"
+        },
+        "version": {
+          "type": "string",
+          "description": "The release version of the package"
+        }
+      }
+    }
+  }
+}

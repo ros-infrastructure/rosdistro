@@ -61,7 +61,13 @@ class FormatVersionError(Exception):
 
 
 from .distribution import Distribution  # noqa
-from .distribution_cache import DistributionCache  # noqa
+from .distribution_cache import (  # noqa
+    CacheConfig,
+    DEFAULT_EXTENDED_CONFIG,
+    DistributionCache,
+    MINIMAL_CACHE_CONFIG,
+    ResourceNotCrawledError,
+)
 from .distribution_file import DistributionFile  # noqa
 from .distribution_file import create_distribution_file  # noqa
 from .external.appdirs import site_config_dir, user_config_dir  # noqa

@@ -31,7 +31,12 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import copy
+import datetime
 import sys
+import time
+
+import yaml
 
 from . import logger
 from .distribution_file import create_distribution_file
@@ -40,46 +45,621 @@ from .source_repository_cache import SourceRepositoryCache
 from .vcs import Git, ref_is_hash
 
 
+class ResourceNotCrawledError(KeyError):
+    """Raised when a caller requests a resource or metadata key with require_crawled=True
+    that was not enabled/crawled in the cache configuration.
+    """
+
+
+NO_MAX_LINES_RESOURCES = ('package.xml', 'launch_files', 'msg_files', 'srv_files', 'action_files')
+
+
+def _normalize_resource_entry(name, raw_value, default_max_lines=100):
+    if isinstance(raw_value, bool):
+        entry = {'enabled': raw_value}
+        if name not in NO_MAX_LINES_RESOURCES and default_max_lines is not None:
+            entry['max_lines'] = default_max_lines
+        return entry
+    if isinstance(raw_value, int):
+        entry = {'enabled': True}
+        if name not in NO_MAX_LINES_RESOURCES:
+            entry['max_lines'] = raw_value
+        return entry
+    if isinstance(raw_value, dict):
+        entry = {'enabled': bool(raw_value.get('enabled', True))}
+        if 'max_lines' in raw_value:
+            entry['max_lines'] = int(raw_value['max_lines']) if raw_value['max_lines'] is not None else None
+        elif name not in NO_MAX_LINES_RESOURCES and default_max_lines is not None:
+            entry['max_lines'] = default_max_lines
+        return entry
+    raise ValueError("Invalid resource configuration for '%s': %r" % (name, raw_value))
+
+
+def _normalize_metadata_entry(name, raw_value):
+    if isinstance(raw_value, bool):
+        return {'enabled': raw_value}
+    if isinstance(raw_value, int):
+        return {'enabled': True, 'max_lines': raw_value}
+    if isinstance(raw_value, dict):
+        entry = {'enabled': bool(raw_value.get('enabled', True))}
+        if 'max_lines' in raw_value:
+            entry['max_lines'] = int(raw_value['max_lines']) if raw_value['max_lines'] is not None else None
+        return entry
+    raise ValueError("Invalid metadata configuration for '%s': %r" % (name, raw_value))
+
+
+class CacheConfig(dict):
+    """Configuration for rosdistro cache generation and self-documenting Cache Format 3."""
+
+    DEFAULT_DOC_MAX_LINES = 100
+    DEFAULT_FALLBACK_SRC_TO_DOC = True
+    DEFAULT_MIN_UPDATE_DELTA = 3600
+    DEFAULT_YAML_ALIAS_MIN_LENGTH = 300
+    DEFAULT_PACKAGE_RESOURCES = ('package.xml', 'README.md', 'CHANGELOG.rst')
+    DEFAULT_SOURCE_PACKAGE_RESOURCES = (
+        'package.xml',
+        'README.md',
+        'CHANGELOG.rst',
+        'launch_files',
+        'msg_files',
+        'srv_files',
+        'action_files',
+    )
+    DEFAULT_REPO_METADATA = (
+        'stars',
+        'description',
+        'tags',
+        'last_commit_time',
+        'contributing',
+        'readme',
+    )
+    VALID_CONFIG_KEYS = {
+        'release_package_resources',
+        'source_package_resources',
+        'source_repo_metadata',
+        'fallback_src_to_doc',
+        'min_update_delta',
+        'yaml_alias_min_length',
+        'limit',
+    }
+
+    @classmethod
+    def _build_resource_map(cls, raw_map, force_package_xml=False, default_resources=None):
+        defaults = default_resources if default_resources is not None else cls.DEFAULT_PACKAGE_RESOURCES
+        res = {
+            name: _normalize_resource_entry(name, False, cls.DEFAULT_DOC_MAX_LINES)
+            for name in defaults
+        }
+        if isinstance(raw_map, (list, tuple, set)):
+            raw_map = {k: True for k in raw_map}
+        for k, v in (raw_map or {}).items():
+            res[k] = _normalize_resource_entry(k, v, cls.DEFAULT_DOC_MAX_LINES)
+        if force_package_xml or (any(v.get('enabled') for v in res.values()) and 'package.xml' not in (raw_map or {})):
+            res['package.xml'] = {'enabled': True}
+        return res
+
+    def __init__(self, data=None, strict=True):
+        super(CacheConfig, self).__init__()
+        raw = copy.deepcopy(data) if data else {}
+        if strict:
+            unknown_keys = set(raw.keys()) - self.VALID_CONFIG_KEYS
+            if unknown_keys:
+                raise ValueError("Unknown cache configuration keys: %s" % ', '.join(sorted(unknown_keys)))
+
+        rel_res = self._build_resource_map(
+            raw.get('release_package_resources'),
+            force_package_xml=True,
+            default_resources=self.DEFAULT_PACKAGE_RESOURCES,
+        )
+        src_res = self._build_resource_map(
+            raw.get('source_package_resources'),
+            force_package_xml=False,
+            default_resources=self.DEFAULT_SOURCE_PACKAGE_RESOURCES,
+        )
+
+        src_meta = {k: {'enabled': False} for k in self.DEFAULT_REPO_METADATA}
+        raw_meta = raw.get('source_repo_metadata', {})
+        if isinstance(raw_meta, (list, tuple, set)):
+            raw_meta = {k: True for k in raw_meta}
+        for k, v in (raw_meta or {}).items():
+            clean_key = k[1:] if k.startswith('_') else k
+            src_meta[clean_key] = _normalize_metadata_entry(clean_key, v)
+
+        self['release_package_resources'] = rel_res
+        self['source_package_resources'] = src_res
+        self['source_repo_metadata'] = src_meta
+        self['fallback_src_to_doc'] = bool(
+            raw.get('fallback_src_to_doc', self.DEFAULT_FALLBACK_SRC_TO_DOC)
+        )
+        self['min_update_delta'] = int(raw.get('min_update_delta', self.DEFAULT_MIN_UPDATE_DELTA))
+        self['yaml_alias_min_length'] = int(
+            raw.get('yaml_alias_min_length', self.DEFAULT_YAML_ALIAS_MIN_LENGTH)
+        )
+        limit_val = raw.get('limit', None)
+        self['limit'] = int(limit_val) if limit_val is not None else None
+
+    @property
+    def release_package_resources(self):
+        return self['release_package_resources']
+
+    @property
+    def source_package_resources(self):
+        return self['source_package_resources']
+
+    @property
+    def source_repo_metadata(self):
+        return self['source_repo_metadata']
+
+    @property
+    def fallback_src_to_doc(self):
+        return self['fallback_src_to_doc']
+
+    @property
+    def min_update_delta(self):
+        return self['min_update_delta']
+
+    @property
+    def yaml_alias_min_length(self):
+        return self['yaml_alias_min_length']
+
+    @property
+    def limit(self):
+        return self['limit']
+
+    def to_dict(self):
+        return copy.deepcopy(dict(self))
+
+    def is_release_resource_enabled(self, filepath):
+        return bool(self['release_package_resources'].get(filepath, {}).get('enabled', False))
+
+    def get_release_resource_max_lines(self, filepath, default=DEFAULT_DOC_MAX_LINES):
+        entry = self['release_package_resources'].get(filepath, {})
+        return entry.get('max_lines', default if filepath not in NO_MAX_LINES_RESOURCES else None)
+
+    def enabled_release_resources(self):
+        enabled = [k for k, v in self['release_package_resources'].items() if v.get('enabled')]
+        if 'package.xml' in enabled:
+            enabled.remove('package.xml')
+        return ['package.xml'] + enabled
+
+    def is_source_resource_enabled(self, filepath):
+        return bool(self['source_package_resources'].get(filepath, {}).get('enabled', False))
+
+    def get_source_resource_max_lines(self, filepath, default=DEFAULT_DOC_MAX_LINES):
+        entry = self['source_package_resources'].get(filepath, {})
+        return entry.get('max_lines', default if filepath not in NO_MAX_LINES_RESOURCES else None)
+
+    def enabled_source_resources(self):
+        enabled = [k for k, v in self['source_package_resources'].items() if v.get('enabled')]
+        if 'package.xml' in enabled:
+            enabled.remove('package.xml')
+            return ['package.xml'] + enabled
+        return enabled
+
+    def is_source_metadata_enabled(self, key):
+        clean_key = key[1:] if key.startswith('_') else key
+        return bool(self['source_repo_metadata'].get(clean_key, {}).get('enabled', False))
+
+    def get_source_metadata_max_lines(self, key, default=DEFAULT_DOC_MAX_LINES):
+        clean_key = key[1:] if key.startswith('_') else key
+        entry = self['source_repo_metadata'].get(clean_key, {})
+        return entry.get('max_lines', default)
+
+    def enabled_source_metadata(self):
+        return [k for k, v in self['source_repo_metadata'].items() if v.get('enabled')]
+
+    def has_any_source_enabled(self):
+        return bool(self.enabled_source_resources() or self.enabled_source_metadata())
+
+    @classmethod
+    def minimal(cls):
+        return cls()
+
+    @classmethod
+    def extended(cls):
+        return cls({
+            'release_package_resources': {k: True for k in cls.DEFAULT_PACKAGE_RESOURCES},
+            'source_package_resources': {k: True for k in cls.DEFAULT_SOURCE_PACKAGE_RESOURCES},
+            'source_repo_metadata': {k: True for k in cls.DEFAULT_REPO_METADATA},
+        })
+
+    @classmethod
+    def from_file(cls, path):
+        with open(path, 'r') as f:
+            data = yaml.safe_load(f.read()) or {}
+        return cls(data)
+
+    @classmethod
+    def from_input(cls, config=None, include_source=False, limit=None):
+        if config is None:
+            cfg = cls.extended() if include_source else cls.minimal()
+        elif isinstance(config, cls):
+            cfg = cls(config.to_dict())
+        elif isinstance(config, dict):
+            cfg = cls(config)
+        elif isinstance(config, str):
+            if config == 'minimal':
+                cfg = cls.minimal()
+            elif config == 'extended':
+                cfg = cls.extended()
+            else:
+                cfg = cls.from_file(config)
+        else:
+            raise TypeError("Unsupported cache config type: %r" % (type(config),))
+
+        if include_source and not cfg.is_source_resource_enabled('package.xml'):
+            cfg['source_package_resources']['package.xml'] = {'enabled': True}
+        if limit is not None:
+            cfg['limit'] = int(limit)
+        return cfg
+
+    @classmethod
+    def from_cache_data(cls, data, inbound_version=3):
+        if data and 'config' in data and isinstance(data['config'], dict):
+            return cls(data['config'], strict=False)
+        cfg = cls.minimal()
+        if not data:
+            return cfg
+        if inbound_version == 2:
+            if data.get('source_repo_package_xmls'):
+                cfg['source_package_resources']['package.xml'] = {'enabled': True}
+            return cfg
+        # Infer crawled resources from Format 3 data when 'config' was omitted
+        for pkg_data in (data.get('release_resources') or {}).values():
+            if isinstance(pkg_data, dict):
+                for res_key in pkg_data:
+                    if res_key != 'version':
+                        cfg['release_package_resources'][res_key] = _normalize_resource_entry(
+                            res_key, True, cls.DEFAULT_DOC_MAX_LINES
+                        )
+        for repo_data in (data.get('source_repo_resources') or {}).values():
+            raw_repo = repo_data._data if isinstance(repo_data, SourceRepositoryCache) else repo_data
+            if isinstance(raw_repo, dict):
+                for k, v in raw_repo.items():
+                    if k.startswith('_'):
+                        if k not in ('_ref', '_last_update_time'):
+                            cfg['source_repo_metadata'][k[1:]] = {'enabled': True}
+                    elif isinstance(v, dict):
+                        for res_key in v:
+                            if res_key != 'package_path':
+                                cfg['source_package_resources'][res_key] = _normalize_resource_entry(
+                                    res_key, True, cls.DEFAULT_DOC_MAX_LINES
+                                )
+                    elif isinstance(v, (list, tuple)):
+                        cfg['source_package_resources']['package.xml'] = {'enabled': True}
+        return cfg
+
+
+yaml.SafeDumper.add_representer(CacheConfig, yaml.SafeDumper.represent_dict)
+
+MINIMAL_CACHE_CONFIG = CacheConfig.minimal()
+DEFAULT_EXTENDED_CONFIG = CacheConfig.extended()
+
+
+class _ReleasePackageXmlsView(dict):
+    """Live dict view over DistributionCache.release_resources[pkg]['package.xml']
+    preserving backwards compatibility for callers accessing cache.release_package_xmls.
+    """
+
+    def __init__(self, release_resources):
+        self._release_resources = release_resources
+        super(_ReleasePackageXmlsView, self).__init__(
+            (pkg_name, pkg_data['package.xml'])
+            for pkg_name, pkg_data in release_resources.items()
+            if isinstance(pkg_data, dict) and pkg_data.get('package.xml') is not None
+        )
+
+    def __setitem__(self, pkg_name, xml_str):
+        super(_ReleasePackageXmlsView, self).__setitem__(pkg_name, xml_str)
+        if pkg_name not in self._release_resources or not isinstance(self._release_resources[pkg_name], dict):
+            self._release_resources[pkg_name] = {}
+        self._release_resources[pkg_name]['package.xml'] = xml_str
+
+    def __delitem__(self, pkg_name):
+        super(_ReleasePackageXmlsView, self).__delitem__(pkg_name)
+        if pkg_name in self._release_resources and 'package.xml' in self._release_resources[pkg_name]:
+            del self._release_resources[pkg_name]['package.xml']
+            if not self._release_resources[pkg_name]:
+                del self._release_resources[pkg_name]
+
+    def update(self, *args, **kwargs):
+        for k, v in dict(*args, **kwargs).items():
+            self[k] = v
+
+    def setdefault(self, key, default=None):
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    def pop(self, key, *args):
+        if key in self:
+            val = self[key]
+            del self[key]
+            return val
+        if args:
+            return args[0]
+        raise KeyError(key)
+
+    def popitem(self):
+        key, val = super(_ReleasePackageXmlsView, self).popitem()
+        if key in self._release_resources and 'package.xml' in self._release_resources[key]:
+            del self._release_resources[key]['package.xml']
+            if not self._release_resources[key]:
+                del self._release_resources[key]
+        return key, val
+
+    def clear(self):
+        for key in list(self.keys()):
+            del self[key]
+
+
+yaml.SafeDumper.add_representer(_ReleasePackageXmlsView, yaml.SafeDumper.represent_dict)
+
+
 class DistributionCache(object):
 
     _type = 'cache'
 
-    def __init__(self, name, data=None, distribution_file_data=None):
+    def __init__(self, name, data=None, distribution_file_data=None, config=None):
         assert data or distribution_file_data
+
+        inbound_version = 0
         if data:
             assert 'type' in data, "Expected file type is '%s'" % DistributionCache._type
             assert data['type'] == DistributionCache._type, "Expected file type is '%s', not '%s'" % (DistributionCache._type, data['type'])
 
             assert 'version' in data, "Distribution cache file for '%s' lacks required version information" % name
-            self.version = int(data['version'])
-            assert self.version > 1, "Unable to handle '%s' format version '%d' anymore, please update your '%s' file to version '2'" % (DistributionCache._type, self.version, DistributionCache._type)
-            if self.version != 2:
+            inbound_version = int(data['version'])
+            assert inbound_version > 1, "Unable to handle '%s' format version '%d' anymore, please update your '%s' file to version '2'" % (DistributionCache._type, inbound_version, DistributionCache._type)
+            if inbound_version not in [2, 3]:
                 from . import FormatVersionError
-                raise FormatVersionError(DistributionCache._type, self.version, [2], name)
+                raise FormatVersionError(DistributionCache._type, inbound_version, [2, 3], name)
 
             assert 'name' in data, "Distribution cache file for '%s' lacks required name information" % name
             assert data['name'] == name, "Distribution cache file for '%s' does not match the name '%s'" % (name, data['name'])
-        else:
-            self.version = 2
+
+        # All data will be migrated forward on import, any re-export defaults to version 3
+        self.version = 3
 
         self._distribution_file_data = data['distribution_file'] if data else distribution_file_data
         self.distribution_file = create_distribution_file(name, self._distribution_file_data)
-        self.release_package_xmls = data['release_package_xmls'] if data else {}
-        self.source_repo_package_xmls = {}
-        if data and 'source_repo_package_xmls' in data:
-            for repo_name, repo_data in data['source_repo_package_xmls'].items():
-                self.source_repo_package_xmls[repo_name] = SourceRepositoryCache(repo_data)
+
+        self.release_resources = (
+            copy.deepcopy(data['release_resources'])
+            if data and 'release_resources' in data else {}
+        )
+        raw_source_repos = (
+            copy.deepcopy(data['source_repo_resources'])
+            if data and 'source_repo_resources' in data else {}
+        )
+
+        # Format 2 backwards compatibility without mutating caller's input data dict
+        if inbound_version == 2 and data:
+            for pkg_name, pkg_xml in (data.get('release_package_xmls') or {}).items():
+                if pkg_name not in self.release_resources:
+                    self.release_resources[pkg_name] = {}
+                self.release_resources[pkg_name]['package.xml'] = pkg_xml
+                if 'version' not in self.release_resources[pkg_name] and pkg_name in self.distribution_file.release_packages:
+                    pkg = self.distribution_file.release_packages[pkg_name]
+                    rel_repo = self.distribution_file.repositories[pkg.repository_name].release_repository
+                    if rel_repo and rel_repo.version:
+                        self.release_resources[pkg_name]['version'] = rel_repo.version
+            for repo_name, repo_data in (data.get('source_repo_package_xmls') or {}).items():
+                if repo_name not in raw_source_repos:
+                    raw_source_repos[repo_name] = copy.deepcopy(repo_data)
+
+        self.source_repo_resources = {}
+        for repo_name, repo_data in raw_source_repos.items():
+            self.source_repo_resources[repo_name] = (
+                repo_data if isinstance(repo_data, SourceRepositoryCache)
+                else SourceRepositoryCache(repo_data)
+            )
         self.distribution_file.source_packages = self.get_source_packages()
 
-    def get_data(self):
+        if config is not None:
+            self.config = CacheConfig.from_input(config)
+        elif data is not None:
+            self.config = CacheConfig.from_cache_data(data, inbound_version=inbound_version)
+        else:
+            self.config = CacheConfig.minimal()
+
+    def apply_config(self, new_config):
+        """Apply a new CacheConfig to an existing (warm) cache, invalidating or stripping
+        entries whose configuration changed so subsequent generation fetches newly enabled
+        or resized resources cleanly.
+        """
+        new_cfg = CacheConfig.from_input(new_config)
+        old_cfg = self.config
+
+        # Reconcile release_resources
+        enabled_rel = set(new_cfg.enabled_release_resources())
+        resized_rel = {
+            r for r in enabled_rel
+            if r not in NO_MAX_LINES_RESOURCES and (
+                not old_cfg.is_release_resource_enabled(r) or
+                old_cfg.get_release_resource_max_lines(r) != new_cfg.get_release_resource_max_lines(r)
+            )
+        }
+        for pkg_data in self.release_resources.values():
+            if not isinstance(pkg_data, dict):
+                continue
+            for key in list(pkg_data.keys()):
+                if key == 'version':
+                    continue
+                if key not in enabled_rel or key in resized_rel:
+                    del pkg_data[key]
+
+        # Reconcile source_repo_resources
+        if not new_cfg.has_any_source_enabled():
+            self.source_repo_resources = {}
+        else:
+            enabled_src_res = set(new_cfg.enabled_source_resources())
+            enabled_src_meta = set(new_cfg.enabled_source_metadata())
+            need_recrawl = any(
+                not old_cfg.is_source_resource_enabled(r) or (
+                    r not in NO_MAX_LINES_RESOURCES and
+                    old_cfg.get_source_resource_max_lines(r) != new_cfg.get_source_resource_max_lines(r)
+                )
+                for r in enabled_src_res
+            ) or any(
+                not old_cfg.is_source_metadata_enabled(m)
+                for m in enabled_src_meta
+            )
+            if need_recrawl:
+                self.source_repo_resources = {}
+            else:
+                if not new_cfg.fallback_src_to_doc:
+                    for repo_name in list(self.source_repo_resources.keys()):
+                        repo_entry = self.distribution_file.repositories.get(repo_name)
+                        if repo_entry is None or repo_entry.source_repository is None:
+                            del self.source_repo_resources[repo_name]
+                for repo_cache in self.source_repo_resources.values():
+                    for key in list(repo_cache._data.keys()):
+                        if key.startswith('_'):
+                            if key not in ('_ref', '_last_update_time') and key[1:] not in enabled_src_meta:
+                                del repo_cache._data[key]
+                        elif isinstance(repo_cache._data[key], dict):
+                            pkg_entry = repo_cache._data[key]
+                            for res_key in list(pkg_entry.keys()):
+                                if res_key != 'package_path' and res_key not in enabled_src_res:
+                                    del pkg_entry[res_key]
+
+        self.distribution_file.source_packages = self.get_source_packages()
+        self.config = new_cfg
+
+    @property
+    def release_package_xmls(self):
+        return _ReleasePackageXmlsView(self.release_resources)
+
+    @release_package_xmls.setter
+    def release_package_xmls(self, mapping):
+        for pkg_name in list(self.release_resources.keys()):
+            if 'package.xml' in self.release_resources[pkg_name]:
+                del self.release_resources[pkg_name]['package.xml']
+                if not self.release_resources[pkg_name]:
+                    del self.release_resources[pkg_name]
+        for pkg_name, xml_str in (mapping or {}).items():
+            if pkg_name not in self.release_resources:
+                self.release_resources[pkg_name] = {}
+            self.release_resources[pkg_name]['package.xml'] = xml_str
+
+    @property
+    def source_repo_package_xmls(self):
+        return self.source_repo_resources
+
+    @source_repo_package_xmls.setter
+    def source_repo_package_xmls(self, value):
+        converted = {}
+        for repo_name, repo_data in (value or {}).items():
+            converted[repo_name] = (
+                repo_data if isinstance(repo_data, SourceRepositoryCache)
+                else SourceRepositoryCache(repo_data)
+            )
+        self.source_repo_resources = converted
+        self.distribution_file.source_packages = self.get_source_packages()
+
+    def is_release_resource_crawled(self, filepath, pkg_name=None):
+        if pkg_name is not None:
+            pkg_data = self.release_resources.get(pkg_name)
+            if isinstance(pkg_data, dict):
+                return filepath in pkg_data
+            if pkg_name in self.distribution_file.release_packages:
+                pkg = self.distribution_file.release_packages[pkg_name]
+                rel_repo = self.distribution_file.repositories[pkg.repository_name].release_repository
+                if rel_repo is not None and rel_repo.version is not None:
+                    return False
+        if self.config.is_release_resource_enabled(filepath):
+            return True
+        return any(
+            isinstance(pkg_data, dict) and filepath in pkg_data
+            for pkg_data in self.release_resources.values()
+        )
+
+    def is_source_resource_crawled(self, filepath, pkg_name=None):
+        if pkg_name is not None:
+            for repo_cache in self.source_repo_resources.values():
+                if pkg_name in repo_cache:
+                    return filepath in repo_cache[pkg_name] or self.config.is_source_resource_enabled(filepath)
+            repo_name = None
+            if pkg_name in self.distribution_file.source_packages:
+                repo_name = self.distribution_file.source_packages[pkg_name].repository_name
+            elif pkg_name in self.distribution_file.release_packages:
+                repo_name = self.distribution_file.release_packages[pkg_name].repository_name
+            elif pkg_name in self.distribution_file.repositories:
+                repo_name = pkg_name
+            if repo_name is not None:
+                if repo_name in self.source_repo_resources:
+                    return self.config.is_source_resource_enabled(filepath)
+                repo = self.distribution_file.repositories.get(repo_name)
+                if repo is not None and (
+                    repo.source_repository is not None or
+                    (self.config.fallback_src_to_doc and repo.doc_repository is not None)
+                ):
+                    return False
+        if self.config.is_source_resource_enabled(filepath):
+            return True
+        for repo_cache in self.source_repo_resources.values():
+            for _, pkg_data in repo_cache.items():
+                if filepath in pkg_data:
+                    return True
+        return False
+
+    def is_source_metadata_crawled(self, key, repo_name=None):
+        clean_key = key[1:] if key.startswith('_') else key
+        meta_key = '_' + clean_key
+        if repo_name is not None:
+            if repo_name not in self.distribution_file.repositories:
+                if repo_name in self.distribution_file.source_packages:
+                    repo_name = self.distribution_file.source_packages[repo_name].repository_name
+                elif repo_name in self.distribution_file.release_packages:
+                    repo_name = self.distribution_file.release_packages[repo_name].repository_name
+            repo_cache = self.source_repo_resources.get(repo_name)
+            if repo_cache is not None:
+                return meta_key in repo_cache._data or self.config.is_source_metadata_enabled(clean_key)
+            repo = self.distribution_file.repositories.get(repo_name)
+            if repo is not None and (
+                repo.source_repository is not None or
+                (self.config.fallback_src_to_doc and repo.doc_repository is not None)
+            ):
+                return False
+        if self.config.is_source_metadata_enabled(clean_key):
+            return True
+        return any(meta_key in repo_cache._data for repo_cache in self.source_repo_resources.values())
+
+    def get_legacy_data(self, include_source=False):
         data = {}
         data['type'] = 'cache'
         data['version'] = 2
         data['name'] = self.distribution_file.name
         data['distribution_file'] = self._distribution_file_data
-        data['release_package_xmls'] = self.release_package_xmls
-        data['source_repo_package_xmls'] = dict([(repo_name, repo_cache.get_data())
-            for repo_name, repo_cache in self.source_repo_package_xmls.items()])
+        data['release_package_xmls'] = dict([
+            (pkg_name, pkg_data['package.xml'])
+            for pkg_name, pkg_data in self.release_resources.items()
+            if isinstance(pkg_data, dict) and pkg_data.get('package.xml') is not None
+        ])
+        if include_source:
+            data['source_repo_package_xmls'] = dict([
+                (repo_name, repo_cache.get_data(version=2))
+                for repo_name, repo_cache in self.source_repo_resources.items()
+            ])
+        else:
+            data['source_repo_package_xmls'] = {}
+        return data
+
+    def get_data(self, version=3, include_source=False):
+        if version == 2:
+            return self.get_legacy_data(include_source=include_source)
+        data = {}
+        data['type'] = 'cache'
+        data['version'] = 3
+        data['name'] = self.distribution_file.name
+        data['config'] = self.config.to_dict()
+        data['distribution_file'] = self._distribution_file_data
+        data['release_resources'] = self.release_resources
+        data['source_repo_resources'] = dict([
+            (repo_name, repo_cache.get_data(version=3))
+            for repo_name, repo_cache in self.source_repo_resources.items()
+        ])
         return data
 
     def update_distribution(self, distribution_file_data):
@@ -87,8 +667,10 @@ class DistributionCache(object):
         self._remove_obsolete_entries()
 
         # determine differences in doc and source entries
-        if len(distribution_file_data) == len(self._distribution_file_data):
-            for old_data, new_data in zip(self._distribution_file_data, distribution_file_data):
+        old_dist_file_data = self._distribution_file_data if isinstance(self._distribution_file_data, list) else [self._distribution_file_data]
+        new_dist_file_data = distribution_file_data if isinstance(distribution_file_data, list) else [distribution_file_data]
+        if len(new_dist_file_data) == len(old_dist_file_data):
+            for old_data, new_data in zip(old_dist_file_data, new_dist_file_data):
                 if not new_data['repositories']:
                     continue
                 for repo_name in sorted(new_data['repositories'].keys()):
@@ -100,36 +682,65 @@ class DistributionCache(object):
                                 section in old_data['repositories'][repo_name] and \
                                 old_data['repositories'][repo_name][section] == repo[section]:
                             continue
-                        # section is either different or does't exist before
+                        # section is either different or doesn't exist before
                         print("  - updated '%s' entry for repository '%s'" % (section, repo_name))
 
         self._distribution_file_data = distribution_file_data
         dist_file = create_distribution_file(self.distribution_file.name, self._distribution_file_data)
 
         # remove all release package xmls where the package version has changed.
-        print("- removing invalid release package cache entries.")
+        print(f"- checking [{len(dist_file.release_packages.keys())}] release package cache entries for different versions")
+        dropped_count = 0
+        skipped_count = 0
         for pkg_name in sorted(dist_file.release_packages.keys()):
             if pkg_name not in self.distribution_file.release_packages:
+                logger.debug("Skipping %s because not in the distro." % pkg_name)
+                skipped_count += 1
                 continue
-            if pkg_name in self.release_package_xmls and self._get_repo_info(dist_file, pkg_name) != self._get_repo_info(self.distribution_file, pkg_name):
-                logger.debug("Dropping release package XML cache for %s" % pkg_name)
-                del self.release_package_xmls[pkg_name]
+            if pkg_name in self.release_resources and self._get_repo_info(dist_file, pkg_name) != self._get_repo_info(self.distribution_file, pkg_name):
+                logger.debug("Dropping release resources package cache for %s" % pkg_name)
+                dropped_count += 1
+                del self.release_resources[pkg_name]
+
+        sys.stdout.write('\n')
+        sys.stdout.write(f'Dropped {dropped_count} repositories\n')
+        sys.stdout.write(f'Skipped {skipped_count} repositories\n')
 
         # Remove all source package xmls where the devel branch is pointing to a different commit than
         # the one we have associated with our cache. This requires calling git ls-remote on all affected repos.
-        if self.source_repo_package_xmls:
-            print("- checking invalid source repo cache entries.")
-            for repo in sorted(self.source_repo_package_xmls.keys()):
+        if self.source_repo_resources:
+            start_time = time.perf_counter()
+            dropped_count = 0
+            skipped_count = 0
+            min_update_delta = self.config.min_update_delta
+            print(f"- checking [{len(self.source_repo_resources.keys())}] source repo cache entries without source entries, requires ls-remote")
+            for repo in sorted(self.source_repo_resources.keys()):
                 sys.stdout.write('.')
                 sys.stdout.flush()
                 try:
-                    source_repository = dist_file.repositories[repo].source_repository
+                    repo_entry = dist_file.repositories[repo]
+                    source_repository = (
+                        repo_entry.source_repository
+                        if repo_entry.source_repository is not None or not self.config.fallback_src_to_doc
+                        else repo_entry.doc_repository
+                    )
+                    if not source_repository:
+                        raise AttributeError()
                 except (KeyError, AttributeError):
-                    # The repo entry has been dropped, or the source stanza from it has been dropped,
+                    # The repo entry has been dropped, or the source/doc stanza from it has been dropped,
                     # either way, remove the cache entries associated with this repository.
                     logger.debug('Unable to find source repository info for repo "%s".' % repo)
-                    del self.source_repo_package_xmls[repo]
+                    del self.source_repo_resources[repo]
                     continue
+
+                last_update_time = self.source_repo_resources[repo].last_update_time()
+                if last_update_time is not None:
+                    now = datetime.datetime.now()
+                    entry_age = (now - last_update_time).total_seconds()
+                    if entry_age < min_update_delta:
+                        logger.debug(f'Skipping check of {repo} because it was last updated only {entry_age} seconds ago less than {min_update_delta}')
+                        skipped_count += 1
+                        continue
 
                 if ref_is_hash(source_repository.version):
                     source_hash = source_repository.version
@@ -145,17 +756,23 @@ class DistributionCache(object):
                             logger.warning(
                                 "Unable to check hash for branch %s of %s, dropping cache entry." %
                                 (source_repository.version, source_repository.url))
-                        del self.source_repo_package_xmls[repo]
+                        del self.source_repo_resources[repo]
+                        dropped_count += 1
                         continue
                     # Split by line first and take the last line, to squelch any preamble output, for example
                     # a known host key validation notice.
                     source_hash = result['output'].split('\n')[-1].split('\t')[0]
 
-                cached_hash = self.source_repo_package_xmls[repo].ref()
+                cached_hash = self.source_repo_resources[repo].ref()
                 if source_hash != cached_hash:
                     logger.debug('Repo "%s" has moved from %s to %s, dropping cache.' % (repo, cached_hash, source_hash))
-                    del self.source_repo_package_xmls[repo]
+                    del self.source_repo_resources[repo]
+                    dropped_count += 1
             sys.stdout.write('\n')
+            sys.stdout.write(f'Dropped {dropped_count} repositories\n')
+            sys.stdout.write(f'Skipped {skipped_count} repositories\n')
+            end_time = time.perf_counter()
+            logger.debug(f'Check of invalid source repo cache entries took {(end_time - start_time):.1f} seconds')
 
         self.distribution_file = dist_file
         self.distribution_file.source_packages = self.get_source_packages()
@@ -166,7 +783,7 @@ class DistributionCache(object):
     def get_source_packages(self):
         """ Returns dictionary mapping source package names to Package() objects. """
         package_dict = {}
-        for source_repo_name, source_repo in self.source_repo_package_xmls.items():
+        for source_repo_name, source_repo in self.source_repo_resources.items():
             for pkg_name in source_repo:
                 package_dict[pkg_name] = Package(pkg_name, source_repo_name)
         return package_dict
@@ -177,7 +794,7 @@ class DistributionCache(object):
         return (repo.version, repo.url)
 
     def _remove_obsolete_entries(self):
-        for pkg_name in list(self.release_package_xmls.keys()):
+        for pkg_name in list(self.release_resources.keys()):
             if pkg_name not in self.distribution_file.release_packages:
-                print('- REMOVE', pkg_name)
-                del self.release_package_xmls[pkg_name]
+                print('- REMOVE Release Resources for: ', pkg_name)
+                del self.release_resources[pkg_name]
