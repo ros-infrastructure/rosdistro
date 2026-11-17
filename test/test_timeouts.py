@@ -18,9 +18,14 @@ from rosdistro.distribution import Distribution
 from rosdistro.distribution_cache import DistributionCache
 from rosdistro.freeze_source import _worker
 from rosdistro.loader import load_url
-from rosdistro.manifest_provider import DEFAULT_HTTP_TIMEOUT, get_http_timeout
+from rosdistro.manifest_provider import (
+    DEFAULT_HTTP_TIMEOUT,
+    PermanentManifestError,
+    get_http_timeout,
+    is_unauthenticated_http_url,
+)
 from rosdistro.manifest_provider.bitbucket import bitbucket_manifest_provider
-from rosdistro.manifest_provider.cache import CachedSourceManifestProvider
+from rosdistro.manifest_provider.cache import CachedManifestProvider, CachedSourceManifestProvider
 from rosdistro.manifest_provider.git import git_source_manifest_provider
 import rosdistro.manifest_provider.github as github_mp
 import rosdistro.manifest_provider.gitlab as gitlab_mp
@@ -514,3 +519,309 @@ def test_freeze_source_worker_handles_timeout_without_deadlock():
     # Queue must be marked done so work_queue.join() will not deadlock
     assert work_queue.unfinished_tasks == 0
     assert src_repo.version == 'main'
+
+
+def test_is_unauthenticated_http_url():
+    assert is_unauthenticated_http_url('https://github.com/ros/genmsg.git') is True
+    assert is_unauthenticated_http_url('http://gitlab.com/org/repo.git') is True
+    assert is_unauthenticated_http_url('git@github.com:org/private.git') is False
+    assert is_unauthenticated_http_url('ssh://git@github.com/org/private.git') is False
+    assert is_unauthenticated_http_url('https://token@github.com/org/private.git') is False
+    assert is_unauthenticated_http_url('https://user:pass@github.com/org/private.git') is False
+    assert is_unauthenticated_http_url('git://github.com/ros/genmsg.git') is False
+
+
+def test_github_source_permanent_errors_skip_git_fallback():
+    dist_file_data = {
+        'type': 'distribution',
+        'version': 2,
+        'repositories': {
+            'andino': {
+                'source': {
+                    'type': 'git',
+                    'url': 'https://github.com/Ekumen-OS/andino.git',
+                    'version': 'humble',
+                }
+            }
+        }
+    }
+    repo = SourceRepositorySpecification('andino', {
+        'type': 'git',
+        'url': 'https://github.com/Ekumen-OS/andino.git',
+        'version': 'humble',
+    })
+
+    permanent_cases = [
+        lambda url: HTTPError(url, 404, 'Not Found', {}, None),
+        lambda url: HTTPError(url, 410, 'Gone', {}, None),
+        lambda url: HTTPError(url, 451, 'Unavailable For Legal Reasons', {}, None),
+        lambda url: HTTPError(
+            url, 403, 'Forbidden',
+            {'X-RateLimit-Remaining': '4999'},
+            io.BytesIO(b'{"message": "Repository access blocked"}'),
+        ),
+    ]
+
+    for make_err in permanent_cases:
+        cache = DistributionCache('humble', distribution_file_data=dist_file_data)
+        git_fallback = MagicMock(side_effect=AssertionError('git fallback must not run'))
+        provider = CachedSourceManifestProvider(
+            cache, [github_mp.github_source_manifest_provider, git_fallback]
+        )
+
+        def fail_urlopen(req, timeout=None, _make_err=make_err):
+            url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+            raise _make_err(url)
+
+        with patch('rosdistro.manifest_provider.github.urlopen', side_effect=fail_urlopen), \
+                patch('rosdistro.manifest_provider.github.time.sleep') as mock_sleep, \
+                _capture_logs(level=logging.ERROR) as records:
+            result = provider(repo)
+
+        assert result is None
+        git_fallback.assert_not_called()
+        mock_sleep.assert_not_called()
+        error_msgs = [r.getMessage() for r in records if r.levelno == logging.ERROR]
+        assert len(error_msgs) == 1
+        assert 'github_source_manifest_provider()' in error_msgs[0]
+
+
+def test_github_source_transient_and_ssh_errors_still_fall_back_to_git():
+    from rosdistro.source_repository_cache import SourceRepositoryCache
+
+    dist_file_data = {'type': 'distribution', 'version': 2, 'repositories': {}}
+    https_repo = SourceRepositorySpecification('andino', {
+        'type': 'git',
+        'url': 'https://github.com/Ekumen-OS/andino.git',
+        'version': 'humble',
+    })
+    ssh_repo = SourceRepositorySpecification('priv', {
+        'type': 'git',
+        'url': 'git@github.com:org/priv.git',
+        'version': 'main',
+    })
+    token_url_repo = SourceRepositorySpecification('priv2', {
+        'type': 'git',
+        'url': 'https://abcdef0123456789abcdef0123456789abcdef01@github.com/org/priv2.git',
+        'version': 'main',
+    })
+
+    reset_ts = str(int(time.time()) + 1800)
+    fallback_cases = [
+        # Primary rate limit 403
+        (https_repo, lambda url: HTTPError(
+            url, 403, 'rate limit exceeded',
+            {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': reset_ts},
+            io.BytesIO(b'{"message": "API rate limit exceeded"}'),
+        )),
+        # Secondary rate limit 403
+        (https_repo, lambda url: HTTPError(
+            url, 403, 'Forbidden',
+            {'X-RateLimit-Remaining': '4999'},
+            io.BytesIO(b'{"message": "You have exceeded a secondary rate limit"}'),
+        )),
+        # Headerless 403
+        (https_repo, lambda url: HTTPError(url, 403, 'Forbidden', {}, None)),
+        # 429 Too Many Requests
+        (https_repo, lambda url: HTTPError(url, 429, 'Too Many Requests', {'Retry-After': '120'}, None)),
+        # 401 Unauthorized (e.g. bad token on public repo)
+        (https_repo, lambda url: HTTPError(url, 401, 'Unauthorized', {}, None)),
+        # 503 Service Unavailable
+        (https_repo, lambda url: HTTPError(url, 503, 'Service Unavailable', {}, None)),
+        # 404 on SSH URL (may succeed via SSH keys)
+        (ssh_repo, lambda url: HTTPError(url, 404, 'Not Found', {}, None)),
+        # 404 on URL with embedded credentials
+        (token_url_repo, lambda url: HTTPError(url, 404, 'Not Found', {}, None)),
+    ]
+
+    for repo, make_err in fallback_cases:
+        cache = DistributionCache('humble', distribution_file_data=dist_file_data)
+        expected_cache = SourceRepositoryCache.from_ref('deadbeef')
+        git_fallback = MagicMock(return_value=expected_cache)
+        provider = CachedSourceManifestProvider(
+            cache, [github_mp.github_source_manifest_provider, git_fallback]
+        )
+
+        def fail_urlopen(req, timeout=None, _make_err=make_err):
+            url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+            raise _make_err(url)
+
+        with patch.object(github_mp, 'ROSDISTRO_RETRY_MAX', 0), \
+                patch('rosdistro.manifest_provider.github.urlopen', side_effect=fail_urlopen):
+            result = provider(repo)
+
+        assert result is expected_cache
+        assert git_fallback.call_count == 1
+
+    # Truncated JSON tree also still falls back to git
+    cache = DistributionCache('humble', distribution_file_data=dist_file_data)
+    expected_cache = SourceRepositoryCache.from_ref('deadbeef')
+    git_fallback = MagicMock(return_value=expected_cache)
+    provider = CachedSourceManifestProvider(
+        cache, [github_mp.github_source_manifest_provider, git_fallback]
+    )
+    with patch('rosdistro.manifest_provider.github.urlopen',
+               return_value=_make_mock_http_response(json.dumps({'sha': 'abc', 'truncated': True, 'tree': []}))):
+        result = provider(https_repo)
+    assert result is expected_cache
+    assert git_fallback.call_count == 1
+
+
+def test_github_source_quotes_version_in_tree_url():
+    repo = SourceRepositorySpecification('special', {
+        'type': 'git',
+        'url': 'https://github.com/org/special.git',
+        'version': 'release/v1+beta#2',
+    })
+    seen_urls = []
+
+    def fake_urlopen(req, timeout=None):
+        url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+        seen_urls.append(url)
+        raise HTTPError(url, 404, 'Not Found', {}, None)
+
+    with patch('rosdistro.manifest_provider.github.urlopen', side_effect=fake_urlopen):
+        try:
+            github_mp.github_source_manifest_provider(repo)
+            assert False, 'Expected PermanentManifestError'
+        except PermanentManifestError:
+            pass
+
+    assert seen_urls == [
+        'https://api.github.com/repos/org/special/git/trees/release/v1%2Bbeta%232?recursive=1'
+    ]
+
+
+def test_gitlab_source_permanent_vs_transient_fallback():
+    from rosdistro.source_repository_cache import SourceRepositoryCache
+
+    dist_file_data = {'type': 'distribution', 'version': 2, 'repositories': {}}
+    https_repo = SourceRepositorySpecification('gl_repo', {
+        'type': 'git',
+        'url': 'https://gitlab.com/org/gl_repo.git',
+        'version': 'humble',
+    })
+    ssh_repo = SourceRepositorySpecification('gl_ssh', {
+        'type': 'git',
+        'url': 'git@gitlab.com:org/gl_ssh.git',
+        'version': 'humble',
+    })
+
+    # Permanent failures (404, non-rate-limit 403, empty commits list) must NOT fall back to git
+    permanent_responses = [
+        lambda url: HTTPError(url, 404, 'Not Found', {}, None),
+        lambda url: HTTPError(
+            url, 403, 'Forbidden',
+            {'RateLimit-Remaining': '99'},
+            io.BytesIO(b'{"message": "403 Forbidden"}'),
+        ),
+        lambda url: _make_mock_http_response('[]'),
+    ]
+    for make_resp in permanent_responses:
+        cache = DistributionCache('humble', distribution_file_data=dist_file_data)
+        git_fallback = MagicMock(side_effect=AssertionError('git fallback must not run'))
+        provider = CachedSourceManifestProvider(
+            cache, [gitlab_mp.gitlab_source_manifest_provider, git_fallback]
+        )
+
+        def fake_urlopen(req, timeout=None, _make_resp=make_resp):
+            url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+            out = _make_resp(url)
+            if isinstance(out, Exception):
+                raise out
+            return out
+
+        with patch('rosdistro.manifest_provider.gitlab.urlopen', side_effect=fake_urlopen), \
+                _capture_logs(level=logging.ERROR):
+            assert provider(https_repo) is None
+        git_fallback.assert_not_called()
+
+    # Transient / rate-limit / SSH errors MUST still fall back to git
+    transient_cases = [
+        (https_repo, lambda url: HTTPError(url, 429, 'Too Many Requests', {'Retry-After': '60'}, None)),
+        (https_repo, lambda url: HTTPError(
+            url, 403, 'Forbidden', {'RateLimit-Remaining': '0'}, io.BytesIO(b'rate limit')
+        )),
+        (https_repo, lambda url: HTTPError(url, 502, 'Bad Gateway', {}, None)),
+        (ssh_repo, lambda url: HTTPError(url, 404, 'Not Found', {}, None)),
+    ]
+    for repo, make_err in transient_cases:
+        cache = DistributionCache('humble', distribution_file_data=dist_file_data)
+        expected_cache = SourceRepositoryCache.from_ref('deadbeef')
+        git_fallback = MagicMock(return_value=expected_cache)
+        provider = CachedSourceManifestProvider(
+            cache, [gitlab_mp.gitlab_source_manifest_provider, git_fallback]
+        )
+
+        def fail_urlopen(req, timeout=None, _make_err=make_err):
+            url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+            raise _make_err(url)
+
+        with patch('rosdistro.manifest_provider.gitlab.urlopen', side_effect=fail_urlopen):
+            assert provider(repo) is expected_cache
+        assert git_fallback.call_count == 1
+
+
+def test_release_manifest_providers_skip_git_fallback_on_permanent_errors():
+    dist_file_data = {'type': 'distribution', 'version': 2, 'repositories': {}}
+    gh_repo = ReleaseRepositorySpecification('genmsg', {
+        'url': 'https://github.com/ros-gbp/genmsg-release.git',
+        'tags': {'release': 'release/melodic/{package}/{version}'},
+        'version': '0.5.11-0',
+    })
+    gl_repo = ReleaseRepositorySpecification('tracetools', {
+        'url': 'https://gitlab.com/ros-tracing/tracetools-release.git',
+        'tags': {'release': 'release/foxy/{package}/{version}'},
+        'version': '1.0.0-1',
+    })
+    bb_repo = ReleaseRepositorySpecification('rospeex', {
+        'url': 'https://bitbucket.org/rospeex/rospeex-release.git',
+        'tags': {'release': 'release/indigo/{package}/{version}'},
+        'version': '2.14.7-0',
+    })
+
+    # 1. Missing remote tag on GitHub / Bitbucket skips git fallback
+    for mp, repo, pkg in (
+        (github_mp.github_manifest_provider, gh_repo, 'genmsg'),
+        (bitbucket_manifest_provider, bb_repo, 'rospeex'),
+    ):
+        cache = DistributionCache('melodic', distribution_file_data=dist_file_data)
+        git_fallback = MagicMock(side_effect=AssertionError('git fallback must not run'))
+        provider = CachedManifestProvider(cache, [mp, git_fallback])
+        with patch.object(repo, 'has_remote_tag', return_value=False), \
+                _capture_logs(level=logging.ERROR):
+            assert provider('melodic', repo, pkg) is None
+        git_fallback.assert_not_called()
+
+    # 2. HTTP 404 on package.xml from GitHub / GitLab / Bitbucket skips git fallback
+    for mp, target, repo, pkg, patch_tag in (
+        (github_mp.github_manifest_provider, 'rosdistro.manifest_provider.github.urlopen', gh_repo, 'genmsg', True),
+        (gitlab_mp.gitlab_manifest_provider, 'rosdistro.manifest_provider.gitlab.urlopen', gl_repo, 'tracetools', False),
+        (bitbucket_manifest_provider, 'rosdistro.manifest_provider.bitbucket.urlopen', bb_repo, 'rospeex', True),
+    ):
+        cache = DistributionCache('melodic', distribution_file_data=dist_file_data)
+        git_fallback = MagicMock(side_effect=AssertionError('git fallback must not run'))
+        provider = CachedManifestProvider(cache, [mp, git_fallback])
+
+        def err_404(req, timeout=None):
+            url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+            raise HTTPError(url, 404, 'Not Found', {}, None)
+
+        with patch(target, side_effect=err_404), \
+                _capture_logs(level=logging.ERROR):
+            if patch_tag:
+                with patch.object(repo, 'has_remote_tag', return_value=True):
+                    assert provider('melodic', repo, pkg) is None
+            else:
+                assert provider('melodic', repo, pkg) is None
+        git_fallback.assert_not_called()
+
+    # 3. Transient 500 on GitHub release package.xml still falls back to git
+    cache = DistributionCache('melodic', distribution_file_data=dist_file_data)
+    git_fallback = MagicMock(return_value='<package><name>genmsg</name></package>')
+    provider = CachedManifestProvider(cache, [github_mp.github_manifest_provider, git_fallback])
+    with patch.object(gh_repo, 'has_remote_tag', return_value=True), \
+            patch('rosdistro.manifest_provider.github.urlopen',
+                  side_effect=lambda req, timeout=None: (_ for _ in ()).throw(HTTPError(str(req), 500, 'Server Error', {}, None))):
+        assert '<name>genmsg</name>' in provider('melodic', gh_repo, 'genmsg')
+    assert git_fallback.call_count == 1

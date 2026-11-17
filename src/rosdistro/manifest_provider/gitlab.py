@@ -44,7 +44,14 @@ from urllib.parse import urlencode
 from catkin_pkg.package import parse_package_string
 
 from rosdistro import logger
-from rosdistro.manifest_provider import SkipManifestProvider, get_http_timeout
+from rosdistro.manifest_provider import (
+    PermanentManifestError,
+    SkipManifestProvider,
+    get_http_header,
+    get_http_timeout,
+    is_unauthenticated_http_url,
+    read_http_error_body,
+)
 from rosdistro.manifest_provider.cache import (
     DEFAULT_SOURCE_FILEPATHS,
     PACKAGE_ASSET_LIST_RESOURCES,
@@ -129,6 +136,29 @@ def _gitlab_paged_api_query(server, path, resource, attrs):
             url = match.group(1)
 
 
+def _is_definitive_gitlab_failure(err, repo_url):
+    """Return True when a GitLab HTTPError means git clone will also fail."""
+    if not is_unauthenticated_http_url(repo_url):
+        return False
+    code = getattr(err, 'code', None)
+    if code in (404, 410, 451):
+        return True
+    if code == 403:
+        headers = getattr(err, 'headers', None)
+        if get_http_header(headers, 'Retry-After') is not None:
+            return False
+        remaining = get_http_header(headers, 'RateLimit-Remaining')
+        if remaining == '0':
+            return False
+        body = read_http_error_body(err)
+        lower_body = body.lower()
+        if 'rate limit' in lower_body or 'too many' in lower_body or 'abuse' in lower_body:
+            return False
+        if remaining is not None or body:
+            return True
+    return False
+
+
 def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     assert repo.version
     if getattr(repo, 'type', 'git') != 'git':
@@ -150,6 +180,10 @@ def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
             logger.debug('- File not found (%s), trying "%s"' % (e, e.filename))
             return None
         logger.debug('- failed (%s), trying "%s"' % (e, e.filename))
+        if _is_definitive_gitlab_failure(e, repo.url):
+            raise PermanentManifestError(
+                'Failed to fetch "%s" from "%s": %s' % (filepath, repo.url, e)
+            ) from e
         raise
     except (URLError, TimeoutError, socket.timeout) as e:
         logger.debug('- failed (%s), trying "%s"' % (e, getattr(e, 'filename', None) or repo.url))
@@ -170,7 +204,19 @@ def gitlab_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, me
         'per_page': 1,
         'ref_name': repo.version,
     }
-    commit_obj = next(_gitlab_paged_api_query(server, path, 'repository/commits', attrs))
+    try:
+        commit_obj = next(_gitlab_paged_api_query(server, path, 'repository/commits', attrs))
+    except StopIteration:
+        msg = 'No commits found for ref "%s" in repository "%s"' % (repo.version, repo.url)
+        if is_unauthenticated_http_url(repo.url):
+            raise PermanentManifestError(msg)
+        raise RuntimeError(msg)
+    except HTTPError as e:
+        if _is_definitive_gitlab_failure(e, repo.url):
+            raise PermanentManifestError(
+                'Unable to fetch commits for ref "%s" from "%s": %s' % (repo.version, repo.url, e)
+            ) from e
+        raise
     sha = commit_obj['id']
     commit_date = commit_obj.get('committed_date') or commit_obj.get('created_at')
 

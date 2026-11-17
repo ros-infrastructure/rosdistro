@@ -38,7 +38,12 @@ from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 
 from rosdistro import logger
-from rosdistro.manifest_provider import SkipManifestProvider, get_http_timeout
+from rosdistro.manifest_provider import (
+    PermanentManifestError,
+    SkipManifestProvider,
+    get_http_timeout,
+    is_unauthenticated_http_url,
+)
 
 # This Bitbucket provider can optionally send basic auth to fetch from
 # private repositories if you supply the environment variables
@@ -64,7 +69,7 @@ def bitbucket_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xm
     release_tag = repo.get_release_tag(pkg_name)
 
     if not repo.has_remote_tag(release_tag):
-        raise RuntimeError('specified tag "%s" is not a git tag' % release_tag)
+        raise PermanentManifestError('specified tag "%s" is not a git tag' % release_tag)
 
     url = 'https://bitbucket.org/%s/raw/%s/%s' % (path, release_tag, filepath)
     try:
@@ -83,6 +88,8 @@ def bitbucket_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xm
             logger.debug('- File not found (%s), trying "%s"' % (e, url))
             return None
         logger.debug('- failed (%s)' % e)
+        if e.code in (404, 410, 451) and is_unauthenticated_http_url(repo.url):
+            raise PermanentManifestError('Failed to fetch "%s": %s' % (url, e)) from e
         raise RuntimeError('Failed to fetch "%s": %s' % (url, e))
     except (URLError, TimeoutError, socket.timeout) as e:
         logger.debug('- failed (%s)' % e)

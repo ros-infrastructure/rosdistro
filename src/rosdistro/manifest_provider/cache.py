@@ -36,7 +36,7 @@ import posixpath
 from xml.dom import minidom
 
 from rosdistro import logger
-from rosdistro.manifest_provider import SkipManifestProvider
+from rosdistro.manifest_provider import PermanentManifestError, SkipManifestProvider
 
 IGNORE_MARKERS = frozenset((
     'CATKIN_IGNORE',
@@ -285,6 +285,13 @@ class CachedManifestProvider(object):
                 try:
                     package_xml = sanitize_xml(mp(dist_name, repo, pkg_name))
                     break
+                except PermanentManifestError as e:
+                    mp_name = getattr(mp, '__name__', str(mp))
+                    logger.debug(
+                        'Permanent failure in "%s()": %s; skipping fallback providers' % (mp_name, e)
+                    )
+                    errors.append((mp_name, e, False))
+                    break
                 except Exception as e:
                     mp_name = getattr(mp, '__name__', str(mp))
                     logger.debug('Skipped "%s()": %s' % (mp_name, e))
@@ -323,6 +330,13 @@ class CachedManifestProvider(object):
                     filepath, mp(dist_name, repo, pkg_name, filepath)
                 )
                 fetched = True
+                break
+            except PermanentManifestError as e:
+                mp_name = getattr(mp, '__name__', str(mp))
+                logger.debug(
+                    'Permanent failure in "%s()": %s; skipping fallback providers' % (mp_name, e)
+                )
+                errors.append((mp_name, e, False))
                 break
             except Exception as e:
                 # pass and try next manifest provider
@@ -404,6 +418,13 @@ class CachedSourceManifestProvider(object):
                             repo_cache = mp(repo, filepaths=filepaths)
                         except TypeError:
                             repo_cache = mp(repo)
+                except PermanentManifestError as e:
+                    mp_name = getattr(mp, '__name__', str(mp))
+                    logger.debug(
+                        'Permanent failure in "%s()": %s; skipping fallback providers' % (mp_name, e)
+                    )
+                    errors.append((mp_name, e, False))
+                    break
                 except Exception as e:
                     # pass and try next manifest provider
                     mp_name = getattr(mp, '__name__', str(mp))

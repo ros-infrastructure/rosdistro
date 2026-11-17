@@ -42,11 +42,19 @@ import time
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 from urllib.error import URLError
+from urllib.parse import quote as urlquote
 
 from catkin_pkg.package import parse_package_string
 
 from rosdistro import logger
-from rosdistro.manifest_provider import SkipManifestProvider, get_http_timeout
+from rosdistro.manifest_provider import (
+    PermanentManifestError,
+    SkipManifestProvider,
+    get_http_header,
+    get_http_timeout,
+    is_unauthenticated_http_url,
+    read_http_error_body,
+)
 from rosdistro.manifest_provider.cache import (
     DEFAULT_SOURCE_FILEPATHS,
     PACKAGE_ASSET_LIST_RESOURCES,
@@ -73,16 +81,34 @@ GITHUB_REPO_METADATA_FIELDS = {
 
 
 def _get_header(headers, name):
-    if not headers:
-        return None
-    val = headers.get(name)
-    if val is not None:
-        return val
-    lower_name = name.lower()
-    for k, v in headers.items():
-        if k.lower() == lower_name:
-            return v
-    return None
+    return get_http_header(headers, name)
+
+
+def _is_permanent_403(err):
+    """Return True if *err* is an authoritative non-rate-limit GitHub 403."""
+    if getattr(err, 'code', None) != 403:
+        return False
+    headers = getattr(err, 'headers', None)
+    if _parse_retry_after(_get_header(headers, 'Retry-After')) is not None:
+        return False
+    remaining = _get_header(headers, 'X-RateLimit-Remaining')
+    if remaining is None or remaining == '0':
+        return False
+    body = read_http_error_body(err)
+    lower_body = body.lower()
+    if not body or 'rate limit' in lower_body or 'abuse' in lower_body:
+        return False
+    return True
+
+
+def _is_definitive_github_failure(err, repo_url):
+    """Return True when a GitHub HTTPError means git clone will also fail."""
+    if not is_unauthenticated_http_url(repo_url):
+        return False
+    code = getattr(err, 'code', None)
+    if code in (404, 410, 451):
+        return True
+    return _is_permanent_403(err)
 
 
 def _parse_retry_after(value):
@@ -141,24 +167,12 @@ def _compute_retry_delay(err, remaining_budget, backoff, url_str):
                     return min(wait_until_reset + 0.5, remaining_budget)
         return min(backoff, remaining_budget)
 
-    if err.code == 403 and remaining is not None:
-        body = ''
-        try:
-            if getattr(err, 'fp', None) is not None:
-                raw_body = err.read()
-                if isinstance(raw_body, bytes):
-                    body = raw_body.decode('utf-8', errors='replace')
-                elif isinstance(raw_body, str):
-                    body = raw_body
-        except Exception:
-            body = ''
-        lower_body = body.lower()
-        if body and 'rate limit' not in lower_body and 'abuse' not in lower_body:
-            logger.debug(
-                'Fetch of %s failed with non-rate-limit 403 (X-RateLimit-Remaining=%s); failing fast.'
-                % (url_str, remaining)
-            )
-            return None
+    if _is_permanent_403(err):
+        logger.debug(
+            'Fetch of %s failed with non-rate-limit 403 (X-RateLimit-Remaining=%s); failing fast.'
+            % (url_str, remaining)
+        )
+        return None
 
     return min(backoff, remaining_budget)
 
@@ -201,9 +215,9 @@ def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
     release_tag = repo.get_release_tag(pkg_name)
 
     if not repo.has_remote_tag(release_tag):
-        raise RuntimeError('specified tag "%s" is not a git tag' % release_tag)
+        raise PermanentManifestError('specified tag "%s" is not a git tag' % release_tag)
 
-    url = 'https://raw.githubusercontent.com/%s/%s/%s' % (path, release_tag, filepath)
+    url = 'https://raw.githubusercontent.com/%s/%s/%s' % (path, urlquote(release_tag, safe='/'), filepath)
     try:
         logger.debug('Load %s file from url "%s"' % (filepath, url))
         return _get_url_contents(url)
@@ -212,6 +226,8 @@ def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
             logger.debug('- File not found (%s), trying "%s"' % (e, url))
             return None
         logger.debug('- HTTP ERROR (%s), trying "%s"' % (e, url))
+        if _is_definitive_github_failure(e, repo.url):
+            raise PermanentManifestError('Failed to fetch "%s": %s' % (url, e)) from e
         raise e
     except (URLError, TimeoutError, socket.timeout) as e:
         logger.debug('- failed (%s), trying "%s"' % (e, url))
@@ -226,7 +242,8 @@ def github_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, me
         logger.debug('Skip non-github url "%s"' % repo.url)
         raise SkipManifestProvider('can not handle non github urls')
 
-    tree_url = 'https://api.github.com/repos/%s/git/trees/%s?recursive=1' % (path, repo.version)
+    quoted_version = urlquote(str(repo.version), safe='/')
+    tree_url = 'https://api.github.com/repos/%s/git/trees/%s?recursive=1' % (path, quoted_version)
     req = Request(tree_url)
     if GITHUB_TOKEN:
         req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
@@ -238,6 +255,12 @@ def github_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, me
     try:
         tree_json = json.loads(_get_url_contents(req))
         logger.debug('- load repo tree from %s' % tree_url)
+    except HTTPError as e:
+        if _is_definitive_github_failure(e, repo.url):
+            raise PermanentManifestError(
+                'Unable to fetch JSON tree from %s: %s' % (tree_url, e)
+            ) from e
+        raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e))
     except (URLError, TimeoutError, socket.timeout) as e:
         raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e))
 
