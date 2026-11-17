@@ -45,6 +45,22 @@ from .source_repository_cache import SourceRepositoryCache
 from .vcs import Git, normalize_git_url, ref_is_hash
 
 
+def resolve_git_remote_ref(url, version):
+    """Resolve a git remote branch or tag reference to its commit hash via ``git ls-remote``.
+
+    Returns ``(remote_hash, error_msg)`` where ``remote_hash`` is a non-empty string on success,
+    or ``None`` on failure.
+    """
+    result = Git().command('ls-remote', normalize_git_url(url), version)
+    output = result.get('output') or ''
+    if result['returncode'] != 0 or not output.strip():
+        error_msg = result.get('error') if result['returncode'] != 0 else None
+        return None, error_msg
+    # Split by line first and take the last line, to squelch any preamble output, for example
+    # a known host key validation notice.
+    return output.rstrip().split('\n')[-1].split('\t')[0], None
+
+
 class ResourceNotCrawledError(KeyError):
     """Raised when a caller requests a resource or metadata key with require_crawled=True
     that was not enabled/crawled in the cache configuration.
@@ -662,7 +678,7 @@ class DistributionCache(object):
         ])
         return data
 
-    def update_distribution(self, distribution_file_data):
+    def update_distribution(self, distribution_file_data, known_remote_refs=None):
         # remove packages which are not in the old distribution file
         self._remove_obsolete_entries()
 
@@ -733,8 +749,17 @@ class DistributionCache(object):
                     del self.source_repo_resources[repo]
                     continue
 
+                ref_key = (source_repository.url, source_repository.version)
+                known_hash = (
+                    known_remote_refs.get(ref_key)
+                    if known_remote_refs is not None
+                    and source_repository.type == 'git'
+                    and source_repository.version is not None
+                    else None
+                )
+
                 last_update_time = self.source_repo_resources[repo].last_update_time()
-                if last_update_time is not None:
+                if known_hash is None and last_update_time is not None:
                     now = datetime.datetime.now()
                     entry_age = (now - last_update_time).total_seconds()
                     if entry_age < min_update_delta:
@@ -742,20 +767,36 @@ class DistributionCache(object):
                         skipped_count += 1
                         continue
 
-                if ref_is_hash(source_repository.version):
+                if source_repository.version and ref_is_hash(source_repository.version):
                     source_hash = source_repository.version
-                else:
-                    result = Git().command(
-                        'ls-remote',
-                        normalize_git_url(source_repository.url),
-                        source_repository.version,
+                elif known_hash is not None:
+                    source_hash = known_hash
+                elif source_repository.type != 'git' or not source_repository.version:
+                    logger.debug(
+                        'Unable to check hash for non-git or unversioned repo "%s", dropping cache entry.' % repo
                     )
-                    if result['returncode'] != 0 or not result['output']:
+                    del self.source_repo_resources[repo]
+                    dropped_count += 1
+                    continue
+                elif known_remote_refs is not None and ref_key in known_remote_refs:
+                    logger.warning(
+                        "Unable to check hash for branch %s of %s, dropping cache entry." %
+                        (source_repository.version, source_repository.url))
+                    del self.source_repo_resources[repo]
+                    dropped_count += 1
+                    continue
+                else:
+                    source_hash, error_msg = resolve_git_remote_ref(
+                        source_repository.url, source_repository.version
+                    )
+                    if source_hash is None:
+                        if known_remote_refs is not None:
+                            known_remote_refs[ref_key] = None
                         # Error checking remote, or unable to find remote reference. Drop the cache entry.
-                        if result['returncode'] != 0 and result.get('error'):
+                        if error_msg:
                             logger.warning(
                                 "Unable to check hash for branch %s of %s (%s), dropping cache entry." %
-                                (source_repository.version, source_repository.url, result['error']))
+                                (source_repository.version, source_repository.url, error_msg))
                         else:
                             logger.warning(
                                 "Unable to check hash for branch %s of %s, dropping cache entry." %
@@ -763,9 +804,8 @@ class DistributionCache(object):
                         del self.source_repo_resources[repo]
                         dropped_count += 1
                         continue
-                    # Split by line first and take the last line, to squelch any preamble output, for example
-                    # a known host key validation notice.
-                    source_hash = result['output'].split('\n')[-1].split('\t')[0]
+                    if known_remote_refs is not None:
+                        known_remote_refs[ref_key] = source_hash
 
                 cached_hash = self.source_repo_resources[repo].ref()
                 if source_hash != cached_hash:
