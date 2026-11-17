@@ -109,6 +109,22 @@ def test_non_interactive_git_env():
     assert env['GCM_INTERACTIVE'] == 'never'
     assert env['SSH_ASKPASS_REQUIRE'] == 'never'
     assert 'SSH_ASKPASS' not in env
+    assert env['GIT_HTTP_LOW_SPEED_LIMIT'] == '1000'
+    assert env['GIT_HTTP_LOW_SPEED_TIME'] == '30'
+    assert env['GIT_LFS_SKIP_SMUDGE'] == '1'
+    assert 'BatchMode=yes' in env['GIT_SSH_COMMAND']
+    assert 'ConnectTimeout=' in env['GIT_SSH_COMMAND']
+
+    # Existing user overrides are preserved
+    custom_env = non_interactive_git_env({
+        'PATH': '/usr/bin',
+        'GIT_HTTP_LOW_SPEED_TIME': '5',
+        'GIT_LFS_SKIP_SMUDGE': '0',
+        'GIT_SSH_COMMAND': 'ssh -i /tmp/key',
+    })
+    assert custom_env['GIT_HTTP_LOW_SPEED_TIME'] == '5'
+    assert custom_env['GIT_LFS_SKIP_SMUDGE'] == '0'
+    assert custom_env['GIT_SSH_COMMAND'] == 'ssh -i /tmp/key'
 
 
 def test_git_command_does_not_prompt_on_credential_challenge():

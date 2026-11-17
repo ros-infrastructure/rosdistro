@@ -189,7 +189,7 @@ _SAMPLE_TAR_PACKAGE_XML = """<?xml version="1.0"?>
 def test_gitlab_manifest_provider_mocked():
     called_urls = []
 
-    def fake_urlopen(req):
+    def fake_urlopen(req, timeout=None):
         url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
         called_urls.append(url)
         return _make_mock_http_response(_SAMPLE_GITLAB_PACKAGE_XML)
@@ -218,7 +218,7 @@ def test_gitlab_source_mocked_with_docs():
     long_changelog = '\n'.join(['Changelog line %d' % i for i in range(1, 121)])
     readme_text = '# ros2trace_analysis\nSome documentation   \n'
 
-    def fake_urlopen(req):
+    def fake_urlopen(req, timeout=None):
         url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
         if '/repository/commits?' in url:
             return _make_mock_http_response(
@@ -287,7 +287,7 @@ def test_gitlab_source_mocked_with_docs():
 
 
 def test_gitlab_source_mocked_missing_docs():
-    def fake_urlopen(req):
+    def fake_urlopen(req, timeout=None):
         url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
         if '/repository/commits?' in url:
             return _make_mock_http_response(
@@ -325,7 +325,7 @@ def test_tar_manifest_provider_mocked():
     })
 
     with patch('rosdistro.manifest_provider.tar.urlopen',
-               side_effect=lambda req: _make_mock_http_response(tar_bytes)):
+               side_effect=lambda req, timeout=None: _make_mock_http_response(tar_bytes)):
         xml = tar_manifest_provider('melodic', _genmsg_release_tarball(), 'genmsg')
         assert '<version>0.5.16</version>' in xml
 
@@ -354,7 +354,7 @@ def test_tar_source_mocked_with_docs():
     })
 
     with patch('rosdistro.manifest_provider.tar.urlopen',
-               side_effect=lambda req: _make_mock_http_response(tar_bytes)):
+               side_effect=lambda req, timeout=None: _make_mock_http_response(tar_bytes)):
         # Raw provider returns raw content
         repo_cache = tar_source_manifest_provider(_genmsg_source_tarball())
         assert repo_cache.ref() is None
@@ -391,7 +391,7 @@ def test_tar_source_mocked_missing_docs():
     })
 
     with patch('rosdistro.manifest_provider.tar.urlopen',
-               side_effect=lambda req: _make_mock_http_response(tar_bytes)):
+               side_effect=lambda req, timeout=None: _make_mock_http_response(tar_bytes)):
         repo_cache = tar_source_manifest_provider(
             _genmsg_source_tarball(), filepaths=['CHANGELOG.rst', 'README.md'])
         assert repo_cache.ref() is None
@@ -554,7 +554,7 @@ def test_github_source_metadata_assets_and_ignore_markers():
 
 
 def test_gitlab_source_metadata_assets_and_ignore_markers():
-    def fake_urlopen(req):
+    def fake_urlopen(req, timeout=None):
         url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
         if '/repository/commits?' in url:
             return _make_mock_http_response(json.dumps([{
@@ -670,7 +670,7 @@ def test_git_and_tar_source_metadata_assets_and_ignore_markers(tmp_path):
         'ignored_pkg/package.xml': _SAMPLE_GITLAB_PACKAGE_XML,
     })
     with patch('rosdistro.manifest_provider.tar.urlopen',
-               side_effect=lambda req: _make_mock_http_response(tar_bytes)):
+               side_effect=lambda req, timeout=None: _make_mock_http_response(tar_bytes)):
         tar_cache = tar_source_manifest_provider(_genmsg_source_tarball())
         assert list(tar_cache.keys()) == ['genmsg']
         assert tar_cache.contributing() == '# Tar Contributing'
@@ -738,7 +738,7 @@ def test_git_and_tar_nested_package_path_posix(tmp_path):
     })
 
     with patch('rosdistro.manifest_provider.tar.urlopen',
-               side_effect=lambda req: _make_mock_http_response(tar_bytes)):
+               side_effect=lambda req, timeout=None: _make_mock_http_response(tar_bytes)):
         git_cache = git_source_manifest_provider(local_source_repo)
         tar_cache = tar_source_manifest_provider(_genmsg_source_tarball())
 

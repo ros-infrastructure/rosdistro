@@ -43,7 +43,7 @@ from catkin_pkg.package import InvalidPackage, parse_package_string
 
 from rosdistro import logger
 from rosdistro.common import rmtree
-from rosdistro.manifest_provider import SkipManifestProvider
+from rosdistro.manifest_provider import SkipManifestProvider, get_http_timeout
 from rosdistro.manifest_provider.cache import (
     DEFAULT_SOURCE_FILEPATHS,
     IGNORE_MARKERS,
@@ -73,8 +73,9 @@ def tar_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
         logger.debug('- using private token auth from supplied environment variables.')
         request.add_header('Private-Token', _TAR_PASSWORD)
 
-    response = urlopen(request)
-    with tarfile.open(fileobj=io.BytesIO(response.read())) as tar:
+    with urlopen(request, timeout=get_http_timeout()) as response:
+        tar_bytes = response.read()
+    with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tar:
         try:
             extracted = tar.extractfile(subdir + '/' + filepath)
         except KeyError:
@@ -105,8 +106,9 @@ def tar_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metad
             logger.debug('- using private token auth from supplied environment variables.')
             request.add_header('Private-Token', _TAR_PASSWORD)
 
-        response = urlopen(request)
-        with tarfile.open(fileobj=io.BytesIO(response.read())) as tar:
+        with urlopen(request, timeout=get_http_timeout()) as response:
+            tar_bytes = response.read()
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tar:
             tmpdir = tempfile.mkdtemp()
             try:
                 blob_paths = [

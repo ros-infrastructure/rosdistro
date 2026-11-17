@@ -34,6 +34,8 @@
 import json
 import os
 import re
+import socket
+import time
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote as urlquote
@@ -42,7 +44,7 @@ from urllib.parse import urlencode
 from catkin_pkg.package import parse_package_string
 
 from rosdistro import logger
-from rosdistro.manifest_provider import SkipManifestProvider
+from rosdistro.manifest_provider import SkipManifestProvider, get_http_timeout
 from rosdistro.manifest_provider.cache import (
     DEFAULT_SOURCE_FILEPATHS,
     PACKAGE_ASSET_LIST_RESOURCES,
@@ -54,6 +56,7 @@ from rosdistro.source_repository_cache import SourceRepositoryCache
 
 GITLAB_PRIVATE_TOKEN = os.getenv('GITLAB_PRIVATE_TOKEN', None)
 ROSDISTRO_GITLAB_SERVER = os.getenv('ROSDISTRO_GITLAB_SERVER', None)
+DEFAULT_GITLAB_PAGINATION_TIMEOUT = 120.0
 
 GITLAB_REPO_METADATA_FIELDS = {
     'stars': 'star_count',
@@ -62,12 +65,21 @@ GITLAB_REPO_METADATA_FIELDS = {
     'last_commit_time': 'last_activity_at',
 }
 
+
+def _get_pagination_timeout():
+    raw = os.getenv('ROSDISTRO_GITLAB_PAGINATION_TIMEOUT')
+    if raw is None or raw == '':
+        return DEFAULT_GITLAB_PAGINATION_TIMEOUT
+    timeout = float(raw)
+    return timeout if timeout > 0 else None
+
+
 def _gitlab_urlopen(url):
     req = Request(url)
     if GITLAB_PRIVATE_TOKEN:
         req.add_header('Private-Token', GITLAB_PRIVATE_TOKEN)
     logger.debug('Performing GitLab API query "%s"' % (url,))
-    return urlopen(req)
+    return urlopen(req, timeout=get_http_timeout())
 
 
 def _gitlab_api_query(server, path, resource, attrs):
@@ -89,7 +101,20 @@ def _gitlab_paged_api_query(server, path, resource, attrs):
     if _attrs:
         url += '?' + urlencode(_attrs)
 
+    pagination_timeout = _get_pagination_timeout()
+    deadline = (time.monotonic() + pagination_timeout) if pagination_timeout is not None else None
+    seen_urls = set()
+
     while True:
+        if deadline is not None and time.monotonic() > deadline:
+            raise RuntimeError(
+                'GitLab paginated API query "%s" timed out after %g seconds' %
+                (url, pagination_timeout)
+            )
+        if url in seen_urls:
+            logger.debug('Detected circular GitLab pagination link "%s", stopping.' % (url,))
+            break
+        seen_urls.add(url)
         with _gitlab_urlopen(url) as res:
             for result in json.loads(res.read().decode('utf-8')):
                 yield result
@@ -126,8 +151,8 @@ def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
             return None
         logger.debug('- failed (%s), trying "%s"' % (e, e.filename))
         raise
-    except URLError as e:
-        logger.debug('- failed (%s), trying "%s"' % (e, e.filename))
+    except (URLError, TimeoutError, socket.timeout) as e:
+        logger.debug('- failed (%s), trying "%s"' % (e, getattr(e, 'filename', None) or repo.url))
         raise
 
 
@@ -177,7 +202,7 @@ def gitlab_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, me
                             continue
                         if (metadata is None or meta_key in metadata) and api_field in project_json:
                             cache.set_metadata(meta_key, project_json[api_field])
-            except URLError as e:
+            except (URLError, TimeoutError, socket.timeout) as e:
                 logger.debug('- failed to load project info from %s: %s' % (path, e))
 
         for meta_key, candidates in ROOT_DOC_CANDIDATES.items():
@@ -189,7 +214,7 @@ def gitlab_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, me
                     try:
                         with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
                             doc_contents = res.read().decode('utf-8')
-                    except URLError as e:
+                    except (URLError, TimeoutError, socket.timeout) as e:
                         logger.debug('- failed to load %s from %s: %s' % (candidate, path, e))
                         continue
                     cache.set_metadata(meta_key, sanitize_and_truncate_docs(doc_contents))
@@ -221,7 +246,7 @@ def gitlab_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, me
             try:
                 with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
                     contents = res.read().decode('utf-8')
-            except URLError as e:
+            except (URLError, TimeoutError, socket.timeout) as e:
                 logger.debug('- failed to load %s from %s: %s' % (filepath, path, e))
                 continue
             cache.add(name, package_xml_path, contents, filepath)

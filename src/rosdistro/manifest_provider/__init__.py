@@ -32,6 +32,21 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+import os
+
+
+DEFAULT_HTTP_TIMEOUT = 30.0
+
+
+def get_http_timeout():
+    """Return the configured HTTP socket timeout in seconds, or None if disabled."""
+    raw = os.getenv('ROSDISTRO_HTTP_TIMEOUT')
+    if raw is None or raw == '':
+        return DEFAULT_HTTP_TIMEOUT
+    timeout = float(raw)
+    return timeout if timeout > 0 else None
+
+
 class SkipManifestProvider(RuntimeError):
     """Raised when a manifest provider cannot handle a given repository."""
 

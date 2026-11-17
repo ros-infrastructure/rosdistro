@@ -33,11 +33,12 @@
 
 import base64
 import os
+import socket
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 
 from rosdistro import logger
-from rosdistro.manifest_provider import SkipManifestProvider
+from rosdistro.manifest_provider import SkipManifestProvider, get_http_timeout
 
 # This Bitbucket provider can optionally send basic auth to fetch from
 # private repositories if you supply the environment variables
@@ -74,14 +75,15 @@ def bitbucket_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xm
             credential_pair = '%s:%s' % (BITBUCKET_USER, BITBUCKET_PASSWORD)
             authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
             req.add_header('Authorization', authheader)
-        package_xml = urlopen(req).read().decode('utf-8')
+        with urlopen(req, timeout=get_http_timeout()) as resp:
+            package_xml = resp.read().decode('utf-8')
         return package_xml
     except HTTPError as e:
         if e.code == 404 and filepath != 'package.xml':
             logger.debug('- File not found (%s), trying "%s"' % (e, url))
             return None
         logger.debug('- failed (%s)' % e)
-        raise RuntimeError()
-    except URLError as e:
+        raise RuntimeError('Failed to fetch "%s": %s' % (url, e))
+    except (URLError, TimeoutError, socket.timeout) as e:
         logger.debug('- failed (%s)' % e)
-        raise RuntimeError()
+        raise RuntimeError('Failed to fetch "%s": %s' % (url, e))

@@ -69,6 +69,7 @@
 from itertools import takewhile
 import os
 import re
+import signal
 import subprocess
 
 from packaging.version import parse, InvalidVersion
@@ -106,22 +107,51 @@ def _version_gte(version: str, required_version: str) -> bool:
 
 from . import logger
 
+DEFAULT_GIT_TIMEOUT = 120.0
+DEFAULT_GIT_LS_REMOTE_TIMEOUT = 60.0
+DEFAULT_GIT_LOW_SPEED_LIMIT = 1000
+DEFAULT_GIT_LOW_SPEED_TIME = 30
+
+
+def get_git_timeout(subcommand=None):
+    """Return the configured git subprocess timeout in seconds, or None if disabled."""
+    if subcommand == 'ls-remote':
+        raw = os.getenv('ROSDISTRO_GIT_LS_REMOTE_TIMEOUT')
+        if raw is not None and raw != '':
+            timeout = float(raw)
+            return timeout if timeout > 0 else None
+    raw = os.getenv('ROSDISTRO_GIT_TIMEOUT')
+    if raw is not None and raw != '':
+        timeout = float(raw)
+        return timeout if timeout > 0 else None
+    if subcommand == 'ls-remote':
+        return DEFAULT_GIT_LS_REMOTE_TIMEOUT
+    return DEFAULT_GIT_TIMEOUT
+
 
 class Git(object):
     _client_executable = None
     _client_version = None
 
-    def __init__(self, cwd=None):
+    def __init__(self, cwd=None, timeout=None):
         self.cwd = cwd
+        self.timeout = timeout
         if not self._client_executable:
             self.__class__._client_executable = _find_executable('git')
 
-    def command(self, *args):
+    def command(self, *args, timeout=None):
         assert self._client_executable is not None, "'git' not found"
+        if timeout is not None:
+            effective_timeout = timeout if timeout > 0 else None
+        elif self.timeout is not None:
+            effective_timeout = self.timeout if self.timeout > 0 else None
+        else:
+            effective_timeout = get_git_timeout(args[0] if args else None)
         result = _run_command(
             (self._client_executable,) + args,
             self.cwd,
-            env=non_interactive_git_env())
+            env=non_interactive_git_env(),
+            timeout=effective_timeout)
         if result['returncode'] != 0:
             error_output = result.get('error') or result.get('output')
             if error_output:
@@ -148,6 +178,11 @@ def non_interactive_git_env(base_env=None):
     env.setdefault('GCM_INTERACTIVE', 'never')
     env['SSH_ASKPASS_REQUIRE'] = 'never'
     env.pop('SSH_ASKPASS', None)
+    env.setdefault('GIT_HTTP_LOW_SPEED_LIMIT', str(DEFAULT_GIT_LOW_SPEED_LIMIT))
+    env.setdefault('GIT_HTTP_LOW_SPEED_TIME', str(DEFAULT_GIT_LOW_SPEED_TIME))
+    env.setdefault('GIT_LFS_SKIP_SMUDGE', '1')
+    if 'GIT_SSH' not in env and 'GIT_SSH_COMMAND' not in env:
+        env['GIT_SSH_COMMAND'] = 'ssh -o BatchMode=yes -o ConnectTimeout=30'
     return env
 
 
@@ -161,16 +196,71 @@ def ref_is_hash(ref):
     return bool(ref) and re.match('^[0-9a-f]{40}$', ref) is not None
 
 
-def _run_command(cmd, cwd=None, env=None):
-    result = {'cmd': ' '.join(cmd), 'cwd': cwd}
+def _kill_process_tree(proc):
+    if os.name == 'nt':
+        try:
+            subprocess.run(
+                ['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
     try:
-        proc = subprocess.Popen(
-            cmd, cwd=cwd, stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-        output, error = proc.communicate()
-        result['output'] = output.rstrip()
-        result['error'] = error.rstrip()
-        result['returncode'] = proc.returncode
+        proc.kill()
+    except OSError:
+        pass
+
+
+def _run_command(cmd, cwd=None, env=None, timeout=None):
+    result = {'cmd': ' '.join(cmd), 'cwd': cwd}
+    popen_kwargs = {
+        'cwd': cwd,
+        'stdin': subprocess.DEVNULL,
+        'stdout': subprocess.PIPE,
+        'stderr': subprocess.PIPE,
+        'env': env,
+    }
+    if os.name != 'nt':
+        popen_kwargs['start_new_session'] = True
+    try:
+        proc = subprocess.Popen(cmd, **popen_kwargs)
+        try:
+            output, error = proc.communicate(timeout=timeout)
+            result['output'] = output.rstrip()
+            result['error'] = error.rstrip()
+            result['returncode'] = proc.returncode
+        except subprocess.TimeoutExpired:
+            _kill_process_tree(proc)
+            try:
+                output, error = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                for pipe in (proc.stdout, proc.stderr):
+                    if pipe is not None:
+                        try:
+                            pipe.close()
+                        except OSError:
+                            pass
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+                output, error = b'', b''
+            result['output'] = output.rstrip()
+            err_text = error.rstrip()
+            if not isinstance(err_text, str):
+                err_text = err_text.decode('utf-8', errors='replace')
+            timeout_msg = 'Command "%s" timed out after %g seconds' % (result['cmd'], timeout)
+            result['error'] = '%s: %s' % (timeout_msg, err_text) if err_text else timeout_msg
+            result['returncode'] = 124
+            result['timed_out'] = True
     except subprocess.CalledProcessError as e:
         result['output'] = e.output
         result['error'] = getattr(e, 'stderr', '') or ''
