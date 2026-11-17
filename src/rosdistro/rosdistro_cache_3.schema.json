@@ -26,6 +26,12 @@
         }
       }
     },
+    "failed_source_repos": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/failed_repo_entry"
+      }
+    },
     "release_resources": {
       "type": "object",
       "additionalProperties": {
@@ -118,6 +124,12 @@
         "min_update_delta": {
           "type": "integer"
         },
+        "failure_retry_delta": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "yaml_alias_min_length": {
           "type": "integer"
         },
@@ -191,6 +203,37 @@
       "required": [
         "_ref"
       ]
+    },
+    "failed_repo_entry": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failed_at": {
+          "type": "string"
+        },
+        "permanent": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "url",
+        "failed_at"
+      ],
+      "additionalProperties": false
     },
     "package_resources": {
       "type": "object",

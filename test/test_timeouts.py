@@ -825,3 +825,282 @@ def test_release_manifest_providers_skip_git_fallback_on_permanent_errors():
                   side_effect=lambda req, timeout=None: (_ for _ in ()).throw(HTTPError(str(req), 500, 'Server Error', {}, None))):
         assert '<name>genmsg</name>' in provider('melodic', gh_repo, 'genmsg')
     assert git_fallback.call_count == 1
+
+
+def test_within_run_ls_remote_failure_skips_source_fetch_retry():
+    import datetime
+    from rosdistro.source_repository_cache import SourceRepositoryCache
+
+    dist_file_data = {
+        'type': 'distribution',
+        'version': 2,
+        'repositories': {
+            'broken_repo': {
+                'source': {
+                    'type': 'git',
+                    'url': 'https://github.com/example/broken_repo.git',
+                    'version': 'humble',
+                }
+            }
+        }
+    }
+    # Even when cross-run failure_retry_delta is 0, within-run deduplication must skip retry
+    cache = DistributionCache(
+        'humble',
+        distribution_file_data=dist_file_data,
+        config={'source_package_resources': {'package.xml': True}, 'failure_retry_delta': 0},
+    )
+    stale_entry = SourceRepositoryCache.from_ref('deadbeef')
+    stale_entry.add('broken_pkg', '', '<package><name>broken_pkg</name></package>', 'package.xml')
+    stale_entry.set_last_update_time(datetime.datetime.now() - datetime.timedelta(hours=2))
+    cache.source_repo_resources['broken_repo'] = stale_entry
+
+    # Simulate git ls-remote returning empty output (branch removed upstream)
+    with patch('rosdistro.distribution_cache.Git') as mock_git, \
+            _capture_logs(level=logging.WARNING):
+        mock_git.return_value.command.return_value = {'returncode': 0, 'output': '', 'error': ''}
+        cache.update_distribution([dist_file_data])
+
+    assert 'broken_repo' not in cache.source_repo_resources
+    assert 'broken_repo' in cache.failed_source_repos
+    assert cache.failed_source_repos['broken_repo']['permanent'] is True
+
+    # Phase 3 source manifest provider must NOT hit the network again in the same run
+    mock_source_provider = MagicMock(side_effect=AssertionError('Should not retry failed ls-remote repo'))
+    cached_src_mp = CachedSourceManifestProvider(cache, [mock_source_provider])
+    src_repo = cache.distribution_file.repositories['broken_repo'].source_repository
+    assert cached_src_mp(src_repo) is None
+    mock_source_provider.assert_not_called()
+
+    # Special case: non-timeout git ls-remote failure on github.com WITH GITHUB_TOKEN still lets API try
+    cache_with_token = DistributionCache(
+        'humble',
+        distribution_file_data=dist_file_data,
+        config={'source_package_resources': {'package.xml': True}},
+    )
+    stale_entry2 = SourceRepositoryCache.from_ref('deadbeef')
+    stale_entry2.add('broken_pkg', '', '<package><name>broken_pkg</name></package>', 'package.xml')
+    stale_entry2.set_last_update_time(datetime.datetime.now() - datetime.timedelta(hours=2))
+    cache_with_token.source_repo_resources['broken_repo'] = stale_entry2
+
+    with patch.dict(os.environ, {'GITHUB_TOKEN': 'ghp_test_token'}, clear=False), \
+            patch('rosdistro.distribution_cache.Git') as mock_git, \
+            _capture_logs(level=logging.WARNING):
+        mock_git.return_value.command.return_value = {
+            'returncode': 128, 'output': '', 'error': 'could not read Username'
+        }
+        cache_with_token.update_distribution([dist_file_data])
+
+    assert 'broken_repo' not in cache_with_token.source_repo_resources
+    assert 'broken_repo' not in cache_with_token.failed_source_repos
+    expected_cache = SourceRepositoryCache.from_ref('cafebabe')
+    api_provider = MagicMock(return_value=expected_cache)
+    cached_src_mp2 = CachedSourceManifestProvider(cache_with_token, [api_provider])
+    assert cached_src_mp2(src_repo) is expected_cache
+    assert api_provider.call_count == 1
+
+
+def test_within_run_source_and_release_failure_deduplication():
+    dist_file_data = {
+        'type': 'distribution',
+        'version': 2,
+        'repositories': {
+            'repo_a': {
+                'source': {
+                    'type': 'git',
+                    'url': 'https://github.com/example/shared_broken.git',
+                    'version': 'humble',
+                }
+            },
+            'repo_b': {
+                'source': {
+                    'type': 'git',
+                    'url': 'https://github.com/example/shared_broken.git',
+                    'version': 'humble',
+                }
+            },
+        }
+    }
+    cache = DistributionCache(
+        'humble',
+        distribution_file_data=dist_file_data,
+        config={'source_package_resources': {'package.xml': True}},
+    )
+    failing_src_mp = MagicMock(side_effect=PermanentManifestError('404 Not Found'))
+    cached_src_mp = CachedSourceManifestProvider(cache, [failing_src_mp])
+    dist = Distribution(cache.distribution_file, source_manifest_providers=[cached_src_mp])
+
+    with _capture_logs(level=logging.ERROR) as records:
+        assert dist.get_source_repo_resources('repo_a') is None
+        # Second call for repo_a hits Distribution in-memory cache
+        assert dist.get_source_repo_resources('repo_a') is None
+        # repo_b shares the exact same broken (url, version) and skips provider
+        assert dist.get_source_repo_resources('repo_b') is None
+
+    assert failing_src_mp.call_count == 1
+    assert len([r for r in records if r.levelno == logging.ERROR]) == 1
+
+    # Release provider deduplicates failed (url, tag) across resources without affecting sibling tags
+    rel_repo = ReleaseRepositorySpecification('multi', {
+        'packages': ['pkg_a', 'pkg_b'],
+        'tags': {'release': 'release/humble/{package}/{version}'},
+        'url': 'https://github.com/example/multi-release.git',
+        'version': '1.0.0-1',
+    })
+    rel_calls = []
+
+    def fake_rel_mp(_dist_name, _repo, pkg_name, filepath='package.xml'):
+        rel_calls.append((pkg_name, filepath))
+        if pkg_name == 'pkg_a':
+            raise PermanentManifestError('tag missing')
+        return '<package><name>pkg_b</name></package>'
+
+    cached_rel_mp = CachedManifestProvider(cache, [fake_rel_mp])
+    with _capture_logs(level=logging.ERROR):
+        assert cached_rel_mp('humble', rel_repo, 'pkg_a', 'package.xml') is None
+        # Repeated fetch of package.xml and optional docs for the same broken tag must skip
+        assert cached_rel_mp('humble', rel_repo, 'pkg_a', 'package.xml') is None
+        assert cached_rel_mp('humble', rel_repo, 'pkg_a', 'README.md') is None
+        assert cached_rel_mp('humble', rel_repo, 'pkg_a', 'CHANGELOG.rst') is None
+        # Sibling package with its own tag still fetches normally
+        assert '<name>pkg_b</name>' in cached_rel_mp('humble', rel_repo, 'pkg_b', 'package.xml')
+
+    assert rel_calls == [('pkg_a', 'package.xml'), ('pkg_b', 'package.xml')]
+
+
+def test_cross_run_negative_cache_ttl_and_invalidation():
+    import datetime
+    import yaml
+    from rosdistro.source_repository_cache import SourceRepositoryCache
+
+    dist_file_data = {
+        'type': 'distribution',
+        'version': 2,
+        'repositories': {
+            'andino': {
+                'source': {
+                    'type': 'git',
+                    'url': 'https://github.com/Ekumen-OS/andino.git',
+                    'version': 'humble',
+                }
+            }
+        }
+    }
+    # Run 1: andino fails and gets recorded in failed_source_repos
+    cache1 = DistributionCache(
+        'humble',
+        distribution_file_data=dist_file_data,
+        config={'source_package_resources': {'package.xml': True}, 'failure_retry_delta': 3600},
+    )
+    failing_mp = MagicMock(side_effect=PermanentManifestError('404 Not Found'))
+    with _capture_logs(level=logging.ERROR):
+        assert CachedSourceManifestProvider(cache1, [failing_mp])(
+            cache1.distribution_file.repositories['andino'].source_repository
+        ) is None
+    assert 'andino' in cache1.failed_source_repos
+    assert cache1.failed_source_repos['andino']['permanent'] is True
+
+    # Persist to YAML and reload in Run 2
+    serialized = yaml.safe_dump(cache1.get_data(version=3))
+    loaded = yaml.safe_load(serialized)
+    cache2 = DistributionCache('humble', data=loaded)
+    cache2.update_distribution([dist_file_data])
+    assert 'andino' in cache2.failed_source_repos
+
+    # Run 2 within TTL: skips network fetch completely
+    never_called = MagicMock(side_effect=AssertionError('Must skip repo within failure_retry_delta'))
+    assert CachedSourceManifestProvider(cache2, [never_called])(
+        cache2.distribution_file.repositories['andino'].source_repository
+    ) is None
+    never_called.assert_not_called()
+
+    # Run 3: distribution.yaml updates branch from humble -> main -> immediately invalidated and retried
+    fixed_dist_data = {
+        'type': 'distribution',
+        'version': 2,
+        'repositories': {
+            'andino': {
+                'source': {
+                    'type': 'git',
+                    'url': 'https://github.com/Ekumen-OS/andino.git',
+                    'version': 'main',
+                }
+            }
+        }
+    }
+    cache3 = DistributionCache('humble', data=loaded)
+    cache3.update_distribution([fixed_dist_data])
+    assert 'andino' not in cache3.failed_source_repos
+    ok_repo_cache = SourceRepositoryCache.from_ref('1234567890')
+    ok_mp = MagicMock(return_value=ok_repo_cache)
+    assert CachedSourceManifestProvider(cache3, [ok_mp])(
+        cache3.distribution_file.repositories['andino'].source_repository
+    ) is ok_repo_cache
+    assert ok_mp.call_count == 1
+    assert 'andino' in cache3.source_repo_resources
+    assert 'andino' not in cache3.failed_source_repos
+
+    # Run 4: TTL expired -> pruned during update_distribution and retried
+    cache4 = DistributionCache('humble', data=loaded)
+    cache4.failed_source_repos['andino']['failed_at'] = (
+        datetime.datetime.now() - datetime.timedelta(hours=2)
+    ).isoformat()
+    cache4.update_distribution([dist_file_data])
+    assert 'andino' not in cache4.failed_source_repos
+
+    # apply_config disabling source clears failed_source_repos
+    cache5 = DistributionCache('humble', data=loaded)
+    assert 'andino' in cache5.failed_source_repos
+    cache5.apply_config({})
+    assert cache5.failed_source_repos == {}
+
+
+def test_zero_package_repo_is_cache_hit_and_preserves_metadata():
+    import datetime
+    from rosdistro.source_repository_cache import SourceRepositoryCache
+
+    dist_file_data = {
+        'type': 'distribution',
+        'version': 2,
+        'repositories': {
+            'docs_only': {
+                'source': {
+                    'type': 'git',
+                    'url': 'https://github.com/example/docs_only.git',
+                    'version': 'main',
+                }
+            }
+        }
+    }
+    cache = DistributionCache(
+        'humble',
+        distribution_file_data=dist_file_data,
+        config={
+            'source_package_resources': {'package.xml': True},
+            'source_repo_metadata': {'readme': {'enabled': True, 'max_lines': 3}},
+        },
+    )
+    empty_pkg_cache = SourceRepositoryCache.from_ref('abcdef1234')
+    empty_pkg_cache.set_readme('line1\nline2\nline3\nline4\nline5')
+    assert len(empty_pkg_cache) == 0
+
+    provider_fn = MagicMock(return_value=empty_pkg_cache)
+    cached_mp = CachedSourceManifestProvider(cache, [provider_fn])
+    repo = cache.distribution_file.repositories['docs_only'].source_repository
+
+    first = cached_mp(repo)
+    assert first is empty_pkg_cache
+    assert provider_fn.call_count == 1
+    assert isinstance(first.last_update_time(), datetime.datetime)
+    assert 'Truncated content at 3 of 5 lines' in first.readme()
+
+    # Second call with a fresh CachedSourceManifestProvider must hit the cache (0 provider calls)
+    second_provider_fn = MagicMock(side_effect=AssertionError('0-package repo must be a cache hit'))
+    second = CachedSourceManifestProvider(cache, [second_provider_fn])(repo)
+    assert second is empty_pkg_cache
+    second_provider_fn.assert_not_called()
+
+    # Distribution metadata crawl query also recognizes 0-package repo
+    dist = Distribution(cache.distribution_file, source_manifest_providers=[])
+    dist._source_repo_resources['docs_only'] = empty_pkg_cache
+    assert dist.is_source_metadata_crawled('readme', repo_name='docs_only') is True

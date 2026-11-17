@@ -616,14 +616,25 @@ def generate_distribution_cache(
                 else repo_entry.doc_repository
             )
             if source_repo is not None:
-                was_cached = bool(has_source_cache_dict and cache.source_repo_resources.get(repo_name))
+                was_cached = bool(
+                    has_source_cache_dict and cache.source_repo_resources.get(repo_name) is not None
+                )
+                is_known_failed = bool(
+                    not was_cached
+                    and hasattr(cache, 'is_source_repo_failed')
+                    and cache.is_source_repo_failed(repo_name, source_repo.url, source_repo.version)
+                )
                 copied_from_neighbor = False
-                if not was_cached and neighbor_pool is not None and has_source_cache_dict:
+                if not was_cached and not is_known_failed and neighbor_pool is not None and has_source_cache_dict:
                     copied_repo_cache, neighbor_dist = neighbor_pool.find_source_repo_cache(
                         dist_name, source_repo, cache_config
                     )
                     if copied_repo_cache is not None:
                         cache.source_repo_resources[repo_name] = copied_repo_cache
+                        if hasattr(cache, 'clear_source_repo_failure'):
+                            cache.clear_source_repo_failure(
+                                repo_name, source_repo.url, source_repo.version
+                            )
                         copied_from_neighbor = True
                         copied_source_count += 1
                         logger.debug(
@@ -742,6 +753,7 @@ def _get_cached_distribution(
         # in order to skip the potentially lengthy cache invalidation process.
         if not (include_source or cache_config.has_any_source_enabled()):
             cache.source_repo_resources = {}
+            cache.failed_source_repos = {}
         # update cache with current distribution file, which filters existing cache by validity.
         cache.update_distribution(rel_file_data, known_remote_refs=known_remote_refs)
     else:

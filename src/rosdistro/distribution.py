@@ -134,12 +134,12 @@ class Distribution(object):
                 return False
         if pkg_name is not None:
             for repo_cache in self._source_repo_resources.values():
-                if repo_cache and pkg_name in repo_cache and filepath in repo_cache[pkg_name]:
+                if repo_cache is not None and pkg_name in repo_cache and filepath in repo_cache[pkg_name]:
                     return True
             return False
         return any(
             filepath in pkg_data
-            for repo_cache in self._source_repo_resources.values() if repo_cache
+            for repo_cache in self._source_repo_resources.values() if repo_cache is not None
             for _, pkg_data in repo_cache.items()
         )
 
@@ -153,10 +153,10 @@ class Distribution(object):
         meta_key = '_' + clean_key
         if repo_name is not None:
             repo_cache = self._source_repo_resources.get(repo_name)
-            return bool(repo_cache and meta_key in repo_cache._data)
+            return bool(repo_cache is not None and meta_key in repo_cache._data)
         return any(
             meta_key in repo_cache._data
-            for repo_cache in self._source_repo_resources.values() if repo_cache
+            for repo_cache in self._source_repo_resources.values() if repo_cache is not None
         )
 
     def get_release_resource(self, pkg_name, filepath='package.xml', require_crawled=False):
@@ -229,7 +229,7 @@ class Distribution(object):
             return None
         repo_name = self._distribution_file.source_packages[pkg_name].repository_name
         repo_cache = self.get_source_repo_resources(repo_name)
-        if repo_cache and pkg_name in repo_cache:
+        if repo_cache is not None and pkg_name in repo_cache:
             return repo_cache[pkg_name].get(filepath)
         return None
 
@@ -322,8 +322,8 @@ class Distribution(object):
                         if pkg_name[0] != '_':
                             self._distribution_file.source_packages[pkg_name] = Package(pkg_name, repo_name)
                     return self._source_repo_resources[repo_name]
-
             if final_exception is not None:
                 raise final_exception
 
+            self._source_repo_resources[repo_name] = None
         return self._source_repo_resources.get(repo_name, None)

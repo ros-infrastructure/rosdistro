@@ -93,6 +93,7 @@ def test_cache_config_normalization_and_presets():
         },
         'fallback_src_to_doc': False,
         'min_update_delta': 1800,
+        'failure_retry_delta': 7200,
         'yaml_alias_min_length': 200,
         'limit': 5,
     }
@@ -117,8 +118,11 @@ def test_cache_config_normalization_and_presets():
     assert cfg.is_source_metadata_enabled('description') is False
     assert cfg.fallback_src_to_doc is False
     assert cfg.min_update_delta == 1800
+    assert cfg.failure_retry_delta == 7200
     assert cfg.yaml_alias_min_length == 200
     assert cfg.limit == 5
+    # When failure_retry_delta is omitted, it defaults to min_update_delta
+    assert CacheConfig({'min_update_delta': 900}).failure_retry_delta == 900
 
     # Unknown top-level config key raises ValueError in strict mode, but allowed in from_cache_data
     with pytest.raises(ValueError, match='Unknown cache configuration keys'):

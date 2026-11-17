@@ -230,9 +230,18 @@ def test_distribution_cache_schema_validation_and_yaml_roundtrip(mock_git):
     tar_repo_cache = SourceRepositoryCache.from_ref(None)
     tar_repo_cache.add('tar_pkg', 'tar_pkg-1.0', '<package format="2"><name>tar_pkg</name></package>', 'package.xml')
     cache.source_repo_resources['tar_repo'] = tar_repo_cache
+    cache.record_source_repo_failure(
+        'broken_repo',
+        'https://github.com/example/broken_repo.git',
+        'humble',
+        error='HTTP Error 404: Not Found',
+        permanent=True,
+    )
 
     # Validate in-memory cache.get_data() against schema
     in_memory_data = cache.get_data()
+    assert 'broken_repo' in in_memory_data['failed_source_repos']
+    assert 'failed_source_repos' not in cache.get_legacy_data(include_source=True)
     validate(instance=in_memory_data, schema=schema)
 
     # Validate after yaml.safe_dump / yaml.safe_load and CacheYamlDumper round-trip
@@ -248,11 +257,14 @@ def test_distribution_cache_schema_validation_and_yaml_roundtrip(mock_git):
             reloaded_cache.source_repo_resources['my_repo'].last_update_time(),
             datetime.datetime,
         )
+        assert 'broken_repo' in reloaded_cache.failed_source_repos
         # Updating distribution immediately after reload should skip ls-remote due to TTL
+        # and prune obsolete failed_source_repos entries not present in dist_file
         reloaded_cache.update_distribution([dist_file_data])
         mock_git.return_value.command.assert_not_called()
         assert 'my_repo' in reloaded_cache.source_repo_resources
         assert 'tar_repo' not in reloaded_cache.source_repo_resources
+        assert 'broken_repo' not in reloaded_cache.failed_source_repos
 
 
 def test_distribution_cache_v2_migration():

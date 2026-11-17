@@ -33,6 +33,7 @@
 
 import copy
 import datetime
+import os
 import sys
 import time
 
@@ -45,20 +46,25 @@ from .source_repository_cache import SourceRepositoryCache
 from .vcs import Git, normalize_git_url, ref_is_hash
 
 
+def _resolve_git_remote_ref_details(url, version):
+    result = Git().command('ls-remote', normalize_git_url(url), version)
+    output = result.get('output') or ''
+    if result['returncode'] != 0 or not output.strip():
+        error_msg = result.get('error') if result['returncode'] != 0 else None
+        return None, error_msg, result
+    # Split by line first and take the last line, to squelch any preamble output, for example
+    # a known host key validation notice.
+    return output.rstrip().split('\n')[-1].split('\t')[0], None, result
+
+
 def resolve_git_remote_ref(url, version):
     """Resolve a git remote branch or tag reference to its commit hash via ``git ls-remote``.
 
     Returns ``(remote_hash, error_msg)`` where ``remote_hash`` is a non-empty string on success,
     or ``None`` on failure.
     """
-    result = Git().command('ls-remote', normalize_git_url(url), version)
-    output = result.get('output') or ''
-    if result['returncode'] != 0 or not output.strip():
-        error_msg = result.get('error') if result['returncode'] != 0 else None
-        return None, error_msg
-    # Split by line first and take the last line, to squelch any preamble output, for example
-    # a known host key validation notice.
-    return output.rstrip().split('\n')[-1].split('\t')[0], None
+    remote_hash, error_msg, _ = _resolve_git_remote_ref_details(url, version)
+    return remote_hash, error_msg
 
 
 class ResourceNotCrawledError(KeyError):
@@ -135,6 +141,7 @@ class CacheConfig(dict):
         'source_repo_metadata',
         'fallback_src_to_doc',
         'min_update_delta',
+        'failure_retry_delta',
         'yaml_alias_min_length',
         'limit',
     }
@@ -188,6 +195,10 @@ class CacheConfig(dict):
             raw.get('fallback_src_to_doc', self.DEFAULT_FALLBACK_SRC_TO_DOC)
         )
         self['min_update_delta'] = int(raw.get('min_update_delta', self.DEFAULT_MIN_UPDATE_DELTA))
+        failure_delta_val = raw.get('failure_retry_delta', None)
+        self['failure_retry_delta'] = (
+            int(failure_delta_val) if failure_delta_val is not None else None
+        )
         self['yaml_alias_min_length'] = int(
             raw.get('yaml_alias_min_length', self.DEFAULT_YAML_ALIAS_MIN_LENGTH)
         )
@@ -212,6 +223,12 @@ class CacheConfig(dict):
 
     @property
     def min_update_delta(self):
+        return self['min_update_delta']
+
+    @property
+    def failure_retry_delta(self):
+        if self['failure_retry_delta'] is not None:
+            return self['failure_retry_delta']
         return self['min_update_delta']
 
     @property
@@ -470,6 +487,11 @@ class DistributionCache(object):
                 repo_data if isinstance(repo_data, SourceRepositoryCache)
                 else SourceRepositoryCache(repo_data)
             )
+        self.failed_source_repos = (
+            copy.deepcopy(data['failed_source_repos'])
+            if data and isinstance(data.get('failed_source_repos'), dict) else {}
+        )
+        self._session_failed_source_repos = set()
         self.distribution_file.source_packages = self.get_source_packages()
 
         if config is not None:
@@ -478,6 +500,87 @@ class DistributionCache(object):
             self.config = CacheConfig.from_cache_data(data, inbound_version=inbound_version)
         else:
             self.config = CacheConfig.minimal()
+
+    @staticmethod
+    def _parse_timestamp(value):
+        if value is None:
+            return None
+        if isinstance(value, datetime.datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.datetime.fromisoformat(value)
+            except ValueError:
+                return None
+        return None
+
+    def record_source_repo_failure(
+        self, repo_name, url, version=None, error=None, permanent=False, failed_at=None
+    ):
+        """Record a failed source repository fetch for within-run and cross-run negative caching."""
+        self._session_failed_source_repos.add((url, version))
+        ts = failed_at if failed_at is not None else datetime.datetime.now()
+        if isinstance(ts, datetime.datetime):
+            ts = ts.isoformat()
+        entry = {
+            'url': str(url),
+            'version': version,
+            'failed_at': ts,
+            'permanent': bool(permanent),
+        }
+        if error is not None:
+            error_str = str(error)
+            if len(error_str) > 500:
+                error_str = error_str[:497] + '...'
+            entry['error'] = error_str
+        self.failed_source_repos[repo_name] = entry
+
+    def clear_source_repo_failure(self, repo_name, url=None, version=None):
+        """Clear any cached failure record for *repo_name*."""
+        self.failed_source_repos.pop(repo_name, None)
+        if url is not None:
+            self._session_failed_source_repos.discard((url, version))
+
+    def is_source_repo_failed(self, repo_name, url, version=None, now=None):
+        """Return True if *(repo_name, url, version)* failed earlier in this run or within TTL."""
+        if (url, version) in self._session_failed_source_repos:
+            return True
+        entry = self.failed_source_repos.get(repo_name)
+        if not isinstance(entry, dict):
+            return False
+        if entry.get('url') != url or entry.get('version') != version:
+            return False
+        retry_delta = self.config.failure_retry_delta
+        if retry_delta <= 0:
+            return False
+        failed_at = self._parse_timestamp(entry.get('failed_at'))
+        if failed_at is None:
+            return False
+        current_time = now if now is not None else datetime.datetime.now()
+        return (current_time - failed_at).total_seconds() < retry_delta
+
+    @staticmethod
+    def _should_record_ls_remote_failure(source_repository, result):
+        """Return True when a failed git ls-remote should suppress retrying in the same run."""
+        if result.get('timed_out'):
+            return True
+        if result.get('returncode', 0) == 0 and not result.get('output'):
+            return True
+        try:
+            server, _ = source_repository.get_url_parts()
+        except RuntimeError:
+            return True
+        if server.endswith('github.com') and (
+            os.getenv('GITHUB_TOKEN') or (os.getenv('GITHUB_USER') and os.getenv('GITHUB_PASSWORD'))
+        ):
+            return False
+        gitlab_server = os.getenv('ROSDISTRO_GITLAB_SERVER')
+        if (
+            (server.endswith('gitlab.com') or (gitlab_server and server == gitlab_server))
+            and os.getenv('GITLAB_PRIVATE_TOKEN')
+        ):
+            return False
+        return True
 
     def apply_config(self, new_config):
         """Apply a new CacheConfig to an existing (warm) cache, invalidating or stripping
@@ -508,6 +611,7 @@ class DistributionCache(object):
         # Reconcile source_repo_resources
         if not new_cfg.has_any_source_enabled():
             self.source_repo_resources = {}
+            self.failed_source_repos = {}
         else:
             enabled_src_res = set(new_cfg.enabled_source_resources())
             enabled_src_meta = set(new_cfg.enabled_source_metadata())
@@ -521,6 +625,11 @@ class DistributionCache(object):
                 not old_cfg.is_source_metadata_enabled(m)
                 for m in enabled_src_meta
             )
+            if not new_cfg.fallback_src_to_doc:
+                for repo_name in list(self.failed_source_repos.keys()):
+                    repo_entry = self.distribution_file.repositories.get(repo_name)
+                    if repo_entry is None or repo_entry.source_repository is None:
+                        del self.failed_source_repos[repo_name]
             if need_recrawl:
                 self.source_repo_resources = {}
             else:
@@ -676,6 +785,8 @@ class DistributionCache(object):
             (repo_name, repo_cache.get_data(version=3))
             for repo_name, repo_cache in self.source_repo_resources.items()
         ])
+        if self.failed_source_repos:
+            data['failed_source_repos'] = self.failed_source_repos
         return data
 
     def update_distribution(self, distribution_file_data, known_remote_refs=None):
@@ -721,6 +832,46 @@ class DistributionCache(object):
         sys.stdout.write('\n')
         sys.stdout.write(f'Dropped {dropped_count} repositories\n')
         sys.stdout.write(f'Skipped {skipped_count} repositories\n')
+
+        # Prune obsolete, changed, or TTL-expired negative-cache entries before running ls-remote
+        if self.failed_source_repos:
+            now = datetime.datetime.now()
+            failure_retry_delta = self.config.failure_retry_delta
+            for repo in list(self.failed_source_repos.keys()):
+                entry = self.failed_source_repos[repo]
+                if not isinstance(entry, dict) or repo in self.source_repo_resources:
+                    del self.failed_source_repos[repo]
+                    continue
+                try:
+                    repo_entry = dist_file.repositories[repo]
+                    source_repository = (
+                        repo_entry.source_repository
+                        if repo_entry.source_repository is not None or not self.config.fallback_src_to_doc
+                        else repo_entry.doc_repository
+                    )
+                    if not source_repository:
+                        raise AttributeError()
+                except (KeyError, AttributeError):
+                    del self.failed_source_repos[repo]
+                    continue
+                if (
+                    entry.get('url') != source_repository.url or
+                    entry.get('version') != source_repository.version
+                ):
+                    logger.debug(
+                        'Clearing cached failure for repo "%s" because url/version changed.' % repo
+                    )
+                    del self.failed_source_repos[repo]
+                    continue
+                if failure_retry_delta <= 0:
+                    del self.failed_source_repos[repo]
+                    continue
+                failed_at = self._parse_timestamp(entry.get('failed_at'))
+                if failed_at is None or (now - failed_at).total_seconds() >= failure_retry_delta:
+                    logger.debug(
+                        'Cached failure TTL expired for repo "%s", will retry.' % repo
+                    )
+                    del self.failed_source_repos[repo]
 
         # Remove all source package xmls where the devel branch is pointing to a different commit than
         # the one we have associated with our cache. This requires calling git ls-remote on all affected repos.
@@ -784,9 +935,19 @@ class DistributionCache(object):
                         (source_repository.version, source_repository.url))
                     del self.source_repo_resources[repo]
                     dropped_count += 1
+                    if self._should_record_ls_remote_failure(source_repository, {'returncode': 1}):
+                        self.record_source_repo_failure(
+                            repo,
+                            source_repository.url,
+                            source_repository.version,
+                            error='Remote reference "%s" unavailable in %s' % (
+                                source_repository.version, source_repository.url
+                            ),
+                            permanent=False,
+                        )
                     continue
                 else:
-                    source_hash, error_msg = resolve_git_remote_ref(
+                    source_hash, error_msg, result = _resolve_git_remote_ref_details(
                         source_repository.url, source_repository.version
                     )
                     if source_hash is None:
@@ -803,6 +964,24 @@ class DistributionCache(object):
                                 (source_repository.version, source_repository.url))
                         del self.source_repo_resources[repo]
                         dropped_count += 1
+                        if self._should_record_ls_remote_failure(source_repository, result):
+                            is_missing_ref = (
+                                result['returncode'] == 0 and not (result.get('output') or '').strip()
+                            )
+                            failure_err = (
+                                error_msg
+                                if error_msg
+                                else 'Remote reference "%s" not found in %s' % (
+                                    source_repository.version, source_repository.url
+                                )
+                            )
+                            self.record_source_repo_failure(
+                                repo,
+                                source_repository.url,
+                                source_repository.version,
+                                error=failure_err,
+                                permanent=is_missing_ref,
+                            )
                         continue
                     if known_remote_refs is not None:
                         known_remote_refs[ref_key] = source_hash
