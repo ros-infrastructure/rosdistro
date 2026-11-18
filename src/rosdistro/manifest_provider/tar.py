@@ -41,6 +41,7 @@ from urllib.request import urlopen, Request
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
 
+from rosdistro.cache_profiler import sanitize_url_for_trace, trace_operation
 from rosdistro.common import rmtree
 from rosdistro.fetch_reporter import report_instant_sub_fetch, report_sub_fetch
 from rosdistro.manifest_provider import SkipManifestProvider, get_http_timeout
@@ -71,21 +72,23 @@ def tar_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     elif _TAR_PASSWORD:
         request.add_header('Private-Token', _TAR_PASSWORD)
 
-    with urlopen(request, timeout=get_http_timeout()) as response:
-        tar_bytes = response.read()
-    with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tar:
-        try:
-            extracted = tar.extractfile(subdir + '/' + filepath)
-        except KeyError:
-            if filepath != 'package.xml':
-                return None
-            raise RuntimeError('Could not find %s in tarball "%s"' % (subdir + '/' + filepath, repo.url))
-        if extracted is None:
-            if filepath != 'package.xml':
-                return None
-            raise RuntimeError('Could not extract %s from tarball "%s"' % (subdir + '/' + filepath, repo.url))
-        package_xml = extracted.read()
-        return package_xml.decode('utf-8')
+    with trace_operation('http:get', fetch_type='tar', target=sanitize_url_for_trace(repo.url)):
+        with urlopen(request, timeout=get_http_timeout()) as response:
+            tar_bytes = response.read()
+    with trace_operation('tar:extract', fetch_type='tar', target=pkg_name):
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tar:
+            try:
+                extracted = tar.extractfile(subdir + '/' + filepath)
+            except KeyError:
+                if filepath != 'package.xml':
+                    return None
+                raise RuntimeError('Could not find %s in tarball "%s"' % (subdir + '/' + filepath, repo.url))
+            if extracted is None:
+                if filepath != 'package.xml':
+                    return None
+                raise RuntimeError('Could not extract %s from tarball "%s"' % (subdir + '/' + filepath, repo.url))
+            package_xml = extracted.read()
+            return package_xml.decode('utf-8')
 
 
 def tar_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metadata=None):
@@ -103,8 +106,9 @@ def tar_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metad
             request.add_header('Private-Token', _TAR_PASSWORD)
 
         with report_sub_fetch('source:repo_tree', repo.name, 'tar'):
-            with urlopen(request, timeout=get_http_timeout()) as response:
-                tar_bytes = response.read()
+            with trace_operation('http:get', fetch_type='tar', target=sanitize_url_for_trace(repo.url)):
+                with urlopen(request, timeout=get_http_timeout()) as response:
+                    tar_bytes = response.read()
             tar = tarfile.open(fileobj=io.BytesIO(tar_bytes))
 
         with tar:
@@ -119,7 +123,8 @@ def tar_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metad
                     package_xml_paths, package_assets, root_files = partition_repo_tree(blob_paths)
 
                 # Extract the package.xmls and requested filepaths
-                tar.extractall(path=tmpdir, members=_package_xml_members(tar, filepaths))
+                with trace_operation('tar:extract', fetch_type='tar', target=repo.name):
+                    tar.extractall(path=tmpdir, members=_package_xml_members(tar, filepaths))
                 cache = SourceRepositoryCache.from_ref(None)
 
                 for meta_key, candidates in ROOT_DOC_CANDIDATES.items():

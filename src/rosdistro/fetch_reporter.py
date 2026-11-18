@@ -207,6 +207,41 @@ class FetchReporter(object):
         else:
             logger.debug(msg.strip())
 
+    @contextmanager
+    def sub_fetch(self, resource_type, target, fetch_type, detail=None):
+        """Time a sub-resource fetch inside a provider and emit standardized debug output."""
+        ctx = _FetchContext(target=target, status='ok', detail=detail)
+        start = time.perf_counter()
+        try:
+            yield ctx
+        except BaseException:
+            if ctx.status == 'ok':
+                ctx.status = 'failed'
+            raise
+        finally:
+            dur = time.perf_counter() - start
+            self.report_fetch(
+                resource_type=resource_type,
+                target=ctx.target,
+                fetch_type=fetch_type,
+                status=ctx.status,
+                duration_s=dur,
+                detail=ctx.detail,
+                level='sub',
+            )
+
+    def instant_sub_fetch(self, resource_type, target, fetch_type, status='ok', detail=None):
+        """Emit a standardized debug report for an instantaneous sub-resource fetch."""
+        self.report_fetch(
+            resource_type=resource_type,
+            target=target,
+            fetch_type=fetch_type,
+            status=status,
+            duration_s=0.0,
+            detail=detail,
+            level='sub',
+        )
+
 
 def get_active_reporter():
     """Return the active FetchReporter for the current thread, or None."""
@@ -264,6 +299,11 @@ def report_fetch(
 @contextmanager
 def report_sub_fetch(resource_type, target, fetch_type, detail=None):
     """Time a sub-resource fetch inside a provider and emit standardized debug output."""
+    reporter = get_active_reporter()
+    if reporter is not None:
+        with reporter.sub_fetch(resource_type, target, fetch_type, detail=detail) as ctx:
+            yield ctx
+        return
     ctx = _FetchContext(target=target, status='ok', detail=detail)
     start = time.perf_counter()
     try:
@@ -274,25 +314,33 @@ def report_sub_fetch(resource_type, target, fetch_type, detail=None):
         raise
     finally:
         dur = time.perf_counter() - start
-        report_fetch(
-            resource_type=resource_type,
-            target=ctx.target,
-            fetch_type=fetch_type,
-            status=ctx.status,
-            duration_s=dur,
-            detail=ctx.detail,
-            level='sub',
+        logger.debug(
+            format_fetch_event(
+                resource_type=resource_type,
+                target=ctx.target,
+                fetch_type=fetch_type,
+                status=ctx.status,
+                duration_s=dur,
+                detail=ctx.detail,
+            ).strip()
         )
 
 
 def report_instant_sub_fetch(resource_type, target, fetch_type, status='ok', detail=None):
     """Emit a standardized debug report for an instantaneous sub-resource fetch."""
-    report_fetch(
-        resource_type=resource_type,
-        target=target,
-        fetch_type=fetch_type,
-        status=status,
-        duration_s=0.0,
-        detail=detail,
-        level='sub',
+    reporter = get_active_reporter()
+    if reporter is not None:
+        reporter.instant_sub_fetch(
+            resource_type, target, fetch_type, status=status, detail=detail
+        )
+        return
+    logger.debug(
+        format_fetch_event(
+            resource_type=resource_type,
+            target=target,
+            fetch_type=fetch_type,
+            status=status,
+            duration_s=0.0,
+            detail=detail,
+        ).strip()
     )

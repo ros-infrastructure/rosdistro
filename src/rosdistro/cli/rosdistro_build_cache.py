@@ -33,11 +33,12 @@
 
 import argparse
 import logging
+import os
 import sys
 
 from rosdistro import logger
+from rosdistro.cache_profiler import CacheProfiler, use_profiler
 from rosdistro.distribution_cache_generator import generate_distribution_caches
-from rosdistro.fetch_reporter import FetchReporter, use_reporter
 
 logging.basicConfig(level=logging.INFO)
 
@@ -76,6 +77,18 @@ def parse_args(args=None):
     add(
         '--limit', type=int, default=None,
         help='Limit the number of packages/repositories to scan (useful for testing)')
+    add(
+        '--profile', action='store_true', default=False,
+        help='Collect OpenTelemetry profiling timings and print a timing summary report')
+    add(
+        '--profile-folded', default=None, metavar='PATH',
+        help='Write Brendan Gregg folded stacks to PATH (implies --profile; view in speedscope.app or render with flamegraph.pl / inferno-flamegraph)')
+    add(
+        '--profile-json', default=None, metavar='PATH',
+        help='Write structured JSON profiling report and Chrome trace events to PATH (implies --profile; view in ui.perfetto.dev or speedscope.app)')
+    add(
+        '--profile-dir', default=None, metavar='DIR',
+        help='Write folded stacks, Chrome trace JSON, and text summary into DIR (implies --profile)')
     return parser.parse_args(args)
 
 
@@ -86,18 +99,67 @@ def main(args=None):
         logger.level = logging.DEBUG
 
     config = args.config if args.config is not None else ('extended' if args.extended else None)
-    reporter = FetchReporter(debug=args.debug)
 
-    with use_reporter(reporter):
-        try:
-            generate_distribution_caches(
-                args.index, dist_names=args.dist_names, preclean=args.preclean,
-                ignore_local=args.ignore_local, include_source=args.include_source,
-                debug=args.debug, limit=args.limit, config=config,
-                output_dir='.')
-        except RuntimeError as e:
-            print(str(e), file=sys.stderr)
-            return 1
+    profile_dir = args.profile_dir or os.getenv('ROSDISTRO_PROFILE_DIR') or None
+    env_profile = os.getenv('ROSDISTRO_PROFILE', '').lower() in ('1', 'true', 'yes', 'on')
+    profiling_enabled = bool(
+        args.profile
+        or env_profile
+        or args.profile_folded
+        or args.profile_json
+        or profile_dir
+    )
+    record_trace_events = bool(args.profile_json or profile_dir)
+    try:
+        profiler = CacheProfiler(
+            enabled=True,
+            record_spans=profiling_enabled,
+            record_trace_events=record_trace_events,
+            debug=args.debug,
+        )
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        return 1
 
+    rc = None
+    try:
+        with use_profiler(profiler):
+            with profiler.span('build_cache', kind='root'):
+                try:
+                    generate_distribution_caches(
+                        args.index, dist_names=args.dist_names, preclean=args.preclean,
+                        ignore_local=args.ignore_local, include_source=args.include_source,
+                        debug=args.debug, limit=args.limit, config=config,
+                        output_dir='.')
+                except RuntimeError as e:
+                    print(str(e), file=sys.stderr)
+                    rc = 1
+                    return rc
+    finally:
+        if profiling_enabled:
+            print(profiler.format_summary(), flush=True)
+            wrote_trace = False
+            if profile_dir:
+                written = profiler.write_all(profile_dir)
+                print('- wrote profiling artifacts to "%s":' % profile_dir, flush=True)
+                for kind, path in sorted(written.items()):
+                    print('  - %s: %s' % (kind, path), flush=True)
+                wrote_trace = True
+            if args.profile_folded:
+                profiler.write_folded_stacks(args.profile_folded)
+                print('- wrote folded stacks "%s"' % args.profile_folded, flush=True)
+                wrote_trace = True
+            if args.profile_json:
+                profiler.write_json_report(args.profile_json)
+                print('- wrote JSON profile trace "%s"' % args.profile_json, flush=True)
+                wrote_trace = True
+            if wrote_trace:
+                print(
+                    '- view flame graph/trace at https://www.speedscope.app/ or https://ui.perfetto.dev/ '
+                    '(or render .folded with flamegraph.pl / inferno-flamegraph)',
+                    flush=True,
+                )
+        profiler.shutdown()
+    return rc
 if __name__ == '__main__':
     sys.exit(main())

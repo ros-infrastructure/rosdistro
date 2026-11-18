@@ -27,6 +27,10 @@ kwargs = {
             'rosdistro_reformat = rosdistro.cli.rosdistro_reformat:main'
         ]},
     'extras_require': {
+        'profile': [
+            'opentelemetry-api',
+            'opentelemetry-sdk',
+        ],
         'test': [
             'pytest',
         ]},

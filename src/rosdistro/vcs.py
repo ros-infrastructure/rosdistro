@@ -106,6 +106,7 @@ def _version_gte(version: str, required_version: str) -> bool:
     return parsed_version >= parse(required_version)
 
 from . import logger
+from .cache_profiler import sanitize_url_for_trace, trace_operation
 
 DEFAULT_GIT_TIMEOUT = 120.0
 DEFAULT_GIT_LS_REMOTE_TIMEOUT = 60.0
@@ -147,11 +148,18 @@ class Git(object):
             effective_timeout = self.timeout if self.timeout > 0 else None
         else:
             effective_timeout = get_git_timeout(args[0] if args else None)
-        result = _run_command(
-            (self._client_executable,) + args,
-            self.cwd,
-            env=non_interactive_git_env(),
-            timeout=effective_timeout)
+        subcmd = args[0] if args else 'unknown'
+        target = None
+        if len(args) > 1 and isinstance(args[1], str):
+            target = sanitize_url_for_trace(args[1])
+        with trace_operation('git:%s' % subcmd, target=target) as span:
+            result = _run_command(
+                (self._client_executable,) + args,
+                self.cwd,
+                env=non_interactive_git_env(),
+                timeout=effective_timeout)
+            if result['returncode'] != 0:
+                span.status = 'timeout' if result.get('timed_out') else 'failed'
         if result['returncode'] != 0:
             error_output = result.get('error') or result.get('output')
             if error_output:

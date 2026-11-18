@@ -38,6 +38,7 @@ import time
 from xml.dom import minidom
 
 from rosdistro import logger
+from rosdistro.cache_profiler import trace_operation, trace_span
 from rosdistro.fetch_reporter import get_active_reporter, get_provider_name, report_fetch
 from rosdistro.manifest_provider import PermanentManifestError, SkipManifestProvider
 
@@ -278,8 +279,10 @@ class CachedManifestProvider(object):
         if content is None:
             return None
         if filepath == 'package.xml':
-            return sanitize_xml(content)
-        return sanitize_and_truncate_docs(content, max_length=self._get_max_lines(filepath))
+            with trace_operation('sanitize:xml', target=filepath):
+                return sanitize_xml(content)
+        with trace_operation('sanitize:docs', target=filepath):
+            return sanitize_and_truncate_docs(content, max_length=self._get_max_lines(filepath))
 
     def _emit_standalone_report(self, dist_name, pkg_name, filepath, fetch_type, status, duration_s):
         reporter = get_active_reporter()
@@ -307,7 +310,8 @@ class CachedManifestProvider(object):
                 return None
             package_xml = self._distribution_cache.release_package_xmls.get(pkg_name, None)
             if package_xml:
-                package_xml = sanitize_xml(package_xml)
+                with trace_operation('sanitize:xml', target=filepath):
+                    package_xml = sanitize_xml(package_xml)
                 self._distribution_cache.release_package_xmls[pkg_name] = package_xml
                 self.last_fetch_info = {'fetch_type': 'cache', 'status': 'ok', 'provider': None}
                 self._emit_standalone_report(
@@ -329,21 +333,39 @@ class CachedManifestProvider(object):
             permanent_failure = False
             fetched_provider = None
             for mp in self._manifest_providers or []:
+                provider_name = get_provider_name(mp)
                 mp_name = getattr(mp, '__name__', str(mp))
-                try:
-                    package_xml = sanitize_xml(mp(dist_name, repo, pkg_name))
-                    fetched_provider = get_provider_name(mp)
-                    break
-                except PermanentManifestError as e:
-                    logger.debug(
-                        'Permanent failure in "%s()": %s; skipping fallback providers' % (mp_name, e)
-                    )
-                    errors.append((mp_name, e, False))
-                    permanent_failure = True
-                    break
-                except Exception as e:
-                    logger.debug('Skipped "%s()": %s' % (mp_name, e))
-                    errors.append((mp_name, e, isinstance(e, SkipManifestProvider)))
+                with trace_span(
+                    'provider:%s' % provider_name,
+                    kind='provider',
+                    fetch_type=provider_name,
+                    target=pkg_name,
+                    dist_name=dist_name,
+                ) as pspan:
+                    try:
+                        raw_xml = mp(dist_name, repo, pkg_name)
+                    except PermanentManifestError as e:
+                        pspan.status = 'failed'
+                        logger.debug(
+                            'Permanent failure in "%s()": %s; skipping fallback providers' % (mp_name, e)
+                        )
+                        errors.append((mp_name, e, False))
+                        permanent_failure = True
+                        break
+                    except SkipManifestProvider as e:
+                        pspan.status = 'skip'
+                        logger.debug('Skipped "%s()": %s' % (mp_name, e))
+                        errors.append((mp_name, e, True))
+                        continue
+                    except Exception as e:
+                        pspan.status = 'failed'
+                        logger.debug('Skipped "%s()": %s' % (mp_name, e))
+                        errors.append((mp_name, e, False))
+                        continue
+                with trace_operation('sanitize:xml', target=filepath):
+                    package_xml = sanitize_xml(raw_xml)
+                fetched_provider = provider_name
+                break
             if package_xml is None:
                 if self._manifest_providers:
                     self._failed_requests.add(req_key)
@@ -404,25 +426,47 @@ class CachedManifestProvider(object):
         errors = []
         permanent_failure = False
         for mp in self._manifest_providers:
+            provider_name = get_provider_name(mp)
             mp_name = getattr(mp, '__name__', str(mp))
+            with trace_span(
+                'provider:%s' % provider_name,
+                kind='provider',
+                fetch_type=provider_name,
+                target=pkg_name,
+                dist_name=dist_name,
+            ) as pspan:
+                try:
+                    raw_content = mp(dist_name, repo, pkg_name, filepath)
+                    if raw_content is None:
+                        pspan.status = 'not_found'
+                except PermanentManifestError as e:
+                    pspan.status = 'failed'
+                    logger.debug(
+                        'Permanent failure in "%s()": %s; skipping fallback providers' % (mp_name, e)
+                    )
+                    errors.append((mp_name, e, False))
+                    permanent_failure = True
+                    break
+                except SkipManifestProvider as e:
+                    pspan.status = 'skip'
+                    logger.debug('Skipped "%s()": %s' % (mp_name, e))
+                    errors.append((mp_name, e, True))
+                    continue
+                except Exception as e:
+                    # pass and try next manifest provider
+                    pspan.status = 'failed'
+                    logger.debug('Skipped "%s()": %s' % (mp_name, e))
+                    errors.append((mp_name, e, False))
+                    continue
             try:
-                manifest_content = self._sanitize_resource(
-                    filepath, mp(dist_name, repo, pkg_name, filepath)
-                )
-                fetched = True
-                fetched_provider = get_provider_name(mp)
-                break
-            except PermanentManifestError as e:
-                logger.debug(
-                    'Permanent failure in "%s()": %s; skipping fallback providers' % (mp_name, e)
-                )
-                errors.append((mp_name, e, False))
-                permanent_failure = True
-                break
+                manifest_content = self._sanitize_resource(filepath, raw_content)
             except Exception as e:
-                # pass and try next manifest provider
                 logger.debug('Skipped "%s()": %s' % (mp_name, e))
-                errors.append((mp_name, e, isinstance(e, SkipManifestProvider)))
+                errors.append((mp_name, e, False))
+                continue
+            fetched = True
+            fetched_provider = provider_name
+            break
 
         if not fetched or (filepath == 'package.xml' and manifest_content is None):
             self._failed_requests.add(req_key)
@@ -496,8 +540,10 @@ class CachedSourceManifestProvider(object):
         if isinstance(content, list):
             return list(content)
         if filepath == 'package.xml':
-            return sanitize_xml(content)
-        return sanitize_and_truncate_docs(content, max_length=self._get_max_lines(filepath))
+            with trace_operation('sanitize:xml', target=filepath):
+                return sanitize_xml(content)
+        with trace_operation('sanitize:docs', target=filepath):
+            return sanitize_and_truncate_docs(content, max_length=self._get_max_lines(filepath))
 
     def _emit_standalone_report(self, repo_name, fetch_type, status, duration_s, detail=None):
         reporter = get_active_reporter()
@@ -544,30 +590,47 @@ class CachedSourceManifestProvider(object):
             permanent_failure = False
             fetched_provider = None
             for mp in self._source_manifest_providers or []:
+                provider_name = get_provider_name(mp)
                 mp_name = getattr(mp, '__name__', str(mp))
-                try:
+                with trace_span(
+                    'provider:%s' % provider_name,
+                    kind='provider',
+                    fetch_type=provider_name,
+                    target=repo.name,
+                ) as pspan:
                     try:
-                        repo_cache = mp(repo, filepaths=filepaths, metadata=metadata)
-                    except TypeError:
                         try:
-                            repo_cache = mp(repo, filepaths=filepaths)
+                            repo_cache = mp(repo, filepaths=filepaths, metadata=metadata)
                         except TypeError:
-                            repo_cache = mp(repo)
-                except PermanentManifestError as e:
-                    logger.debug(
-                        'Permanent failure in "%s()": %s; skipping fallback providers' % (mp_name, e)
-                    )
-                    errors.append((mp_name, e, False))
-                    permanent_failure = True
-                    break
-                except Exception as e:
-                    # pass and try next manifest provider
-                    logger.debug('Skipped "%s()": %s' % (mp_name, e))
-                    errors.append((mp_name, e, isinstance(e, SkipManifestProvider)))
-                    continue
+                            try:
+                                repo_cache = mp(repo, filepaths=filepaths)
+                            except TypeError:
+                                repo_cache = mp(repo)
+                    except PermanentManifestError as e:
+                        pspan.status = 'failed'
+                        logger.debug(
+                            'Permanent failure in "%s()": %s; skipping fallback providers' % (mp_name, e)
+                        )
+                        errors.append((mp_name, e, False))
+                        permanent_failure = True
+                        break
+                    except SkipManifestProvider as e:
+                        pspan.status = 'skip'
+                        logger.debug('Skipped "%s()": %s' % (mp_name, e))
+                        errors.append((mp_name, e, True))
+                        continue
+                    except Exception as e:
+                        # pass and try next manifest provider
+                        pspan.status = 'failed'
+                        logger.debug('Skipped "%s()": %s' % (mp_name, e))
+                        errors.append((mp_name, e, False))
+                        continue
+
+                    if repo_cache is None:
+                        pspan.status = 'not_found'
 
                 if repo_cache is not None:
-                    fetched_provider = get_provider_name(mp)
+                    fetched_provider = provider_name
                     if hasattr(repo_cache, 'last_update_time') and repo_cache.last_update_time() is None:
                         repo_cache.set_last_update_time(datetime.datetime.now())
                     self._distribution_cache.source_repo_resources[repo.name] = repo_cache
@@ -610,34 +673,36 @@ class CachedSourceManifestProvider(object):
 
         # Sanitize/truncate and de-duplicate with the release resources so the YAML writer uses aliases
         if repo_cache is not None:
-            for meta_doc in ('contributing', 'readme'):
-                meta_val = repo_cache.get_metadata(meta_doc)
-                if isinstance(meta_val, str):
-                    repo_cache.set_metadata(
-                        meta_doc,
-                        sanitize_and_truncate_docs(meta_val, max_length=self._get_metadata_max_lines(meta_doc)),
-                    )
-            for package_name, pkg_entries in repo_cache._data.items():
-                if package_name.startswith('_') or not isinstance(pkg_entries, dict):
-                    continue
-                for resource_type in list(pkg_entries.keys()):
-                    if resource_type == 'package_path' or pkg_entries[resource_type] is None:
-                        continue
-                    content = self._sanitize_resource(resource_type, pkg_entries[resource_type])
-                    if isinstance(content, str):
-                        release_content = self._distribution_cache.release_resources.get(
-                            package_name, {}
-                        ).get(resource_type, None)
-                        if content == release_content and release_content is not None:
-                            logger.debug(
-                                f'{package_name} Linking {resource_type} of source cache entry for compaction. '
-                                f'Lines saved: {len(content.splitlines())}'
+            with trace_operation('source:sanitize', fetch_type=fetched_provider, target=repo.name):
+                for meta_doc in ('contributing', 'readme'):
+                    meta_val = repo_cache.get_metadata(meta_doc)
+                    if isinstance(meta_val, str):
+                        with trace_operation('sanitize:docs', target='metadata:%s' % meta_doc):
+                            sanitized_meta = sanitize_and_truncate_docs(
+                                meta_val, max_length=self._get_metadata_max_lines(meta_doc)
                             )
-                            content = release_content
-                    repo_cache.add(
-                        package_name, pkg_entries['package_path'],
-                        content, resource_type, increment_update_time=False
-                    )
+                        repo_cache.set_metadata(meta_doc, sanitized_meta)
+                for package_name, pkg_entries in repo_cache._data.items():
+                    if package_name.startswith('_') or not isinstance(pkg_entries, dict):
+                        continue
+                    for resource_type in list(pkg_entries.keys()):
+                        if resource_type == 'package_path' or pkg_entries[resource_type] is None:
+                            continue
+                        content = self._sanitize_resource(resource_type, pkg_entries[resource_type])
+                        if isinstance(content, str):
+                            release_content = self._distribution_cache.release_resources.get(
+                                package_name, {}
+                            ).get(resource_type, None)
+                            if content == release_content and release_content is not None:
+                                logger.debug(
+                                    f'{package_name} Linking {resource_type} of source cache entry for compaction. '
+                                    f'Lines saved: {len(content.splitlines())}'
+                                )
+                                content = release_content
+                        repo_cache.add(
+                            package_name, pkg_entries['package_path'],
+                            content, resource_type, increment_update_time=False
+                        )
             self.last_fetch_info = {
                 'fetch_type': fetched_provider,
                 'status': 'ok',

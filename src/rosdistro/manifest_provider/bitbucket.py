@@ -37,6 +37,7 @@ import socket
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 
+from rosdistro.cache_profiler import sanitize_url_for_trace, trace_operation
 from rosdistro.manifest_provider import (
     PermanentManifestError,
     SkipManifestProvider,
@@ -76,8 +77,9 @@ def bitbucket_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xm
             credential_pair = '%s:%s' % (BITBUCKET_USER, BITBUCKET_PASSWORD)
             authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
             req.add_header('Authorization', authheader)
-        with urlopen(req, timeout=get_http_timeout()) as resp:
-            package_xml = resp.read().decode('utf-8')
+        with trace_operation('http:get', fetch_type='bitbucket', target=sanitize_url_for_trace(url)):
+            with urlopen(req, timeout=get_http_timeout()) as resp:
+                package_xml = resp.read().decode('utf-8')
         return package_xml
     except HTTPError as e:
         if e.code == 404 and filepath != 'package.xml':

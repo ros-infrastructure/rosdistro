@@ -38,6 +38,7 @@ from contextlib import contextmanager
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
 
+from rosdistro.cache_profiler import trace_operation
 from rosdistro.common import rmtree
 from rosdistro.fetch_reporter import report_instant_sub_fetch, report_sub_fetch
 from rosdistro.manifest_provider import SkipManifestProvider
@@ -88,7 +89,8 @@ def git_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metad
                     # Include the git hash in our cache dictionary.
                     git_hash = git_client.command('rev-parse', 'HEAD')['output']
                     cache = SourceRepositoryCache.from_ref(git_hash)
-                    local_files = list_local_repo_files(git_repo_path)
+                    with trace_operation('fs:list_repo_files', fetch_type='git', target=repo.name):
+                        local_files = list_local_repo_files(git_repo_path)
                 except BaseException:
                     ctx.status = 'failed'
                     raise

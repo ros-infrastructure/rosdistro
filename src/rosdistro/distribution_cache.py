@@ -39,6 +39,7 @@ import time
 import yaml
 
 from . import logger
+from .cache_profiler import trace_operation, trace_span
 from .distribution_file import create_distribution_file
 from .fetch_reporter import report_fetch
 from .package import Package
@@ -928,17 +929,18 @@ class DistributionCache(object):
         dropped_count = 0
         new_count = 0
         kept_count = 0
-        for pkg_name in sorted(dist_file.release_packages.keys()):
-            if pkg_name not in self.distribution_file.release_packages:
-                logger.debug("Skipping %s because not in the distro." % pkg_name)
-                new_count += 1
-                continue
-            if pkg_name in self.release_resources and self._get_repo_info(dist_file, pkg_name) != self._get_repo_info(self.distribution_file, pkg_name):
-                logger.debug("Dropping release resources package cache for %s" % pkg_name)
-                dropped_count += 1
-                del self.release_resources[pkg_name]
-            elif pkg_name in self.release_resources:
-                kept_count += 1
+        with trace_operation('cache:validate_release', target=dist_name):
+            for pkg_name in sorted(dist_file.release_packages.keys()):
+                if pkg_name not in self.distribution_file.release_packages:
+                    logger.debug("Skipping %s because not in the distro." % pkg_name)
+                    new_count += 1
+                    continue
+                if pkg_name in self.release_resources and self._get_repo_info(dist_file, pkg_name) != self._get_repo_info(self.distribution_file, pkg_name):
+                    logger.debug("Dropping release resources package cache for %s" % pkg_name)
+                    dropped_count += 1
+                    del self.release_resources[pkg_name]
+                elif pkg_name in self.release_resources:
+                    kept_count += 1
         rel_dur = time.perf_counter() - rel_start
         print(
             '- validated %d release package cache entries (kept=%d, dropped=%d, new=%d, %.2fs)'
@@ -948,43 +950,44 @@ class DistributionCache(object):
 
         # Prune obsolete, changed, or TTL-expired negative-cache entries before running ls-remote
         if self.failed_source_repos:
-            now = datetime.datetime.now()
-            failure_retry_delta = self.config.failure_retry_delta
-            for repo in list(self.failed_source_repos.keys()):
-                entry = self.failed_source_repos[repo]
-                if not isinstance(entry, dict) or repo in self.source_repo_resources:
-                    del self.failed_source_repos[repo]
-                    continue
-                try:
-                    repo_entry = dist_file.repositories[repo]
-                    source_repository = (
-                        repo_entry.source_repository
-                        if repo_entry.source_repository is not None or not self.config.fallback_src_to_doc
-                        else repo_entry.doc_repository
-                    )
-                    if not source_repository:
-                        raise AttributeError()
-                except (KeyError, AttributeError):
-                    del self.failed_source_repos[repo]
-                    continue
-                if (
-                    entry.get('url') != source_repository.url or
-                    entry.get('version') != source_repository.version
-                ):
-                    logger.debug(
-                        'Clearing cached failure for repo "%s" because url/version changed.' % repo
-                    )
-                    del self.failed_source_repos[repo]
-                    continue
-                if failure_retry_delta <= 0:
-                    del self.failed_source_repos[repo]
-                    continue
-                failed_at = self._parse_timestamp(entry.get('failed_at'))
-                if failed_at is None or (now - failed_at).total_seconds() >= failure_retry_delta:
-                    logger.debug(
-                        'Cached failure TTL expired for repo "%s", will retry.' % repo
-                    )
-                    del self.failed_source_repos[repo]
+            with trace_operation('cache:prune_failed_source', target=dist_name):
+                now = datetime.datetime.now()
+                failure_retry_delta = self.config.failure_retry_delta
+                for repo in list(self.failed_source_repos.keys()):
+                    entry = self.failed_source_repos[repo]
+                    if not isinstance(entry, dict) or repo in self.source_repo_resources:
+                        del self.failed_source_repos[repo]
+                        continue
+                    try:
+                        repo_entry = dist_file.repositories[repo]
+                        source_repository = (
+                            repo_entry.source_repository
+                            if repo_entry.source_repository is not None or not self.config.fallback_src_to_doc
+                            else repo_entry.doc_repository
+                        )
+                        if not source_repository:
+                            raise AttributeError()
+                    except (KeyError, AttributeError):
+                        del self.failed_source_repos[repo]
+                        continue
+                    if (
+                        entry.get('url') != source_repository.url or
+                        entry.get('version') != source_repository.version
+                    ):
+                        logger.debug(
+                            'Clearing cached failure for repo "%s" because url/version changed.' % repo
+                        )
+                        del self.failed_source_repos[repo]
+                        continue
+                    if failure_retry_delta <= 0:
+                        del self.failed_source_repos[repo]
+                        continue
+                    failed_at = self._parse_timestamp(entry.get('failed_at'))
+                    if failed_at is None or (now - failed_at).total_seconds() >= failure_retry_delta:
+                        logger.debug(
+                            'Cached failure TTL expired for repo "%s", will retry.' % repo
+                        )
+                        del self.failed_source_repos[repo]
 
         # Remove all source package xmls where the devel branch is pointing to a different commit than
         # the one we have associated with our cache. This requires calling git ls-remote on all affected repos.
@@ -995,26 +998,35 @@ class DistributionCache(object):
             kept_count = 0
             method_counts = {}
             min_update_delta = self.config.min_update_delta
-            for repo in sorted(self.source_repo_resources.keys()):
-                item_start = time.perf_counter()
-                fetch_type, status = self._validate_source_repo_entry(
-                    dist_file, repo, min_update_delta, known_remote_refs
-                )
-                item_dur = time.perf_counter() - item_start
-                method_counts[fetch_type] = method_counts.get(fetch_type, 0) + 1
-                if status == 'kept':
-                    kept_count += 1
-                else:
-                    dropped_count += 1
-                report_fetch(
-                    'cache:validate_source_ref',
-                    repo,
-                    fetch_type,
-                    status=status,
-                    duration_s=item_dur,
-                    dist_name=dist_name,
-                    level='top',
-                )
+            with trace_operation('cache:validate_source', target=dist_name):
+                for repo in sorted(self.source_repo_resources.keys()):
+                    with trace_span(
+                        'cache:validate_source_ref',
+                        kind='fetch',
+                        resource_type='cache:validate_source_ref',
+                        target=repo,
+                        dist_name=dist_name,
+                        deferred_label=True,
+                    ) as vspan:
+                        fetch_type, status = self._validate_source_repo_entry(
+                            dist_file, repo, min_update_delta, known_remote_refs
+                        )
+                        vspan.fetch_type = fetch_type
+                        vspan.status = status
+                    method_counts[fetch_type] = method_counts.get(fetch_type, 0) + 1
+                    if status == 'kept':
+                        kept_count += 1
+                    else:
+                        dropped_count += 1
+                    report_fetch(
+                        'cache:validate_source_ref',
+                        repo,
+                        fetch_type,
+                        status=status,
+                        duration_s=vspan.duration_s,
+                        dist_name=dist_name,
+                        level='top',
+                    )
             end_time = time.perf_counter()
             method_summary = ', '.join('%s=%d' % (k, v) for k, v in sorted(method_counts.items()))
             print(

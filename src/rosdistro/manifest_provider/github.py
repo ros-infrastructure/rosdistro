@@ -47,6 +47,7 @@ from urllib.parse import quote as urlquote
 from catkin_pkg.package import parse_package_string
 
 from rosdistro import logger
+from rosdistro.cache_profiler import sanitize_url_for_trace, trace_operation
 from rosdistro.fetch_reporter import report_instant_sub_fetch, report_sub_fetch
 from rosdistro.manifest_provider import (
     PermanentManifestError,
@@ -182,16 +183,17 @@ def _get_url_contents(url):
     timeout = get_http_timeout()
     remaining_budget = max(0.0, float(ROSDISTRO_RETRY_MAX))
     backoff = 1.0
+    url_str = sanitize_url_for_trace(getattr(url, 'full_url', url))
     while True:
         try:
-            with urlopen(url, timeout=timeout) as resp:
-                return resp.read().decode('utf-8')
+            with trace_operation('http:get', fetch_type='github', target=url_str):
+                with urlopen(url, timeout=timeout) as resp:
+                    return resp.read().decode('utf-8')
         except HTTPError as e:
             if e.code not in (403, 429):
                 raise
             if remaining_budget <= 0:
                 raise
-            url_str = getattr(url, 'full_url', url)
             delay = _compute_retry_delay(e, remaining_budget, backoff, url_str)
             if delay is None or delay <= 0:
                 raise
@@ -199,7 +201,8 @@ def _get_url_contents(url):
                 'Fetch of %s failed with %d, assuming rate limit, retrying after period %.1f seconds.'
                 % (url_str, e.code, delay)
             )
-            time.sleep(delay)
+            with trace_operation('http:rate_limit_sleep', fetch_type='github', target=url_str):
+                time.sleep(delay)
             remaining_budget -= delay
             backoff *= 1.5
 

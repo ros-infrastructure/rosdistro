@@ -46,7 +46,6 @@ import yaml
 
 logger = logging.getLogger('rosdistro')
 
-
 class FormatVersionError(Exception):
     def __init__(self, file_type, version, supported_versions, file_name=None):
         self.file_type = file_type
@@ -60,6 +59,12 @@ class FormatVersionError(Exception):
         super(FormatVersionError, self).__init__(msg)
 
 
+from .cache_profiler import (  # noqa
+    CacheProfiler,
+    RosdistroSpanProcessor,
+    get_active_profiler,
+    use_profiler,
+)
 from .distribution import Distribution  # noqa
 from .fetch_reporter import (  # noqa
     FetchReporter,

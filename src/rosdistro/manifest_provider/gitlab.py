@@ -31,6 +31,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from contextlib import contextmanager
 import json
 import os
 import re
@@ -44,6 +45,7 @@ from urllib.parse import urlencode
 from catkin_pkg.package import parse_package_string
 
 from rosdistro import logger
+from rosdistro.cache_profiler import sanitize_url_for_trace, trace_operation
 from rosdistro.fetch_reporter import report_instant_sub_fetch, report_sub_fetch
 from rosdistro.manifest_provider import (
     PermanentManifestError,
@@ -82,12 +84,15 @@ def _get_pagination_timeout():
     return timeout if timeout > 0 else None
 
 
+@contextmanager
 def _gitlab_urlopen(url):
     req = Request(url)
     if GITLAB_PRIVATE_TOKEN:
         req.add_header('Private-Token', GITLAB_PRIVATE_TOKEN)
     logger.debug('Performing GitLab API query "%s"' % (url,))
-    return urlopen(req, timeout=get_http_timeout())
+    with trace_operation('http:get', fetch_type='gitlab', target=sanitize_url_for_trace(url)):
+        with urlopen(req, timeout=get_http_timeout()) as res:
+            yield res
 
 
 def _gitlab_api_query(server, path, resource, attrs):
