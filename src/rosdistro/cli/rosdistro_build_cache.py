@@ -32,14 +32,11 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import argparse
-import gzip
 import logging
 import sys
 
 from rosdistro import logger
-from rosdistro.distribution_cache_generator import CacheYamlDumper, generate_distribution_caches
-
-import yaml
+from rosdistro.distribution_cache_generator import generate_distribution_caches
 
 logging.basicConfig(level=logging.INFO)
 
@@ -90,39 +87,14 @@ def main(args=None):
     config = args.config if args.config is not None else ('extended' if args.extended else None)
 
     try:
-        caches = generate_distribution_caches(
+        generate_distribution_caches(
             args.index, dist_names=args.dist_names, preclean=args.preclean,
             ignore_local=args.ignore_local, include_source=args.include_source,
-            debug=args.debug, limit=args.limit, config=config)
+            debug=args.debug, limit=args.limit, config=config,
+            output_dir='.')
     except RuntimeError as e:
         print(str(e), file=sys.stderr)
         return 1
-
-    for dist_name, cache in caches.items():
-        if args.dist_names and dist_name not in args.dist_names:
-            continue
-        dumper = CacheYamlDumper.with_min_length(cache.config.yaml_alias_min_length)
-
-        # Write the legacy Format 2 minimal cache
-        legacy_data = yaml.dump(
-            cache.get_legacy_data(include_source=args.include_source), Dumper=dumper
-        ).encode()
-        with open('%s-cache.yaml' % dist_name, 'wb') as f:
-            print('- write cache file "%s-cache.yaml"' % dist_name)
-            f.write(legacy_data)
-        with gzip.open('%s-cache.yaml.gz' % dist_name, 'wb') as f:
-            print('- write compressed cache file "%s-cache.yaml.gz"' % dist_name)
-            f.write(legacy_data)
-
-        # Write the extended Format 3 cache when --config or --extended is specified
-        if config is not None:
-            extended_data = yaml.dump(cache.get_data(version=3), Dumper=dumper).encode()
-            with open('%s-extended-cache.yaml' % dist_name, 'wb') as f:
-                print('- write extended cache file "%s-extended-cache.yaml"' % dist_name)
-                f.write(extended_data)
-            with gzip.open('%s-extended-cache.yaml.gz' % dist_name, 'wb') as f:
-                print('- write compressed extended cache file "%s-extended-cache.yaml.gz"' % dist_name)
-                f.write(extended_data)
 
 
 if __name__ == '__main__':

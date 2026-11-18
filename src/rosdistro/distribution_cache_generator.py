@@ -49,13 +49,14 @@ from .source_repository_cache import SourceRepositoryCache
 from .vcs import ref_is_hash
 
 
-def _find_local_cache_file(dist_name):
-    for candidate in (
+def _find_local_cache_file(dist_name, cache_dir=None):
+    for filename in (
         '%s-extended-cache.yaml' % dist_name,
         '%s-extended-cache.yaml.gz' % dist_name,
         '%s-cache.yaml' % dist_name,
         '%s-cache.yaml.gz' % dist_name,
     ):
+        candidate = filename if cache_dir in (None, '', '.') else os.path.join(cache_dir, filename)
         if os.path.exists(candidate):
             return candidate
     return None
@@ -199,7 +200,7 @@ class _NeighborCachePool(object):
     is loaded from disk more than once per run.
     """
 
-    def __init__(self, index=None, ignore_local=False, initial_caches=None):
+    def __init__(self, index=None, ignore_local=False, initial_caches=None, cache_dir=None):
         self._ignore_local = ignore_local
         self._processed_order = []
         self._processed_caches = {}
@@ -223,7 +224,7 @@ class _NeighborCachePool(object):
         if not ignore_local and index is not None and isinstance(getattr(index, 'distributions', None), dict):
             discovered = []
             for other_dist in sorted(index.distributions.keys()):
-                candidate = _find_local_cache_file(other_dist)
+                candidate = _find_local_cache_file(other_dist, cache_dir=cache_dir)
                 if candidate is not None:
                     try:
                         mtime = os.path.getmtime(candidate)
@@ -430,7 +431,8 @@ class _NeighborCachePool(object):
 
 def generate_distribution_caches(
     index, dist_names=None, preclean=False,
-    ignore_local=False, include_source=False, debug=False, limit=None, config=None
+    ignore_local=False, include_source=False, debug=False, limit=None, config=None,
+    output_dir=None
 ):
     if os.path.isfile(index):
         index = 'file://' + os.path.abspath(index)
@@ -439,7 +441,10 @@ def generate_distribution_caches(
     if not dist_names:
         dist_names = sorted(index.distributions.keys())
 
-    neighbor_pool = None if preclean else _NeighborCachePool(index=index, ignore_local=ignore_local)
+    neighbor_pool = (
+        None if preclean
+        else _NeighborCachePool(index=index, ignore_local=ignore_local, cache_dir=output_dir)
+    )
 
     errors = []
     caches = {}
@@ -449,13 +454,21 @@ def generate_distribution_caches(
                 index, dist_name, preclean=preclean,
                 ignore_local=ignore_local, include_source=include_source,
                 debug=debug, limit=limit, config=config,
-                neighbor_caches=neighbor_pool)
+                neighbor_caches=neighbor_pool, cache_dir=output_dir)
         except RuntimeError as e:
             errors.append(str(e))
             continue
         caches[dist_name] = cache
         if neighbor_pool is not None and cache is not None:
             neighbor_pool.add_cache(dist_name, cache)
+        if output_dir is not None and cache is not None:
+            write_distribution_cache(
+                dist_name,
+                cache,
+                include_source=include_source,
+                write_extended=(config is not None),
+                output_dir=output_dir,
+            )
     if errors:
         raise RuntimeError('\n'.join(errors))
     return caches
@@ -464,7 +477,7 @@ def generate_distribution_caches(
 def generate_distribution_cache(
     index, dist_name, preclean=False, ignore_local=False,
     include_source=False, debug=False, limit=None, config=None,
-    neighbor_caches=None
+    neighbor_caches=None, cache_dir=None
 ):
     cache_config = CacheConfig.from_input(config, include_source=include_source, limit=limit)
     if preclean:
@@ -473,10 +486,13 @@ def generate_distribution_cache(
         neighbor_pool = neighbor_caches
     else:
         neighbor_pool = _NeighborCachePool(
-            index=index, ignore_local=ignore_local, initial_caches=neighbor_caches
+            index=index, ignore_local=ignore_local, initial_caches=neighbor_caches,
+            cache_dir=cache_dir,
         )
 
     get_cached_kwargs = {}
+    if cache_dir not in (None, '', '.'):
+        get_cached_kwargs['cache_dir'] = cache_dir
     if neighbor_pool is not None:
         get_cached_kwargs['known_remote_refs'] = neighbor_pool.known_remote_refs
         preloaded = neighbor_pool.take_local_cache(dist_name)
@@ -713,9 +729,47 @@ class CacheYamlDumper(yaml.SafeDumper):
         return type('ConfiguredCacheYamlDumper', (cls,), {'yaml_alias_min_length': int(min_length)})
 
 
+def write_distribution_cache(
+    dist_name, cache, include_source=False, write_extended=False, output_dir='.'
+):
+    """Serialize and write cache files for a single distribution."""
+    dumper = CacheYamlDumper.with_min_length(cache.config.yaml_alias_min_length)
+    if output_dir not in (None, '', '.'):
+        os.makedirs(output_dir, exist_ok=True)
+
+    def _target(filename):
+        return filename if output_dir in (None, '', '.') else os.path.join(output_dir, filename)
+
+    # Write the legacy Format 2 minimal cache
+    legacy_data = yaml.dump(
+        cache.get_legacy_data(include_source=include_source), Dumper=dumper
+    ).encode()
+    legacy_yaml_name = '%s-cache.yaml' % dist_name
+    with open(_target(legacy_yaml_name), 'wb') as f:
+        print('- write cache file "%s"' % legacy_yaml_name, flush=True)
+        f.write(legacy_data)
+    legacy_gz_name = '%s-cache.yaml.gz' % dist_name
+    with gzip.open(_target(legacy_gz_name), 'wb') as f:
+        print('- write compressed cache file "%s"' % legacy_gz_name, flush=True)
+        f.write(legacy_data)
+
+    # Write the extended Format 3 cache when requested (e.g. --config or --extended)
+    if write_extended:
+        extended_data = yaml.dump(cache.get_data(version=3), Dumper=dumper).encode()
+        extended_yaml_name = '%s-extended-cache.yaml' % dist_name
+        with open(_target(extended_yaml_name), 'wb') as f:
+            print('- write extended cache file "%s"' % extended_yaml_name, flush=True)
+            f.write(extended_data)
+        extended_gz_name = '%s-extended-cache.yaml.gz' % dist_name
+        with gzip.open(_target(extended_gz_name), 'wb') as f:
+            print('- write compressed extended cache file "%s"' % extended_gz_name, flush=True)
+            f.write(extended_data)
+
+
 def _get_cached_distribution(
     index, dist_name, preclean=False, ignore_local=False,
-    include_source=False, config=None, known_remote_refs=None, preloaded_cache=None
+    include_source=False, config=None, known_remote_refs=None, preloaded_cache=None,
+    cache_dir=None
 ):
     print('Build cache for "%s"' % dist_name)
     cache_config = CacheConfig.from_input(config, include_source=include_source)
@@ -728,7 +782,7 @@ def _get_cached_distribution(
                     print('- reuse already loaded local file "%s"' % candidate)
                 else:
                     print('- trying to use local cache')
-                    candidate = _find_local_cache_file(dist_name)
+                    candidate = _find_local_cache_file(dist_name, cache_dir=cache_dir)
                     if candidate is not None:
                         print('- use local file "%s"' % candidate)
                         cache, _ = _load_local_cache_file(dist_name, path=candidate)

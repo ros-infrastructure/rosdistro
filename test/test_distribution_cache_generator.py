@@ -1,4 +1,5 @@
 import datetime
+import gzip
 import json
 import os
 from unittest.mock import Mock, patch
@@ -8,7 +9,11 @@ import pytest
 import yaml
 
 from rosdistro.distribution_cache import DistributionCache
-from rosdistro.distribution_cache_generator import CacheYamlDumper, generate_distribution_cache
+from rosdistro.distribution_cache_generator import (
+    CacheYamlDumper,
+    generate_distribution_cache,
+    generate_distribution_caches,
+)
 from rosdistro.source_repository_cache import SourceRepositoryCache
 
 
@@ -296,8 +301,11 @@ def test_distribution_cache_v2_migration():
     validate(instance=cache.get_data(), schema=schema)
 
 
-@patch('rosdistro.cli.rosdistro_build_cache.generate_distribution_caches')
-def test_cli_build_cache_writes_both_legacy_and_extended_files(mock_gen_caches, tmp_path, monkeypatch):
+@patch('rosdistro.distribution_cache_generator.generate_distribution_cache')
+@patch('rosdistro.distribution_cache_generator.get_index')
+def test_cli_build_cache_writes_both_legacy_and_extended_files(
+    mock_get_index, mock_gen_cache, tmp_path, monkeypatch
+):
     from rosdistro.cli.rosdistro_build_cache import main
     from rosdistro.distribution_cache import CacheConfig
 
@@ -333,7 +341,8 @@ def test_cli_build_cache_writes_both_legacy_and_extended_files(mock_gen_caches, 
     repo_cache.set_stars(99)
     repo_cache.add('my_pkg', 'src/my_pkg', pkg_xml, 'package.xml')
     cache.source_repo_resources['my_repo'] = repo_cache
-    mock_gen_caches.return_value = {'rolling': cache}
+    mock_get_index.return_value = Mock(distributions={'rolling': {}})
+    mock_gen_cache.return_value = cache
 
     # Without --config or --extended, only the legacy Format 2 cache files are written
     rc_legacy_only = main(['index.yaml', 'rolling'])
@@ -495,5 +504,336 @@ def test_distribution_cache_update_distribution_doc_only_repo(mock_git):
     assert 'soar_ros' not in cache.source_repo_resources
 
 
+def _make_pkg_xml(name, version='1.0.0'):
+    return (
+        f'<?xml version="1.0"?>'
+        f'<package format="2">'
+        f'<name>{name}</name>'
+        f'<version>{version}</version>'
+        f'<description>{name} description</description>'
+        f'<maintainer email="dev@example.com">Dev</maintainer>'
+        f'<license>BSD</license>'
+        f'</package>'
+    )
 
+
+def _write_multi_distro_index(tmp_path, distros):
+    index_data = {
+        'type': 'index',
+        'version': 4,
+        'distributions': {},
+    }
+    for dist_name, pkg_name in distros.items():
+        dist_dir = tmp_path / dist_name
+        dist_dir.mkdir(parents=True, exist_ok=True)
+        (dist_dir / 'distribution.yaml').write_text(yaml.safe_dump({
+            'type': 'distribution',
+            'version': 2,
+            'repositories': {
+                f'{pkg_name}_repo': {
+                    'source': {
+                        'type': 'git',
+                        'url': f'https://github.com/org/{pkg_name}.git',
+                        'version': 'main',
+                    },
+                    'release': {
+                        'packages': [pkg_name],
+                        'tags': {'release': f'release/{dist_name}/{{package}}/{{version}}'},
+                        'url': f'https://github.com/org/{pkg_name}-release.git',
+                        'version': '1.0.0-1',
+                    },
+                },
+            },
+        }))
+        index_data['distributions'][dist_name] = {
+            'distribution': [f'{dist_name}/distribution.yaml'],
+            'distribution_status': 'active',
+            'distribution_type': 'ros2',
+            'python_version': 3,
+        }
+    index_path = tmp_path / 'index-v4.yaml'
+    index_path.write_text(yaml.safe_dump(index_data))
+    return str(index_path)
+
+
+def _make_source_cache_for_pkg(pkg_name, sha):
+    rc = SourceRepositoryCache.from_ref(sha)
+    rc.set_stars(5)
+    rc.set_description(f'{pkg_name} repo')
+    rc.set_tags(['ros2'])
+    rc.set_last_commit_time('2026-04-01T12:00:00Z')
+    rc.set_contributing('# Contributing')
+    rc.set_readme('# Root README')
+    rc.add(pkg_name, pkg_name, _make_pkg_xml(pkg_name), 'package.xml')
+    rc.add(pkg_name, pkg_name, f'# {pkg_name}', 'README.md')
+    rc.add(pkg_name, pkg_name, '1.0.0\n* init', 'CHANGELOG.rst')
+    rc.add(pkg_name, pkg_name, [], 'launch_files')
+    rc.add(pkg_name, pkg_name, [], 'msg_files')
+    rc.add(pkg_name, pkg_name, [], 'srv_files')
+    rc.add(pkg_name, pkg_name, [], 'action_files')
+    return rc
+
+
+def test_generate_distribution_caches_writes_to_output_dir_per_distro_and_reuses_on_restart(tmp_path, monkeypatch):
+    from rosdistro import distribution_cache_generator as dcg
+
+    monkeypatch.chdir(tmp_path)
+    index_path = _write_multi_distro_index(
+        tmp_path, {'distro_a': 'pkg_a', 'distro_b': 'pkg_b', 'distro_c': 'pkg_c'}
+    )
+
+    # 1. Default output_dir=None does not write any files to disk
+    def fake_gen_only(index, dist_name, **kwargs):
+        dist_data = yaml.safe_load((tmp_path / dist_name / 'distribution.yaml').read_text())
+        return DistributionCache(dist_name, distribution_file_data=dist_data)
+
+    with patch('rosdistro.distribution_cache_generator.generate_distribution_cache', side_effect=fake_gen_only):
+        caches = generate_distribution_caches(index_path, dist_names=['distro_a'])
+    assert list(caches.keys()) == ['distro_a']
+    assert not (tmp_path / 'distro_a-cache.yaml').exists()
+
+    # 2. Explicit output_dir writes each distro before moving to the next
+    out_dir = tmp_path / 'cache_out'
+    events = []
+    real_write = dcg.write_distribution_cache
+
+    def fake_gen_with_order(index, dist_name, **kwargs):
+        events.append(('generate', dist_name))
+        dist_data = yaml.safe_load((tmp_path / dist_name / 'distribution.yaml').read_text())
+        return DistributionCache(dist_name, distribution_file_data=dist_data)
+
+    def tracking_write(dist_name, cache, **kwargs):
+        events.append(('write', dist_name))
+        return real_write(dist_name, cache, **kwargs)
+
+    with patch('rosdistro.distribution_cache_generator.generate_distribution_cache', side_effect=fake_gen_with_order), \
+         patch('rosdistro.distribution_cache_generator.write_distribution_cache', side_effect=tracking_write):
+        caches = generate_distribution_caches(
+            index_path,
+            dist_names=['distro_a', 'distro_b', 'distro_c'],
+            config='extended',
+            output_dir=str(out_dir),
+        )
+
+    assert list(caches.keys()) == ['distro_a', 'distro_b', 'distro_c']
+    assert events == [
+        ('generate', 'distro_a'),
+        ('write', 'distro_a'),
+        ('generate', 'distro_b'),
+        ('write', 'distro_b'),
+        ('generate', 'distro_c'),
+        ('write', 'distro_c'),
+    ]
+    for dist_name in ('distro_a', 'distro_b', 'distro_c'):
+        assert (out_dir / f'{dist_name}-cache.yaml').exists()
+        assert (out_dir / f'{dist_name}-extended-cache.yaml').exists()
+        assert not (tmp_path / f'{dist_name}-cache.yaml').exists()
+
+    # 3. Restarting with the same custom output_dir reuses cached files from output_dir
+    out_dir_2 = tmp_path / 'cache_out_restart'
+    rel_calls = []
+    src_calls = []
+
+    def fake_rel(dist_name, repo, pkg_name, filepath='package.xml'):
+        rel_calls.append((dist_name, pkg_name, filepath))
+        if filepath == 'package.xml':
+            return _make_pkg_xml(pkg_name)
+        return f'# {pkg_name} {filepath}'
+
+    def fake_src(repo, filepaths=None, metadata=None):
+        pkg_name = repo.name[:-len('_repo')]
+        src_calls.append(pkg_name)
+        return _make_source_cache_for_pkg(pkg_name, 'a' * 40)
+
+    with patch('rosdistro.Distribution.default_manifest_providers', [fake_rel]), \
+         patch('rosdistro.Distribution.default_source_manifest_providers', [fake_src]):
+        generate_distribution_caches(
+            index_path, dist_names=['distro_a'], config='extended', output_dir=str(out_dir_2)
+        )
+    assert len(rel_calls) == 3
+    assert src_calls == ['pkg_a']
+
+    rel_calls.clear()
+    src_calls.clear()
+    with patch('rosdistro.Distribution.default_manifest_providers', [fake_rel]), \
+         patch('rosdistro.Distribution.default_source_manifest_providers', [fake_src]), \
+         patch('rosdistro.distribution_cache.Git') as mock_git:
+        generate_distribution_caches(
+            index_path, dist_names=['distro_a', 'distro_b'], config='extended', output_dir=str(out_dir_2)
+        )
+    assert [c[0] for c in rel_calls] == ['distro_b', 'distro_b', 'distro_b']
+    assert src_calls == ['pkg_b']
+    mock_git.return_value.command.assert_not_called()
+    assert (out_dir_2 / 'distro_b-extended-cache.yaml').exists()
+
+
+def test_cli_build_cache_writes_each_distro_before_starting_next(tmp_path, monkeypatch):
+    from rosdistro.cli.rosdistro_build_cache import main
+    from rosdistro import distribution_cache_generator as dcg
+
+    monkeypatch.chdir(tmp_path)
+    index_path = _write_multi_distro_index(tmp_path, {'distro_a': 'pkg_a', 'distro_b': 'pkg_b'})
+    distro_a_files_seen_when_b_started = {}
+    written_calls = []
+    real_write = dcg.write_distribution_cache
+
+    def tracking_write(dist_name, cache, **kwargs):
+        written_calls.append(dist_name)
+        return real_write(dist_name, cache, **kwargs)
+
+    def fake_release_mp(dist_name, repo, pkg_name, filepath='package.xml'):
+        if dist_name == 'distro_b' and not distro_a_files_seen_when_b_started:
+            for fname in (
+                'distro_a-cache.yaml',
+                'distro_a-cache.yaml.gz',
+                'distro_a-extended-cache.yaml',
+                'distro_a-extended-cache.yaml.gz',
+            ):
+                p = tmp_path / fname
+                distro_a_files_seen_when_b_started[fname] = p.exists()
+            # Verify the already-written files are complete and readable before distro_b finishes
+            loaded = yaml.safe_load((tmp_path / 'distro_a-extended-cache.yaml').read_text())
+            assert loaded['name'] == 'distro_a'
+            assert 'pkg_a' in loaded['release_resources']
+            with gzip.open(tmp_path / 'distro_a-cache.yaml.gz', 'rb') as gz:
+                gz_loaded = yaml.safe_load(gz.read())
+            assert gz_loaded['name'] == 'distro_a'
+        if filepath == 'package.xml':
+            return _make_pkg_xml(pkg_name)
+        return f'# {pkg_name} {filepath}'
+
+    def fake_source_mp(repo, filepaths=None, metadata=None):
+        pkg_name = repo.name[:-len('_repo')]
+        return _make_source_cache_for_pkg(pkg_name, 'a' * 40 if pkg_name == 'pkg_a' else 'b' * 40)
+
+    with patch('rosdistro.distribution_cache_generator.write_distribution_cache', side_effect=tracking_write), \
+         patch('rosdistro.Distribution.default_manifest_providers', [fake_release_mp]), \
+         patch('rosdistro.Distribution.default_source_manifest_providers', [fake_source_mp]):
+        rc = main([index_path, 'distro_a', 'distro_b', '--extended'])
+
+    assert not rc
+    assert distro_a_files_seen_when_b_started == {
+        'distro_a-cache.yaml': True,
+        'distro_a-cache.yaml.gz': True,
+        'distro_a-extended-cache.yaml': True,
+        'distro_a-extended-cache.yaml.gz': True,
+    }
+    assert written_calls == ['distro_a', 'distro_b']
+
+
+def test_cli_build_cache_preserves_completed_distro_on_crash_and_reuses_on_restart(tmp_path, monkeypatch):
+    from rosdistro.cli.rosdistro_build_cache import main
+
+    monkeypatch.chdir(tmp_path)
+    schema = _load_schema()
+    index_path = _write_multi_distro_index(tmp_path, {'distro_a': 'pkg_a', 'distro_b': 'pkg_b'})
+
+    # Run 1 (cold start): distro_a completes, then process crashes while indexing distro_b
+    run1_rel_calls = []
+    run1_src_calls = []
+
+    def run1_release_mp(dist_name, repo, pkg_name, filepath='package.xml'):
+        run1_rel_calls.append((dist_name, pkg_name, filepath))
+        if dist_name == 'distro_b':
+            raise KeyboardInterrupt('simulated crash during distro_b')
+        if filepath == 'package.xml':
+            return _make_pkg_xml(pkg_name)
+        return f'# {pkg_name} {filepath}'
+
+    def run1_source_mp(repo, filepaths=None, metadata=None):
+        pkg_name = repo.name[:-len('_repo')]
+        run1_src_calls.append(pkg_name)
+        return _make_source_cache_for_pkg(pkg_name, '1' * 40)
+
+    with patch('rosdistro.Distribution.default_manifest_providers', [run1_release_mp]), \
+         patch('rosdistro.Distribution.default_source_manifest_providers', [run1_source_mp]):
+        with pytest.raises(KeyboardInterrupt, match='simulated crash during distro_b'):
+            main([index_path, 'distro_a', 'distro_b', '--extended'])
+
+    # distro_a must already be persisted to disk; distro_b must not exist
+    for fname in (
+        'distro_a-cache.yaml',
+        'distro_a-cache.yaml.gz',
+        'distro_a-extended-cache.yaml',
+        'distro_a-extended-cache.yaml.gz',
+    ):
+        assert (tmp_path / fname).exists()
+    for fname in (
+        'distro_b-cache.yaml',
+        'distro_b-cache.yaml.gz',
+        'distro_b-extended-cache.yaml',
+        'distro_b-extended-cache.yaml.gz',
+    ):
+        assert not (tmp_path / fname).exists()
+
+    ext_a = yaml.safe_load((tmp_path / 'distro_a-extended-cache.yaml').read_text())
+    validate(instance=ext_a, schema=schema)
+    assert 'pkg_a' in ext_a['release_resources']
+    assert 'pkg_a_repo' in ext_a['source_repo_resources']
+
+    # Run 2 (restart with same command): distro_a is reused from cache with ZERO remote fetches,
+    # and distro_b now completes and is written out.
+    run2_rel_calls = []
+    run2_src_calls = []
+
+    def run2_release_mp(dist_name, repo, pkg_name, filepath='package.xml'):
+        run2_rel_calls.append((dist_name, pkg_name, filepath))
+        if filepath == 'package.xml':
+            return _make_pkg_xml(pkg_name)
+        return f'# {pkg_name} {filepath}'
+
+    def run2_source_mp(repo, filepaths=None, metadata=None):
+        pkg_name = repo.name[:-len('_repo')]
+        run2_src_calls.append(pkg_name)
+        return _make_source_cache_for_pkg(pkg_name, '2' * 40)
+
+    with patch('rosdistro.Distribution.default_manifest_providers', [run2_release_mp]), \
+         patch('rosdistro.Distribution.default_source_manifest_providers', [run2_source_mp]), \
+         patch('rosdistro.distribution_cache.Git') as mock_git:
+        rc = main([index_path, 'distro_a', 'distro_b', '--extended'])
+
+    assert not rc
+    # distro_a was loaded from the locally cached files written in Run 1 -> zero network calls!
+    assert [c[0] for c in run2_rel_calls] == ['distro_b', 'distro_b', 'distro_b']
+    assert run2_src_calls == ['pkg_b']
+    mock_git.return_value.command.assert_not_called()
+
+    ext_b = yaml.safe_load((tmp_path / 'distro_b-extended-cache.yaml').read_text())
+    validate(instance=ext_b, schema=schema)
+    assert 'pkg_b' in ext_b['release_resources']
+    assert 'pkg_b_repo' in ext_b['source_repo_resources']
+
+
+def test_cli_build_cache_writes_completed_distros_when_another_distro_errors(tmp_path, monkeypatch):
+    from rosdistro.cli.rosdistro_build_cache import main
+
+    monkeypatch.chdir(tmp_path)
+    index_path = _write_multi_distro_index(
+        tmp_path, {'distro_a': 'pkg_a', 'distro_b': 'pkg_b', 'distro_c': 'pkg_c'}
+    )
+
+    def fake_release_mp(dist_name, repo, pkg_name, filepath='package.xml'):
+        if dist_name == 'distro_b':
+            # Missing package.xml triggers RuntimeError for distro_b only
+            return None
+        if filepath == 'package.xml':
+            return _make_pkg_xml(pkg_name)
+        return f'# {pkg_name} {filepath}'
+
+    def fake_source_mp(repo, filepaths=None, metadata=None):
+        pkg_name = repo.name[:-len('_repo')]
+        return _make_source_cache_for_pkg(pkg_name, '3' * 40)
+
+    with patch('rosdistro.Distribution.default_manifest_providers', [fake_release_mp]), \
+         patch('rosdistro.Distribution.default_source_manifest_providers', [fake_source_mp]):
+        rc = main([index_path, 'distro_a', 'distro_b', 'distro_c', '--extended'])
+
+    assert rc == 1
+    for ok_dist in ('distro_a', 'distro_c'):
+        assert (tmp_path / f'{ok_dist}-cache.yaml').exists()
+        assert (tmp_path / f'{ok_dist}-cache.yaml.gz').exists()
+        assert (tmp_path / f'{ok_dist}-extended-cache.yaml').exists()
+        assert (tmp_path / f'{ok_dist}-extended-cache.yaml.gz').exists()
+    assert not (tmp_path / 'distro_b-cache.yaml').exists()
+    assert not (tmp_path / 'distro_b-extended-cache.yaml').exists()
 
