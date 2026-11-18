@@ -37,7 +37,6 @@ import socket
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 
-from rosdistro import logger
 from rosdistro.manifest_provider import (
     PermanentManifestError,
     SkipManifestProvider,
@@ -63,7 +62,6 @@ def bitbucket_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xm
     server, path = repo.get_url_parts()
 
     if not server.endswith('bitbucket.org'):
-        logger.debug('Skip non-bitbucket url "%s"' % repo.url)
         raise SkipManifestProvider('Cannot handle non bitbucket url.')
 
     release_tag = repo.get_release_tag(pkg_name)
@@ -73,10 +71,8 @@ def bitbucket_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xm
 
     url = 'https://bitbucket.org/%s/raw/%s/%s' % (path, release_tag, filepath)
     try:
-        logger.debug('Load package.xml file from url "%s"' % url)
         req = Request(url)
         if BITBUCKET_USER and BITBUCKET_PASSWORD:
-            logger.debug('- using http basic auth from supplied environment variables.')
             credential_pair = '%s:%s' % (BITBUCKET_USER, BITBUCKET_PASSWORD)
             authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
             req.add_header('Authorization', authheader)
@@ -85,12 +81,9 @@ def bitbucket_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xm
         return package_xml
     except HTTPError as e:
         if e.code == 404 and filepath != 'package.xml':
-            logger.debug('- File not found (%s), trying "%s"' % (e, url))
             return None
-        logger.debug('- failed (%s)' % e)
         if e.code in (404, 410, 451) and is_unauthenticated_http_url(repo.url):
             raise PermanentManifestError('Failed to fetch "%s": %s' % (url, e)) from e
         raise RuntimeError('Failed to fetch "%s": %s' % (url, e))
     except (URLError, TimeoutError, socket.timeout) as e:
-        logger.debug('- failed (%s)' % e)
         raise RuntimeError('Failed to fetch "%s": %s' % (url, e))

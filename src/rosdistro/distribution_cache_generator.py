@@ -36,7 +36,7 @@ import datetime
 import gzip
 import os
 import re
-import sys
+import time
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
 
@@ -44,6 +44,13 @@ import yaml
 
 from . import _get_dist_file_data, get_cached_distribution, get_distribution_cache, get_index, logger
 from .distribution_cache import CacheConfig, DistributionCache, NO_MAX_LINES_RESOURCES, resolve_git_remote_ref
+from .fetch_reporter import (
+    FetchReporter,
+    format_phase_summary,
+    get_active_reporter,
+    report_fetch,
+    use_reporter,
+)
 from .manifest_provider.cache import PACKAGE_ASSET_LIST_RESOURCES, sanitize_and_truncate_docs
 from .source_repository_cache import SourceRepositoryCache
 from .vcs import ref_is_hash
@@ -291,15 +298,25 @@ class _NeighborCachePool(object):
             if d_name == exclude_dist_name or d_name in self._processed_caches or d_name in self._attempted_local:
                 continue
             self._attempted_local.add(d_name)
+            load_start = time.perf_counter()
+            loaded_cache = None
             try:
                 loaded_cache, _ = _load_local_cache_file(d_name, path=path)
-                if loaded_cache is not None:
-                    self._local_caches[d_name] = (loaded_cache, path)
-                    self._local_order.append(d_name)
-                    logger.debug('Loaded neighboring local cache "%s" from "%s"' % (d_name, path))
-                    yield d_name, loaded_cache
             except Exception as e:
                 logger.debug('Failed to load neighboring local cache "%s" from "%s": %s' % (d_name, path, e))
+            if loaded_cache is not None:
+                self._local_caches[d_name] = (loaded_cache, path)
+                self._local_order.append(d_name)
+                report_fetch(
+                    'cache:neighbor_load',
+                    d_name,
+                    'local_file',
+                    status='ok',
+                    duration_s=time.perf_counter() - load_start,
+                    detail='path=%s' % path,
+                    level='top',
+                )
+                yield d_name, loaded_cache
 
     def find_release_resource(self, exclude_dist_name, pkg_name, repo, filepath, target_config):
         if repo is None or repo.version is None:
@@ -429,55 +446,167 @@ class _NeighborCachePool(object):
         return None, None
 
 
+def _get_last_provider_fetch_info(dist, attr_name):
+    providers = getattr(dist, attr_name, None)
+    if not isinstance(providers, (list, tuple)):
+        return None
+    for mp in providers:
+        info = getattr(mp, 'last_fetch_info', None)
+        if isinstance(info, dict):
+            return info
+    return None
+
+
+def _fetch_release_resource(
+    dist, dist_name, cache, pkg_name, repo, resource_name,
+    cache_config, neighbor_pool, has_release_cache_dict, reporter,
+):
+    """Fetch a single release resource via cache, local neighbor, or manifest providers,
+    emitting standardized framework output."""
+    if resource_name == 'package.xml':
+        was_cached = bool(
+            has_release_cache_dict and cache.release_resources[pkg_name].get('package.xml')
+        )
+    else:
+        was_cached = bool(
+            has_release_cache_dict and resource_name in cache.release_resources[pkg_name]
+        )
+
+    copied_from_neighbor = False
+    neighbor_dist = None
+    resource_type = 'release:%s' % resource_name
+    start_s = time.perf_counter()
+
+    with reporter.fetch_scope():
+        if not was_cached and neighbor_pool is not None and has_release_cache_dict:
+            found, copied_val, neighbor_dist = neighbor_pool.find_release_resource(
+                dist_name, pkg_name, repo, resource_name, cache_config
+            )
+            if found:
+                cache.release_resources[pkg_name][resource_name] = copied_val
+                copied_from_neighbor = True
+
+        if resource_name == 'package.xml':
+            content = dist.get_release_package_xml(pkg_name)
+        else:
+            content = dist.get_release_resource(pkg_name, resource_name)
+
+    dur_s = time.perf_counter() - start_s
+    detail_parts = []
+    if copied_from_neighbor:
+        fetch_type = 'local_neighbor'
+        status = 'ok' if content is not None else 'not_found'
+        detail_parts.append('neighbor=%s' % neighbor_dist)
+    elif was_cached:
+        fetch_type = 'cache'
+        status = 'ok' if content is not None else 'not_found'
+    else:
+        info = _get_last_provider_fetch_info(dist, '_manifest_providers')
+        if info is not None:
+            fetch_type = info.get('fetch_type') or 'unknown'
+            status = info.get('status') or ('ok' if content is not None else 'not_found')
+        elif content is not None:
+            fetch_type = 'provider'
+            status = 'ok'
+        elif resource_name == 'package.xml':
+            fetch_type = 'failed'
+            status = 'failed'
+        else:
+            fetch_type = 'provider'
+            status = 'not_found'
+
+    if resource_name == 'package.xml' and getattr(repo, 'version', None):
+        detail_parts.append('version=%s' % repo.version)
+
+    detail = ', '.join(detail_parts) if detail_parts else None
+    reporter.report_fetch(
+        resource_type,
+        pkg_name,
+        fetch_type,
+        status=status,
+        duration_s=dur_s,
+        dist_name=dist_name,
+        detail=detail,
+        level='top',
+    )
+    return content, fetch_type, status, dur_s
+
+
 def generate_distribution_caches(
     index, dist_names=None, preclean=False,
     ignore_local=False, include_source=False, debug=False, limit=None, config=None,
     output_dir=None
 ):
-    if os.path.isfile(index):
-        index = 'file://' + os.path.abspath(index)
-    index = get_index(index)
+    reporter = get_active_reporter()
+    if reporter is None:
+        reporter = FetchReporter(debug=debug)
+    elif debug:
+        reporter.debug = True
 
-    if not dist_names:
-        dist_names = sorted(index.distributions.keys())
+    with use_reporter(reporter):
+        if os.path.isfile(index):
+            index = 'file://' + os.path.abspath(index)
+        index = get_index(index)
 
-    neighbor_pool = (
-        None if preclean
-        else _NeighborCachePool(index=index, ignore_local=ignore_local, cache_dir=output_dir)
-    )
+        if not dist_names:
+            dist_names = sorted(index.distributions.keys())
 
-    errors = []
-    caches = {}
-    for dist_name in dist_names:
-        try:
-            cache = generate_distribution_cache(
-                index, dist_name, preclean=preclean,
-                ignore_local=ignore_local, include_source=include_source,
-                debug=debug, limit=limit, config=config,
-                neighbor_caches=neighbor_pool, cache_dir=output_dir)
-        except RuntimeError as e:
-            errors.append(str(e))
-            continue
-        caches[dist_name] = cache
-        if neighbor_pool is not None and cache is not None:
-            neighbor_pool.add_cache(dist_name, cache)
-        if output_dir is not None and cache is not None:
-            write_distribution_cache(
-                dist_name,
-                cache,
-                include_source=include_source,
-                write_extended=(config is not None),
-                output_dir=output_dir,
-            )
-    if errors:
-        raise RuntimeError('\n'.join(errors))
-    return caches
+        neighbor_pool = (
+            None if preclean
+            else _NeighborCachePool(index=index, ignore_local=ignore_local, cache_dir=output_dir)
+        )
+
+        errors = []
+        caches = {}
+        for dist_name in dist_names:
+            try:
+                cache = generate_distribution_cache(
+                    index, dist_name, preclean=preclean,
+                    ignore_local=ignore_local, include_source=include_source,
+                    debug=debug, limit=limit, config=config,
+                    neighbor_caches=neighbor_pool, cache_dir=output_dir)
+            except RuntimeError as e:
+                errors.append(str(e))
+                continue
+            caches[dist_name] = cache
+            if neighbor_pool is not None and cache is not None:
+                neighbor_pool.add_cache(dist_name, cache)
+            if output_dir is not None and cache is not None:
+                write_distribution_cache(
+                    dist_name,
+                    cache,
+                    include_source=include_source,
+                    write_extended=(config is not None),
+                    output_dir=output_dir,
+                )
+        if errors:
+            raise RuntimeError('\n'.join(errors))
+        return caches
 
 
 def generate_distribution_cache(
     index, dist_name, preclean=False, ignore_local=False,
     include_source=False, debug=False, limit=None, config=None,
     neighbor_caches=None, cache_dir=None
+):
+    reporter = get_active_reporter()
+    if reporter is None:
+        reporter = FetchReporter(debug=debug)
+    elif debug:
+        reporter.debug = True
+
+    with use_reporter(reporter), reporter.distro_scope(dist_name):
+        return _generate_distribution_cache_impl(
+            index, dist_name, preclean=preclean, ignore_local=ignore_local,
+            include_source=include_source, debug=debug, limit=limit, config=config,
+            neighbor_caches=neighbor_caches, cache_dir=cache_dir, reporter=reporter,
+        )
+
+
+def _generate_distribution_cache_impl(
+    index, dist_name, preclean=False, ignore_local=False,
+    include_source=False, debug=False, limit=None, config=None,
+    neighbor_caches=None, cache_dir=None, reporter=None,
 ):
     cache_config = CacheConfig.from_input(config, include_source=include_source, limit=limit)
     if preclean:
@@ -507,123 +636,103 @@ def generate_distribution_cache(
     has_release_cache_dict = isinstance(getattr(cache, 'release_resources', None), dict)
     has_source_cache_dict = isinstance(getattr(cache, 'source_repo_resources', None), dict)
 
-    print('- fetch missing release manifests')
     effective_limit = cache_config.limit
     all_release_pkgs = sorted(dist.release_packages.keys())
     if effective_limit is not None:
-        if debug and len(all_release_pkgs) > effective_limit:
-            print(f'  - limiting packages scanned to {effective_limit} of {len(all_release_pkgs)} as per config')
         release_pkgs = all_release_pkgs[:effective_limit]
     else:
         release_pkgs = all_release_pkgs
 
+    all_release_resources = cache_config.enabled_release_resources()
+    limit_note = (
+        ' (limited to %d of %d)' % (len(release_pkgs), len(all_release_pkgs))
+        if effective_limit is not None and len(all_release_pkgs) > effective_limit else ''
+    )
+    print(
+        '- fetch release resources (%d packages%s: %s)'
+        % (len(release_pkgs), limit_note, ', '.join(all_release_resources)),
+        flush=True,
+    )
+
     errors = []
-    copied_release_count = 0
-    enabled_release_resources = [
-        r for r in cache_config.enabled_release_resources() if r != 'package.xml'
-    ]
+    rel_counts = {}
+    rel_durations = {}
+    rel_phase_start = time.perf_counter()
     for pkg_name in release_pkgs:
         repo = dist.repositories[dist.release_packages[pkg_name].repository_name].release_repository
         if repo.version is None:
-            if debug:
-                print('  - skip "%s" since it has no version' % pkg_name)
+            reporter.report_fetch(
+                'release:package.xml',
+                pkg_name,
+                'skipped',
+                status='skipped',
+                duration_s=0.0,
+                dist_name=dist_name,
+                detail='no version',
+                level='top',
+            )
+            rel_counts['skipped'] = rel_counts.get('skipped', 0) + 1
             continue
-        if debug:
-            print('  - dist cache fetch "%s"' % pkg_name)
-        else:
-            sys.stdout.write('.')
-            sys.stdout.flush()
         if cache:
             if pkg_name in cache.release_resources:
                 cached_ver = cache.release_resources[pkg_name].get('version')
                 if cached_ver is not None and cached_ver != repo.version:
-                    print("  - invalidating package '%s' due to version mismatch" % pkg_name)
+                    logger.debug("Invalidating package '%s' due to version mismatch" % pkg_name)
                     cache.release_resources[pkg_name] = {}
             else:
                 cache.release_resources[pkg_name] = {}
             cache.release_resources[pkg_name]['version'] = repo.version
 
-        # check that package.xml is fetchable
-        old_package_xml = None
-        if cache and pkg_name in cache.release_resources:
-            old_package_xml = cache.release_resources[pkg_name].get('package.xml', None)
-        if (
-            neighbor_pool is not None
-            and has_release_cache_dict
-            and not cache.release_resources[pkg_name].get('package.xml')
-        ):
-            found, copied_xml, neighbor_dist = neighbor_pool.find_release_resource(
-                dist_name, pkg_name, repo, 'package.xml', cache_config
+        for resource_name in all_release_resources:
+            content, fetch_type, _, dur_s = _fetch_release_resource(
+                dist, dist_name, cache, pkg_name, repo, resource_name,
+                cache_config, neighbor_pool, has_release_cache_dict, reporter,
             )
-            if found:
-                cache.release_resources[pkg_name]['package.xml'] = copied_xml
-                copied_release_count += 1
-                logger.debug(
-                    "Copying release 'package.xml' for package '%s' from neighbor distro '%s'"
-                    % (pkg_name, neighbor_dist)
-                )
-                if debug:
-                    print("  - copied package.xml for '%s' from neighbor '%s'" % (pkg_name, neighbor_dist))
-        package_xml = dist.get_release_package_xml(pkg_name)
-        if not package_xml:
-            errors.append('%s: missing package.xml file for package "%s"' % (dist_name, pkg_name))
-            continue
-        # check that package.xml is parseable
-        try:
-            pkg = parse_package_string(package_xml)
-        except InvalidPackage as e:
-            errors.append('%s: invalid package.xml file for package "%s": %s' % (dist_name, pkg_name, e))
-            continue
-        # check that version numbers match (at least without deb inc)
-        if not re.match(r'^%s(-[\dA-z~\+\.]+)?$' % re.escape(pkg.version), repo.version):
-            errors.append('%s: different version in package.xml (%s) for package "%s" than for the repository (%s) (after removing the debian increment)' % (dist_name, pkg.version, pkg_name, repo.version))
+            rel_counts[fetch_type] = rel_counts.get(fetch_type, 0) + 1
+            rel_durations[fetch_type] = rel_durations.get(fetch_type, 0.0) + dur_s
 
-        if package_xml != old_package_xml:
-            print("  - updated manifest of package '%s' to version '%s'" % (pkg_name, pkg.version))
-
-        for resource_name in enabled_release_resources:
-            old_resource = None
-            if cache and pkg_name in cache.release_resources:
-                old_resource = cache.release_resources[pkg_name].get(resource_name, None)
-            if (
-                neighbor_pool is not None
-                and has_release_cache_dict
-                and resource_name not in cache.release_resources[pkg_name]
-            ):
-                found, copied_res, neighbor_dist = neighbor_pool.find_release_resource(
-                    dist_name, pkg_name, repo, resource_name, cache_config
-                )
-                if found:
-                    cache.release_resources[pkg_name][resource_name] = copied_res
-                    copied_release_count += 1
-                    logger.debug(
-                        "Copying release '%s' for package '%s' from neighbor distro '%s'"
-                        % (resource_name, pkg_name, neighbor_dist)
+            if resource_name == 'package.xml':
+                if not content:
+                    errors.append('%s: missing package.xml file for package "%s"' % (dist_name, pkg_name))
+                    break
+                try:
+                    pkg = parse_package_string(content)
+                except InvalidPackage as e:
+                    errors.append('%s: invalid package.xml file for package "%s": %s' % (dist_name, pkg_name, e))
+                    break
+                if not re.match(r'^%s(-[\dA-z~\+\.]+)?$' % re.escape(pkg.version), repo.version):
+                    errors.append(
+                        '%s: different version in package.xml (%s) for package "%s" than for the repository (%s) '
+                        '(after removing the debian increment)'
+                        % (dist_name, pkg.version, pkg_name, repo.version)
                     )
-                    if debug:
-                        print(
-                            "  - copied %s for '%s' from neighbor '%s'"
-                            % (resource_name, pkg_name, neighbor_dist)
-                        )
-            resource_content = dist.get_release_resource(pkg_name, resource_name)
-            if resource_content != old_resource:
-                print("  - updated %s of package '%s'" % (resource_name, pkg_name))
 
-    if not debug:
-        print('')
-    if copied_release_count:
-        print('- copied %d release resource(s) from neighboring distro caches' % copied_release_count)
+    rel_phase_dur = time.perf_counter() - rel_phase_start
+    print(
+        format_phase_summary(
+            'release fetch', rel_counts, rel_durations, rel_phase_dur, dist_name=dist_name
+        ),
+        flush=True,
+    )
 
-    copied_source_count = 0
     if include_source or cache_config.has_any_source_enabled():
-        print('- fetch source repository manifests')
         all_repos = sorted(dist.repositories.keys())
         if effective_limit is not None:
-            if debug and len(all_repos) > effective_limit:
-                print(f'  - limiting repositories scanned to {effective_limit} of {len(all_repos)} as per config')
             repos_to_scan = all_repos[:effective_limit]
         else:
             repos_to_scan = all_repos
+        src_limit_note = (
+            ' (limited to %d of %d)' % (len(repos_to_scan), len(all_repos))
+            if effective_limit is not None and len(all_repos) > effective_limit else ''
+        )
+        print(
+            '- fetch source repositories (%d repositories%s)' % (len(repos_to_scan), src_limit_note),
+            flush=True,
+        )
+
+        src_counts = {}
+        src_durations = {}
+        src_phase_start = time.perf_counter()
         for repo_name in repos_to_scan:
             repo_entry = dist.repositories[repo_name]
             source_repo = (
@@ -631,16 +740,33 @@ def generate_distribution_cache(
                 if repo_entry.source_repository is not None or not cache_config.fallback_src_to_doc
                 else repo_entry.doc_repository
             )
-            if source_repo is not None:
-                was_cached = bool(
-                    has_source_cache_dict and cache.source_repo_resources.get(repo_name) is not None
+            if source_repo is None:
+                reporter.report_fetch(
+                    'source:repo',
+                    repo_name,
+                    'skipped',
+                    status='skipped',
+                    duration_s=0.0,
+                    dist_name=dist_name,
+                    detail='no source or doc entry',
+                    level='top',
                 )
-                is_known_failed = bool(
-                    not was_cached
-                    and hasattr(cache, 'is_source_repo_failed')
-                    and cache.is_source_repo_failed(repo_name, source_repo.url, source_repo.version)
-                )
-                copied_from_neighbor = False
+                src_counts['skipped'] = src_counts.get('skipped', 0) + 1
+                continue
+
+            was_cached = bool(
+                has_source_cache_dict and cache.source_repo_resources.get(repo_name) is not None
+            )
+            is_known_failed = bool(
+                not was_cached
+                and hasattr(cache, 'is_source_repo_failed')
+                and cache.is_source_repo_failed(repo_name, source_repo.url, source_repo.version)
+            )
+            copied_from_neighbor = False
+            neighbor_dist = None
+            item_start = time.perf_counter()
+
+            with reporter.fetch_scope():
                 if not was_cached and not is_known_failed and neighbor_pool is not None and has_source_cache_dict:
                     copied_repo_cache, neighbor_dist = neighbor_pool.find_source_repo_cache(
                         dist_name, source_repo, cache_config
@@ -652,16 +778,7 @@ def generate_distribution_cache(
                                 repo_name, source_repo.url, source_repo.version
                             )
                         copied_from_neighbor = True
-                        copied_source_count += 1
-                        logger.debug(
-                            "Copying source repository '%s' from neighbor distro '%s'"
-                            % (repo_name, neighbor_dist)
-                        )
-                        if debug:
-                            print(
-                                "  - copied source repo '%s' from neighbor '%s'"
-                                % (repo_name, neighbor_dist)
-                            )
+
                 repo_cache = dist.get_source_repo_resources(repo_name)
                 if (
                     not was_cached
@@ -675,20 +792,55 @@ def generate_distribution_cache(
                     neighbor_pool.record_remote_ref(
                         source_repo.url, source_repo.version, repo_cache.ref()
                     )
-                if debug:
-                    print('  - dist cache source fetch "%s"' % repo_name)
-                else:
-                    sys.stdout.write('.')
-                    sys.stdout.flush()
-            else:
-                if debug:
-                    print('  - skip "%s" since it has no source or doc entry.' % repo_name)
-                continue
 
-    if not debug:
-        print('')
-    if copied_source_count:
-        print('- copied %d source repo(s) from neighboring distro caches' % copied_source_count)
+            item_dur = time.perf_counter() - item_start
+            detail_parts = []
+            if copied_from_neighbor:
+                fetch_type = 'local_neighbor'
+                status = 'ok'
+                detail_parts.append('neighbor=%s' % neighbor_dist)
+            elif was_cached:
+                fetch_type = 'cache'
+                status = 'ok'
+            elif is_known_failed:
+                fetch_type = 'cached_failure'
+                status = 'skipped'
+            else:
+                info = _get_last_provider_fetch_info(dist, '_source_manifest_providers')
+                if info is not None:
+                    fetch_type = info.get('fetch_type') or 'unknown'
+                    status = info.get('status') or ('ok' if repo_cache is not None else 'failed')
+                elif repo_cache is not None:
+                    fetch_type = 'provider'
+                    status = 'ok'
+                else:
+                    fetch_type = 'failed'
+                    status = 'failed'
+
+            if isinstance(repo_cache, SourceRepositoryCache):
+                detail_parts.append('packages=%d' % len(repo_cache))
+            detail = ', '.join(detail_parts) if detail_parts else None
+
+            src_counts[fetch_type] = src_counts.get(fetch_type, 0) + 1
+            src_durations[fetch_type] = src_durations.get(fetch_type, 0.0) + item_dur
+            reporter.report_fetch(
+                'source:repo',
+                repo_name,
+                fetch_type,
+                status=status,
+                duration_s=item_dur,
+                dist_name=dist_name,
+                detail=detail,
+                level='top',
+            )
+
+        src_phase_dur = time.perf_counter() - src_phase_start
+        print(
+            format_phase_summary(
+                'source fetch', src_counts, src_durations, src_phase_dur, dist_name=dist_name
+            ),
+            flush=True,
+        )
 
     if errors:
         raise RuntimeError('\n'.join(errors))
@@ -729,6 +881,26 @@ class CacheYamlDumper(yaml.SafeDumper):
         return type('ConfiguredCacheYamlDumper', (cls,), {'yaml_alias_min_length': int(min_length)})
 
 
+def _write_cache_file(dist_name, filename, target_path, fetch_type, data_bytes, compressed=False):
+    start_s = time.perf_counter()
+    if compressed:
+        with gzip.open(target_path, 'wb') as f:
+            f.write(data_bytes)
+    else:
+        with open(target_path, 'wb') as f:
+            f.write(data_bytes)
+    report_fetch(
+        'cache:write',
+        filename,
+        fetch_type,
+        status='ok',
+        duration_s=time.perf_counter() - start_s,
+        dist_name=dist_name,
+        detail=('path=%s' % target_path) if target_path != filename else None,
+        level='top',
+    )
+
+
 def write_distribution_cache(
     dist_name, cache, include_source=False, write_extended=False, output_dir='.'
 ):
@@ -745,25 +917,29 @@ def write_distribution_cache(
         cache.get_legacy_data(include_source=include_source), Dumper=dumper
     ).encode()
     legacy_yaml_name = '%s-cache.yaml' % dist_name
-    with open(_target(legacy_yaml_name), 'wb') as f:
-        print('- write cache file "%s"' % legacy_yaml_name, flush=True)
-        f.write(legacy_data)
+    _write_cache_file(
+        dist_name, legacy_yaml_name, _target(legacy_yaml_name),
+        'legacy_yaml', legacy_data, compressed=False,
+    )
     legacy_gz_name = '%s-cache.yaml.gz' % dist_name
-    with gzip.open(_target(legacy_gz_name), 'wb') as f:
-        print('- write compressed cache file "%s"' % legacy_gz_name, flush=True)
-        f.write(legacy_data)
+    _write_cache_file(
+        dist_name, legacy_gz_name, _target(legacy_gz_name),
+        'legacy_gzip', legacy_data, compressed=True,
+    )
 
     # Write the extended Format 3 cache when requested (e.g. --config or --extended)
     if write_extended:
         extended_data = yaml.dump(cache.get_data(version=3), Dumper=dumper).encode()
         extended_yaml_name = '%s-extended-cache.yaml' % dist_name
-        with open(_target(extended_yaml_name), 'wb') as f:
-            print('- write extended cache file "%s"' % extended_yaml_name, flush=True)
-            f.write(extended_data)
+        _write_cache_file(
+            dist_name, extended_yaml_name, _target(extended_yaml_name),
+            'extended_yaml', extended_data, compressed=False,
+        )
         extended_gz_name = '%s-extended-cache.yaml.gz' % dist_name
-        with gzip.open(_target(extended_gz_name), 'wb') as f:
-            print('- write compressed extended cache file "%s"' % extended_gz_name, flush=True)
-            f.write(extended_data)
+        _write_cache_file(
+            dist_name, extended_gz_name, _target(extended_gz_name),
+            'extended_gzip', extended_data, compressed=True,
+        )
 
 
 def _get_cached_distribution(
@@ -771,32 +947,51 @@ def _get_cached_distribution(
     include_source=False, config=None, known_remote_refs=None, preloaded_cache=None,
     cache_dir=None
 ):
-    print('Build cache for "%s"' % dist_name)
+    print('Build cache for "%s"' % dist_name, flush=True)
     cache_config = CacheConfig.from_input(config, include_source=include_source)
     cache = None
+    load_fetch_type = 'scratch'
+    load_detail = None
+    load_start = time.perf_counter()
     try:
         if not preclean:
             if not ignore_local:
                 if preloaded_cache is not None:
                     cache, candidate = preloaded_cache
-                    print('- reuse already loaded local file "%s"' % candidate)
+                    load_fetch_type = 'local_preloaded'
+                    load_detail = 'path=%s' % candidate
                 else:
-                    print('- trying to use local cache')
                     candidate = _find_local_cache_file(dist_name, cache_dir=cache_dir)
                     if candidate is not None:
-                        print('- use local file "%s"' % candidate)
                         cache, _ = _load_local_cache_file(dist_name, path=candidate)
+                        load_fetch_type = 'local_file'
+                        load_detail = 'path=%s' % candidate
             if not cache:
-                print('- trying to fetch cache')
                 try:
                     cache = get_distribution_cache(index, dist_name, extended=True)
+                    load_fetch_type = 'remote_cache'
+                    load_detail = 'extended'
                 except Exception:
                     cache = get_distribution_cache(index, dist_name, extended=False)
+                    load_fetch_type = 'remote_cache'
+                    load_detail = 'legacy'
     except Exception as e:
-        print('- failed to fetch old cache: %s' % e)
+        load_fetch_type = 'scratch'
+        load_detail = 'fallback (%s)' % e
+        logger.debug('Failed to fetch old cache for "%s": %s' % (dist_name, e))
+
+    report_fetch(
+        'cache:load',
+        dist_name,
+        load_fetch_type,
+        status='ok',
+        duration_s=time.perf_counter() - load_start,
+        dist_name=dist_name,
+        detail=load_detail,
+        level='top',
+    )
 
     if cache:
-        print('- update cache')
         cache.apply_config(cache_config)
         # get current distribution file
         rel_file_data = _get_dist_file_data(index, dist_name, 'distribution')
@@ -811,7 +1006,6 @@ def _get_cached_distribution(
         # update cache with current distribution file, which filters existing cache by validity.
         cache.update_distribution(rel_file_data, known_remote_refs=known_remote_refs)
     else:
-        print('- build cache from scratch')
         # get empty cache with distribution file
         distribution_file_data = _get_dist_file_data(index, dist_name, 'distribution')
         cache = DistributionCache(dist_name, distribution_file_data=distribution_file_data, config=cache_config)

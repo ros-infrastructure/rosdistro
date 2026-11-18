@@ -47,6 +47,7 @@ from urllib.parse import quote as urlquote
 from catkin_pkg.package import parse_package_string
 
 from rosdistro import logger
+from rosdistro.fetch_reporter import report_instant_sub_fetch, report_sub_fetch
 from rosdistro.manifest_provider import (
     PermanentManifestError,
     SkipManifestProvider,
@@ -209,7 +210,6 @@ def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
         raise SkipManifestProvider('Cannot handle non-git repository.')
     server, path = repo.get_url_parts()
     if not server.endswith('github.com'):
-        logger.debug('Skip non-github url "%s"' % repo.url)
         raise SkipManifestProvider('can not handle non github urls')
 
     release_tag = repo.get_release_tag(pkg_name)
@@ -219,18 +219,14 @@ def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
 
     url = 'https://raw.githubusercontent.com/%s/%s/%s' % (path, urlquote(release_tag, safe='/'), filepath)
     try:
-        logger.debug('Load %s file from url "%s"' % (filepath, url))
         return _get_url_contents(url)
     except HTTPError as e:
         if e.code == 404 and filepath != 'package.xml':
-            logger.debug('- File not found (%s), trying "%s"' % (e, url))
             return None
-        logger.debug('- HTTP ERROR (%s), trying "%s"' % (e, url))
         if _is_definitive_github_failure(e, repo.url):
             raise PermanentManifestError('Failed to fetch "%s": %s' % (url, e)) from e
         raise e
     except (URLError, TimeoutError, socket.timeout) as e:
-        logger.debug('- failed (%s), trying "%s"' % (e, url))
         raise RuntimeError('Failed to fetch "%s": %s' % (url, e))
 
 
@@ -239,7 +235,6 @@ def github_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, me
         raise SkipManifestProvider('Cannot handle non-git repository.')
     server, path = repo.get_url_parts()
     if not server.endswith('github.com'):
-        logger.debug('Skip non-github url "%s"' % repo.url)
         raise SkipManifestProvider('can not handle non github urls')
 
     quoted_version = urlquote(str(repo.version), safe='/')
@@ -248,24 +243,26 @@ def github_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, me
     if GITHUB_TOKEN:
         req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
     if GITHUB_USER and GITHUB_PASSWORD:
-        logger.debug('- using http basic auth from supplied environment variables.')
         credential_pair = '%s:%s' % (GITHUB_USER, GITHUB_PASSWORD)
         authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
         req.add_header('Authorization', authheader)
-    try:
-        tree_json = json.loads(_get_url_contents(req))
-        logger.debug('- load repo tree from %s' % tree_url)
-    except HTTPError as e:
-        if _is_definitive_github_failure(e, repo.url):
-            raise PermanentManifestError(
-                'Unable to fetch JSON tree from %s: %s' % (tree_url, e)
-            ) from e
-        raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e))
-    except (URLError, TimeoutError, socket.timeout) as e:
-        raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e))
+    with report_sub_fetch('source:repo_tree', repo.name, 'github') as ctx:
+        try:
+            tree_json = json.loads(_get_url_contents(req))
+        except HTTPError as e:
+            ctx.status = 'failed'
+            if _is_definitive_github_failure(e, repo.url):
+                raise PermanentManifestError(
+                    'Unable to fetch JSON tree from %s: %s' % (tree_url, e)
+                ) from e
+            raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e))
+        except (URLError, TimeoutError, socket.timeout) as e:
+            ctx.status = 'failed'
+            raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e))
 
-    if tree_json['truncated']:
-        raise RuntimeError('JSON tree is truncated, must perform full clone.')
+        if tree_json['truncated']:
+            ctx.status = 'failed'
+            raise RuntimeError('JSON tree is truncated, must perform full clone.')
 
     blob_paths = [
         obj['path']
@@ -273,7 +270,8 @@ def github_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, me
         if obj.get('type', 'blob') not in ('tree', 'commit')
     ]
     blob_path_set = {p.replace('\\', '/').strip('/') for p in blob_paths if p and p.strip('/')}
-    package_xml_paths, package_assets, root_files = partition_repo_tree(blob_paths)
+    with report_sub_fetch('source:partition_tree', repo.name, 'github'):
+        package_xml_paths, package_assets, root_files = partition_repo_tree(blob_paths)
 
     cache = SourceRepositoryCache.from_ref(tree_json['sha'])
 
@@ -288,68 +286,85 @@ def github_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, me
                 credential_pair = '%s:%s' % (GITHUB_USER, GITHUB_PASSWORD)
                 authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
                 repo_req.add_header('Authorization', authheader)
-            try:
-                repo_json = json.loads(_get_url_contents(repo_req))
-                for meta_key, api_field in GITHUB_REPO_METADATA_FIELDS.items():
-                    if (metadata is None or meta_key in metadata) and api_field in repo_json:
-                        cache.set_metadata(meta_key, repo_json[api_field])
-            except (URLError, TimeoutError, socket.timeout) as e:
-                logger.debug('- failed to load repository info from %s: %s' % (repo_url, e))
+            with report_sub_fetch('source:metadata:repo_info', repo.name, 'github') as ctx:
+                try:
+                    repo_json = json.loads(_get_url_contents(repo_req))
+                    for meta_key, api_field in GITHUB_REPO_METADATA_FIELDS.items():
+                        if (metadata is None or meta_key in metadata) and api_field in repo_json:
+                            cache.set_metadata(meta_key, repo_json[api_field])
+                except (URLError, TimeoutError, socket.timeout):
+                    ctx.status = 'failed'
 
         for meta_key, candidates in ROOT_DOC_CANDIDATES.items():
             if metadata is None or meta_key in metadata:
-                for candidate in candidates:
-                    if candidate not in root_files:
-                        continue
-                    doc_url = 'https://raw.githubusercontent.com/%s/%s/%s' % (path, cache.ref(), candidate)
-                    logger.debug('- load repo %s from %s' % (candidate, doc_url))
-                    try:
-                        doc_contents = _get_url_contents(doc_url)
-                    except (URLError, TimeoutError, socket.timeout) as e:
-                        logger.debug('- failed to load %s from %s: %s' % (candidate, doc_url, e))
-                        continue
-                    cache.set_metadata(meta_key, sanitize_and_truncate_docs(doc_contents))
-                    break
+                matching_candidates = [c for c in candidates if c in root_files]
+                if not matching_candidates:
+                    report_instant_sub_fetch(
+                        'source:metadata:%s' % meta_key, repo.name, 'github',
+                        status='not_found', detail='not_in_tree',
+                    )
+                    continue
+                with report_sub_fetch('source:metadata:%s' % meta_key, repo.name, 'github') as ctx:
+                    found_doc = False
+                    for candidate in matching_candidates:
+                        doc_url = 'https://raw.githubusercontent.com/%s/%s/%s' % (path, cache.ref(), candidate)
+                        try:
+                            doc_contents = _get_url_contents(doc_url)
+                        except (URLError, TimeoutError, socket.timeout):
+                            continue
+                        cache.set_metadata(meta_key, sanitize_and_truncate_docs(doc_contents))
+                        found_doc = True
+                        break
+                    if not found_doc:
+                        ctx.status = 'failed'
 
     for package_xml_path in package_xml_paths:
         package_xml_filename = 'package.xml'
         url = 'https://raw.githubusercontent.com/%s/%s/%s' % \
             (path, cache.ref(), package_xml_path + '/' + package_xml_filename if package_xml_path else package_xml_filename)
-        logger.debug('- load %s from %s' % (package_xml_filename, url))
-        try:
-            package_xml = _get_url_contents(url)
-        except (URLError, TimeoutError, socket.timeout) as e:
-            raise RuntimeError('Unable to fetch %s from %s: %s' % (package_xml_filename, url, e))
-        name = parse_package_string(package_xml).name
+        pkg_target = '%s/%s' % (repo.name, package_xml_path) if package_xml_path else repo.name
+        with report_sub_fetch('source:package.xml', pkg_target, 'github') as ctx:
+            try:
+                package_xml = _get_url_contents(url)
+            except (URLError, TimeoutError, socket.timeout) as e:
+                ctx.status = 'failed'
+                raise RuntimeError('Unable to fetch %s from %s: %s' % (package_xml_filename, url, e))
+            name = parse_package_string(package_xml).name
+            ctx.target = '%s/%s' % (repo.name, name)
         cache.add(name, package_xml_path, package_xml, package_xml_filename)
+        pkg_label = '%s/%s' % (repo.name, name)
         for filepath in filepaths:
             if filepath == package_xml_filename:
                 continue
             if filepath in PACKAGE_ASSET_LIST_RESOURCES:
-                cache.add(
-                    name,
-                    package_xml_path,
-                    package_assets.get(package_xml_path, {}).get(filepath, []),
-                    filepath,
+                assets = package_assets.get(package_xml_path, {}).get(filepath, [])
+                cache.add(name, package_xml_path, assets, filepath)
+                report_instant_sub_fetch(
+                    'source:%s' % filepath, pkg_label, 'github',
+                    status='ok', detail='count=%d' % len(assets),
                 )
                 continue
             rel_target = (package_xml_path + '/' + filepath if package_xml_path else filepath).replace('\\', '/').strip('/')
             if rel_target not in blob_path_set:
-                logger.debug('- %s not present in repo tree, skipping' % rel_target)
+                report_instant_sub_fetch(
+                    'source:%s' % filepath, pkg_label, 'github',
+                    status='not_found', detail='not_in_tree',
+                )
                 continue
             url = 'https://raw.githubusercontent.com/%s/%s/%s' % \
                 (path, cache.ref(), package_xml_path + '/' + filepath if package_xml_path else filepath)
-            logger.debug('- load %s from %s' % (filepath, url))
-            try:
-                contents = _get_url_contents(url)
-            except HTTPError as e:
-                if e.code == 404:
-                    logger.debug('- File not found (%s), skipping "%s"' % (e, url))
-                    continue
-                logger.debug('- HTTP ERROR (%s), trying "%s"' % (e, url))
-                raise e
-            except (URLError, TimeoutError, socket.timeout) as e:
-                raise RuntimeError('Unable to fetch %s from %s: %s' % (filepath, url, e))
+            with report_sub_fetch('source:%s' % filepath, pkg_label, 'github') as ctx:
+                try:
+                    contents = _get_url_contents(url)
+                except HTTPError as e:
+                    if e.code == 404:
+                        ctx.status = 'not_found'
+                        continue
+                    ctx.status = 'failed'
+                    raise e
+                except (URLError, TimeoutError, socket.timeout) as e:
+                    ctx.status = 'failed'
+                    raise RuntimeError('Unable to fetch %s from %s: %s' % (filepath, url, e))
             cache.add(name, package_xml_path, contents, filepath)
 
     return cache

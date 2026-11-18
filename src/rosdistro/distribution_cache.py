@@ -34,13 +34,13 @@
 import copy
 import datetime
 import os
-import sys
 import time
 
 import yaml
 
 from . import logger
 from .distribution_file import create_distribution_file
+from .fetch_reporter import report_fetch
 from .package import Package
 from .source_repository_cache import SourceRepositoryCache
 from .vcs import Git, normalize_git_url, ref_is_hash
@@ -789,7 +789,114 @@ class DistributionCache(object):
             data['failed_source_repos'] = self.failed_source_repos
         return data
 
+    def _validate_source_repo_entry(self, dist_file, repo, min_update_delta, known_remote_refs):
+        """Validate a single cached source repo entry; return ``(fetch_type, status)``."""
+        try:
+            repo_entry = dist_file.repositories[repo]
+            source_repository = (
+                repo_entry.source_repository
+                if repo_entry.source_repository is not None or not self.config.fallback_src_to_doc
+                else repo_entry.doc_repository
+            )
+            if not source_repository:
+                raise AttributeError()
+        except (KeyError, AttributeError):
+            logger.debug('Unable to find source repository info for repo "%s".' % repo)
+            del self.source_repo_resources[repo]
+            return 'obsolete', 'dropped'
+
+        ref_key = (source_repository.url, source_repository.version)
+        known_hash = (
+            known_remote_refs.get(ref_key)
+            if known_remote_refs is not None
+            and source_repository.type == 'git'
+            and source_repository.version is not None
+            else None
+        )
+
+        last_update_time = self.source_repo_resources[repo].last_update_time()
+        if known_hash is None and last_update_time is not None:
+            now = datetime.datetime.now()
+            entry_age = (now - last_update_time).total_seconds()
+            if entry_age < min_update_delta:
+                return 'ttl_skip', 'kept'
+
+        if source_repository.version and ref_is_hash(source_repository.version):
+            source_hash = source_repository.version
+            fetch_type = 'pinned_hash'
+        elif known_hash is not None:
+            source_hash = known_hash
+            fetch_type = 'known_remote_ref'
+        elif source_repository.type != 'git' or not source_repository.version:
+            logger.debug(
+                'Unable to check hash for non-git or unversioned repo "%s", dropping cache entry.' % repo
+            )
+            del self.source_repo_resources[repo]
+            return 'non_git_or_unversioned', 'dropped'
+        elif known_remote_refs is not None and ref_key in known_remote_refs:
+            logger.warning(
+                "Unable to check hash for branch %s of %s, dropping cache entry." %
+                (source_repository.version, source_repository.url))
+            del self.source_repo_resources[repo]
+            if self._should_record_ls_remote_failure(source_repository, {'returncode': 1}):
+                self.record_source_repo_failure(
+                    repo,
+                    source_repository.url,
+                    source_repository.version,
+                    error='Remote reference "%s" unavailable in %s' % (
+                        source_repository.version, source_repository.url
+                    ),
+                    permanent=False,
+                )
+            return 'known_remote_ref_failed', 'failed'
+        else:
+            fetch_type = 'git_ls_remote'
+            source_hash, error_msg, result = _resolve_git_remote_ref_details(
+                source_repository.url, source_repository.version
+            )
+            if source_hash is None:
+                if known_remote_refs is not None:
+                    known_remote_refs[ref_key] = None
+                if error_msg:
+                    logger.warning(
+                        "Unable to check hash for branch %s of %s (%s), dropping cache entry." %
+                        (source_repository.version, source_repository.url, error_msg))
+                else:
+                    logger.warning(
+                        "Unable to check hash for branch %s of %s, dropping cache entry." %
+                        (source_repository.version, source_repository.url))
+                del self.source_repo_resources[repo]
+                if self._should_record_ls_remote_failure(source_repository, result):
+                    is_missing_ref = (
+                        result['returncode'] == 0 and not (result.get('output') or '').strip()
+                    )
+                    failure_err = (
+                        error_msg
+                        if error_msg
+                        else 'Remote reference "%s" not found in %s' % (
+                            source_repository.version, source_repository.url
+                        )
+                    )
+                    self.record_source_repo_failure(
+                        repo,
+                        source_repository.url,
+                        source_repository.version,
+                        error=failure_err,
+                        permanent=is_missing_ref,
+                    )
+                return fetch_type, 'failed'
+            if known_remote_refs is not None:
+                known_remote_refs[ref_key] = source_hash
+
+        cached_hash = self.source_repo_resources[repo].ref()
+        if source_hash != cached_hash:
+            logger.debug('Repo "%s" has moved from %s to %s, dropping cache.' % (repo, cached_hash, source_hash))
+            del self.source_repo_resources[repo]
+            return fetch_type, 'dropped'
+        return fetch_type, 'kept'
+
     def update_distribution(self, distribution_file_data, known_remote_refs=None):
+        dist_name = self.distribution_file.name
         # remove packages which are not in the old distribution file
         self._remove_obsolete_entries()
 
@@ -810,28 +917,34 @@ class DistributionCache(object):
                                 old_data['repositories'][repo_name][section] == repo[section]:
                             continue
                         # section is either different or doesn't exist before
-                        print("  - updated '%s' entry for repository '%s'" % (section, repo_name))
+                        logger.debug("Updated '%s' entry for repository '%s'" % (section, repo_name))
 
         self._distribution_file_data = distribution_file_data
-        dist_file = create_distribution_file(self.distribution_file.name, self._distribution_file_data)
+        dist_file = create_distribution_file(dist_name, self._distribution_file_data)
 
         # remove all release package xmls where the package version has changed.
-        print(f"- checking [{len(dist_file.release_packages.keys())}] release package cache entries for different versions")
+        rel_start = time.perf_counter()
+        total_release_pkgs = len(dist_file.release_packages.keys())
         dropped_count = 0
-        skipped_count = 0
+        new_count = 0
+        kept_count = 0
         for pkg_name in sorted(dist_file.release_packages.keys()):
             if pkg_name not in self.distribution_file.release_packages:
                 logger.debug("Skipping %s because not in the distro." % pkg_name)
-                skipped_count += 1
+                new_count += 1
                 continue
             if pkg_name in self.release_resources and self._get_repo_info(dist_file, pkg_name) != self._get_repo_info(self.distribution_file, pkg_name):
                 logger.debug("Dropping release resources package cache for %s" % pkg_name)
                 dropped_count += 1
                 del self.release_resources[pkg_name]
-
-        sys.stdout.write('\n')
-        sys.stdout.write(f'Dropped {dropped_count} repositories\n')
-        sys.stdout.write(f'Skipped {skipped_count} repositories\n')
+            elif pkg_name in self.release_resources:
+                kept_count += 1
+        rel_dur = time.perf_counter() - rel_start
+        print(
+            '- validated %d release package cache entries (kept=%d, dropped=%d, new=%d, %.2fs)'
+            % (total_release_pkgs, kept_count, dropped_count, new_count, rel_dur),
+            flush=True,
+        )
 
         # Prune obsolete, changed, or TTL-expired negative-cache entries before running ls-remote
         if self.failed_source_repos:
@@ -877,125 +990,44 @@ class DistributionCache(object):
         # the one we have associated with our cache. This requires calling git ls-remote on all affected repos.
         if self.source_repo_resources:
             start_time = time.perf_counter()
+            total_source_repos = len(self.source_repo_resources.keys())
             dropped_count = 0
-            skipped_count = 0
+            kept_count = 0
+            method_counts = {}
             min_update_delta = self.config.min_update_delta
-            print(f"- checking [{len(self.source_repo_resources.keys())}] source repo cache entries without source entries, requires ls-remote")
             for repo in sorted(self.source_repo_resources.keys()):
-                sys.stdout.write('.')
-                sys.stdout.flush()
-                try:
-                    repo_entry = dist_file.repositories[repo]
-                    source_repository = (
-                        repo_entry.source_repository
-                        if repo_entry.source_repository is not None or not self.config.fallback_src_to_doc
-                        else repo_entry.doc_repository
-                    )
-                    if not source_repository:
-                        raise AttributeError()
-                except (KeyError, AttributeError):
-                    # The repo entry has been dropped, or the source/doc stanza from it has been dropped,
-                    # either way, remove the cache entries associated with this repository.
-                    logger.debug('Unable to find source repository info for repo "%s".' % repo)
-                    del self.source_repo_resources[repo]
-                    continue
-
-                ref_key = (source_repository.url, source_repository.version)
-                known_hash = (
-                    known_remote_refs.get(ref_key)
-                    if known_remote_refs is not None
-                    and source_repository.type == 'git'
-                    and source_repository.version is not None
-                    else None
+                item_start = time.perf_counter()
+                fetch_type, status = self._validate_source_repo_entry(
+                    dist_file, repo, min_update_delta, known_remote_refs
                 )
-
-                last_update_time = self.source_repo_resources[repo].last_update_time()
-                if known_hash is None and last_update_time is not None:
-                    now = datetime.datetime.now()
-                    entry_age = (now - last_update_time).total_seconds()
-                    if entry_age < min_update_delta:
-                        logger.debug(f'Skipping check of {repo} because it was last updated only {entry_age} seconds ago less than {min_update_delta}')
-                        skipped_count += 1
-                        continue
-
-                if source_repository.version and ref_is_hash(source_repository.version):
-                    source_hash = source_repository.version
-                elif known_hash is not None:
-                    source_hash = known_hash
-                elif source_repository.type != 'git' or not source_repository.version:
-                    logger.debug(
-                        'Unable to check hash for non-git or unversioned repo "%s", dropping cache entry.' % repo
-                    )
-                    del self.source_repo_resources[repo]
-                    dropped_count += 1
-                    continue
-                elif known_remote_refs is not None and ref_key in known_remote_refs:
-                    logger.warning(
-                        "Unable to check hash for branch %s of %s, dropping cache entry." %
-                        (source_repository.version, source_repository.url))
-                    del self.source_repo_resources[repo]
-                    dropped_count += 1
-                    if self._should_record_ls_remote_failure(source_repository, {'returncode': 1}):
-                        self.record_source_repo_failure(
-                            repo,
-                            source_repository.url,
-                            source_repository.version,
-                            error='Remote reference "%s" unavailable in %s' % (
-                                source_repository.version, source_repository.url
-                            ),
-                            permanent=False,
-                        )
-                    continue
+                item_dur = time.perf_counter() - item_start
+                method_counts[fetch_type] = method_counts.get(fetch_type, 0) + 1
+                if status == 'kept':
+                    kept_count += 1
                 else:
-                    source_hash, error_msg, result = _resolve_git_remote_ref_details(
-                        source_repository.url, source_repository.version
-                    )
-                    if source_hash is None:
-                        if known_remote_refs is not None:
-                            known_remote_refs[ref_key] = None
-                        # Error checking remote, or unable to find remote reference. Drop the cache entry.
-                        if error_msg:
-                            logger.warning(
-                                "Unable to check hash for branch %s of %s (%s), dropping cache entry." %
-                                (source_repository.version, source_repository.url, error_msg))
-                        else:
-                            logger.warning(
-                                "Unable to check hash for branch %s of %s, dropping cache entry." %
-                                (source_repository.version, source_repository.url))
-                        del self.source_repo_resources[repo]
-                        dropped_count += 1
-                        if self._should_record_ls_remote_failure(source_repository, result):
-                            is_missing_ref = (
-                                result['returncode'] == 0 and not (result.get('output') or '').strip()
-                            )
-                            failure_err = (
-                                error_msg
-                                if error_msg
-                                else 'Remote reference "%s" not found in %s' % (
-                                    source_repository.version, source_repository.url
-                                )
-                            )
-                            self.record_source_repo_failure(
-                                repo,
-                                source_repository.url,
-                                source_repository.version,
-                                error=failure_err,
-                                permanent=is_missing_ref,
-                            )
-                        continue
-                    if known_remote_refs is not None:
-                        known_remote_refs[ref_key] = source_hash
-
-                cached_hash = self.source_repo_resources[repo].ref()
-                if source_hash != cached_hash:
-                    logger.debug('Repo "%s" has moved from %s to %s, dropping cache.' % (repo, cached_hash, source_hash))
-                    del self.source_repo_resources[repo]
                     dropped_count += 1
-            sys.stdout.write('\n')
-            sys.stdout.write(f'Dropped {dropped_count} repositories\n')
-            sys.stdout.write(f'Skipped {skipped_count} repositories\n')
+                report_fetch(
+                    'cache:validate_source_ref',
+                    repo,
+                    fetch_type,
+                    status=status,
+                    duration_s=item_dur,
+                    dist_name=dist_name,
+                    level='top',
+                )
             end_time = time.perf_counter()
-            logger.debug(f'Check of invalid source repo cache entries took {(end_time - start_time):.1f} seconds')
+            method_summary = ', '.join('%s=%d' % (k, v) for k, v in sorted(method_counts.items()))
+            print(
+                '- validated %d source repository cache entries (kept=%d, dropped=%d%s, %.2fs)'
+                % (
+                    total_source_repos,
+                    kept_count,
+                    dropped_count,
+                    (', ' + method_summary) if method_summary else '',
+                    end_time - start_time,
+                ),
+                flush=True,
+            )
 
         self.distribution_file = dist_file
         self.distribution_file.source_packages = self.get_source_packages()
@@ -1019,5 +1051,5 @@ class DistributionCache(object):
     def _remove_obsolete_entries(self):
         for pkg_name in list(self.release_resources.keys()):
             if pkg_name not in self.distribution_file.release_packages:
-                print('- REMOVE Release Resources for: ', pkg_name)
+                logger.debug('Removing obsolete release resources for "%s"' % pkg_name)
                 del self.release_resources[pkg_name]

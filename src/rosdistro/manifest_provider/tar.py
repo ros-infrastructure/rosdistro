@@ -41,8 +41,8 @@ from urllib.request import urlopen, Request
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
 
-from rosdistro import logger
 from rosdistro.common import rmtree
+from rosdistro.fetch_reporter import report_instant_sub_fetch, report_sub_fetch
 from rosdistro.manifest_provider import SkipManifestProvider, get_http_timeout
 from rosdistro.manifest_provider.cache import (
     DEFAULT_SOURCE_FILEPATHS,
@@ -65,12 +65,10 @@ def tar_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
 
     request = Request(repo.url)
     if _TAR_USER and _TAR_PASSWORD:
-        logger.debug('- using http basic auth from supplied environment variables.')
         credential_pair = '%s:%s' % (_TAR_USER, _TAR_PASSWORD)
         authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
         request.add_header('Authorization', authheader)
     elif _TAR_PASSWORD:
-        logger.debug('- using private token auth from supplied environment variables.')
         request.add_header('Private-Token', _TAR_PASSWORD)
 
     with urlopen(request, timeout=get_http_timeout()) as response:
@@ -98,17 +96,18 @@ def tar_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metad
     try:
         request = Request(repo.url)
         if _TAR_USER and _TAR_PASSWORD:
-            logger.debug('- using http basic auth from supplied environment variables.')
             credential_pair = '%s:%s' % (_TAR_USER, _TAR_PASSWORD)
             authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
             request.add_header('Authorization', authheader)
         elif _TAR_PASSWORD:
-            logger.debug('- using private token auth from supplied environment variables.')
             request.add_header('Private-Token', _TAR_PASSWORD)
 
-        with urlopen(request, timeout=get_http_timeout()) as response:
-            tar_bytes = response.read()
-        with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tar:
+        with report_sub_fetch('source:repo_tree', repo.name, 'tar'):
+            with urlopen(request, timeout=get_http_timeout()) as response:
+                tar_bytes = response.read()
+            tar = tarfile.open(fileobj=io.BytesIO(tar_bytes))
+
+        with tar:
             tmpdir = tempfile.mkdtemp()
             try:
                 blob_paths = [
@@ -116,7 +115,8 @@ def tar_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metad
                     for m in tar.getmembers()
                     if m.isfile()
                 ]
-                package_xml_paths, package_assets, root_files = partition_repo_tree(blob_paths)
+                with report_sub_fetch('source:partition_tree', repo.name, 'tar'):
+                    package_xml_paths, package_assets, root_files = partition_repo_tree(blob_paths)
 
                 # Extract the package.xmls and requested filepaths
                 tar.extractall(path=tmpdir, members=_package_xml_members(tar, filepaths))
@@ -124,43 +124,61 @@ def tar_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metad
 
                 for meta_key, candidates in ROOT_DOC_CANDIDATES.items():
                     if metadata is None or meta_key in metadata:
-                        for candidate in candidates:
-                            if candidate not in root_files:
-                                continue
-                            candidate_path = os.path.join(tmpdir, candidate)
-                            if os.path.isfile(candidate_path):
-                                with open(candidate_path, 'r') as f:
-                                    cache.set_metadata(meta_key, sanitize_and_truncate_docs(f.read()))
-                                break
+                        matching_candidates = [c for c in candidates if c in root_files]
+                        if not matching_candidates:
+                            report_instant_sub_fetch(
+                                'source:metadata:%s' % meta_key, repo.name, 'tar',
+                                status='not_found', detail='not_in_tree',
+                            )
+                            continue
+                        with report_sub_fetch('source:metadata:%s' % meta_key, repo.name, 'tar') as ctx:
+                            found_doc = False
+                            for candidate in matching_candidates:
+                                candidate_path = os.path.join(tmpdir, candidate)
+                                if os.path.isfile(candidate_path):
+                                    with open(candidate_path, 'r') as f:
+                                        cache.set_metadata(meta_key, sanitize_and_truncate_docs(f.read()))
+                                    found_doc = True
+                                    break
+                            if not found_doc:
+                                ctx.status = 'not_found'
 
                 for package_path in package_xml_paths:
                     local_pkg_dir = os.path.join(tmpdir, *package_path.split('/')) if package_path else tmpdir
-                    with open(os.path.join(local_pkg_dir, xmlpath), 'r') as f:
-                        package_xml = f.read()
-                    try:
-                        name = parse_package_string(package_xml).name
-                    except InvalidPackage:
-                        raise RuntimeError('Unable to parse package.xml file found in %s' % repo.url)
+                    pkg_target = '%s/%s' % (repo.name, package_path) if package_path else repo.name
+                    with report_sub_fetch('source:package.xml', pkg_target, 'tar') as ctx:
+                        with open(os.path.join(local_pkg_dir, xmlpath), 'r') as f:
+                            package_xml = f.read()
+                        try:
+                            name = parse_package_string(package_xml).name
+                        except InvalidPackage:
+                            ctx.status = 'failed'
+                            raise RuntimeError('Unable to parse package.xml file found in %s' % repo.url)
+                        ctx.target = '%s/%s' % (repo.name, name)
                     cache.add(name, package_path, package_xml, xmlpath)
+                    pkg_label = '%s/%s' % (repo.name, name)
                     for filepath in filepaths:
                         if filepath == xmlpath:
                             continue
                         if filepath in PACKAGE_ASSET_LIST_RESOURCES:
-                            cache.add(
-                                name,
-                                package_path,
-                                package_assets.get(package_path, {}).get(filepath, []),
-                                filepath,
+                            assets = package_assets.get(package_path, {}).get(filepath, [])
+                            cache.add(name, package_path, assets, filepath)
+                            report_instant_sub_fetch(
+                                'source:%s' % filepath, pkg_label, 'tar',
+                                status='ok', detail='count=%d' % len(assets),
                             )
                             continue
                         repo_filename = os.path.join(local_pkg_dir, *filepath.split('/'))
                         if not os.path.isfile(repo_filename):
-                            logger.debug(f'- tar load of {filepath} from {repo.url} skipped because it did not exist.')
+                            report_instant_sub_fetch(
+                                'source:%s' % filepath, pkg_label, 'tar',
+                                status='not_found', detail='not_in_tree',
+                            )
                             continue
-                        with open(repo_filename, 'r') as f:
-                            logger.debug('- tar load %s from %s' % (filepath, repo_filename))
-                            contents = f.read()
-                            cache.add(name, package_path, contents, filepath)
+                        with report_sub_fetch('source:%s' % filepath, pkg_label, 'tar'):
+                            with open(repo_filename, 'r') as f:
+                                contents = f.read()
+                        cache.add(name, package_path, contents, filepath)
 
                 return cache
             finally:

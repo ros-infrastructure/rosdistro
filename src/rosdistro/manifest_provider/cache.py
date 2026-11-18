@@ -34,9 +34,11 @@
 import datetime
 import os
 import posixpath
+import time
 from xml.dom import minidom
 
 from rosdistro import logger
+from rosdistro.fetch_reporter import get_active_reporter, get_provider_name, report_fetch
 from rosdistro.manifest_provider import PermanentManifestError, SkipManifestProvider
 
 IGNORE_MARKERS = frozenset((
@@ -256,6 +258,7 @@ class CachedManifestProvider(object):
         self._manifest_providers = manifest_providers
         self._failed_requests = set()
         self._failed_tags = set()
+        self.last_fetch_info = None
 
     @staticmethod
     def _get_release_failure_key(repo, pkg_name):
@@ -278,37 +281,60 @@ class CachedManifestProvider(object):
             return sanitize_xml(content)
         return sanitize_and_truncate_docs(content, max_length=self._get_max_lines(filepath))
 
+    def _emit_standalone_report(self, dist_name, pkg_name, filepath, fetch_type, status, duration_s):
+        reporter = get_active_reporter()
+        if reporter is not None and reporter.has_enclosing_fetch():
+            return
+        report_fetch(
+            'release:%s' % filepath,
+            pkg_name,
+            fetch_type,
+            status=status,
+            duration_s=duration_s,
+            dist_name=dist_name,
+            level='top',
+        )
+
     def __call__(self, dist_name, repo, pkg_name, filepath='package.xml'):
         assert repo.version
+        start_s = time.perf_counter()
+        self.last_fetch_info = None
 
         # Backwards compatibility for legacy ReleaseCache without release_resources
         if not hasattr(self._distribution_cache, 'release_resources'):
             if filepath != 'package.xml':
+                self.last_fetch_info = {'fetch_type': 'unsupported', 'status': 'not_found', 'provider': None}
                 return None
             package_xml = self._distribution_cache.release_package_xmls.get(pkg_name, None)
             if package_xml:
                 package_xml = sanitize_xml(package_xml)
                 self._distribution_cache.release_package_xmls[pkg_name] = package_xml
-                logger.debug('Loading package.xml for package "%s" from cache' % pkg_name)
+                self.last_fetch_info = {'fetch_type': 'cache', 'status': 'ok', 'provider': None}
+                self._emit_standalone_report(
+                    dist_name, pkg_name, filepath, 'cache', 'ok', time.perf_counter() - start_s
+                )
                 return package_xml
             if not self._manifest_providers:
+                self.last_fetch_info = {'fetch_type': 'cache_miss', 'status': 'not_found', 'provider': None}
                 return None
             tag_key = self._get_release_failure_key(repo, pkg_name)
             req_key = (tag_key[0], tag_key[1], filepath)
             if tag_key in self._failed_tags or req_key in self._failed_requests:
-                logger.debug(
-                    'Skipping package.xml fetch for package "%s" from "%s": already failed in this run'
-                    % (pkg_name, repo.url)
+                self.last_fetch_info = {'fetch_type': 'cached_failure', 'status': 'skipped', 'provider': None}
+                self._emit_standalone_report(
+                    dist_name, pkg_name, filepath, 'cached_failure', 'skipped', time.perf_counter() - start_s
                 )
                 return None
             errors = []
             permanent_failure = False
+            fetched_provider = None
             for mp in self._manifest_providers or []:
+                mp_name = getattr(mp, '__name__', str(mp))
                 try:
                     package_xml = sanitize_xml(mp(dist_name, repo, pkg_name))
+                    fetched_provider = get_provider_name(mp)
                     break
                 except PermanentManifestError as e:
-                    mp_name = getattr(mp, '__name__', str(mp))
                     logger.debug(
                         'Permanent failure in "%s()": %s; skipping fallback providers' % (mp_name, e)
                     )
@@ -316,7 +342,6 @@ class CachedManifestProvider(object):
                     permanent_failure = True
                     break
                 except Exception as e:
-                    mp_name = getattr(mp, '__name__', str(mp))
                     logger.debug('Skipped "%s()": %s' % (mp_name, e))
                     errors.append((mp_name, e, isinstance(e, SkipManifestProvider)))
             if package_xml is None:
@@ -331,8 +356,20 @@ class CachedManifestProvider(object):
                     logger.error(
                         'Failed to fetch package.xml for package "%s" from "%s":\n%s' %
                         (pkg_name, repo.url, details))
+                self.last_fetch_info = {'fetch_type': 'failed', 'status': 'failed', 'provider': None}
+                self._emit_standalone_report(
+                    dist_name, pkg_name, filepath, 'failed', 'failed', time.perf_counter() - start_s
+                )
                 return None
             self._distribution_cache.release_package_xmls[pkg_name] = package_xml
+            self.last_fetch_info = {
+                'fetch_type': fetched_provider,
+                'status': 'ok',
+                'provider': fetched_provider,
+            }
+            self._emit_standalone_report(
+                dist_name, pkg_name, filepath, fetched_provider, 'ok', time.perf_counter() - start_s
+            )
             return package_xml
 
         pkg_resources = self._distribution_cache.release_resources.get(pkg_name, {})
@@ -340,35 +377,42 @@ class CachedManifestProvider(object):
             manifest_content = self._sanitize_resource(filepath, pkg_resources[filepath])
             if manifest_content is not None:
                 self._distribution_cache.release_resources[pkg_name][filepath] = manifest_content
-            logger.debug('Loading %s for package "%s" from cache' % (filepath, pkg_name))
+            status = 'ok' if manifest_content is not None else 'not_found'
+            self.last_fetch_info = {'fetch_type': 'cache', 'status': status, 'provider': None}
+            self._emit_standalone_report(
+                dist_name, pkg_name, filepath, 'cache', status, time.perf_counter() - start_s
+            )
             return manifest_content
 
         if not self._manifest_providers:
+            self.last_fetch_info = {'fetch_type': 'cache_miss', 'status': 'not_found', 'provider': None}
             return None
 
         tag_key = self._get_release_failure_key(repo, pkg_name)
         req_key = (tag_key[0], tag_key[1], filepath)
         if tag_key in self._failed_tags or req_key in self._failed_requests:
-            logger.debug(
-                'Skipping %s fetch for package "%s" from "%s": already failed in this run'
-                % (filepath, pkg_name, repo.url)
+            self.last_fetch_info = {'fetch_type': 'cached_failure', 'status': 'skipped', 'provider': None}
+            self._emit_standalone_report(
+                dist_name, pkg_name, filepath, 'cached_failure', 'skipped', time.perf_counter() - start_s
             )
             return None
 
         # Use manifest providers to lazy load
         fetched = False
+        fetched_provider = None
         manifest_content = None
         errors = []
         permanent_failure = False
         for mp in self._manifest_providers:
+            mp_name = getattr(mp, '__name__', str(mp))
             try:
                 manifest_content = self._sanitize_resource(
                     filepath, mp(dist_name, repo, pkg_name, filepath)
                 )
                 fetched = True
+                fetched_provider = get_provider_name(mp)
                 break
             except PermanentManifestError as e:
-                mp_name = getattr(mp, '__name__', str(mp))
                 logger.debug(
                     'Permanent failure in "%s()": %s; skipping fallback providers' % (mp_name, e)
                 )
@@ -377,7 +421,6 @@ class CachedManifestProvider(object):
                 break
             except Exception as e:
                 # pass and try next manifest provider
-                mp_name = getattr(mp, '__name__', str(mp))
                 logger.debug('Skipped "%s()": %s' % (mp_name, e))
                 errors.append((mp_name, e, isinstance(e, SkipManifestProvider)))
 
@@ -397,12 +440,25 @@ class CachedManifestProvider(object):
                 logger.error(
                     'Failed to fetch %s for package "%s" from "%s"' %
                     (filepath, pkg_name, repo.url))
+            self.last_fetch_info = {'fetch_type': 'failed', 'status': 'failed', 'provider': None}
+            self._emit_standalone_report(
+                dist_name, pkg_name, filepath, 'failed', 'failed', time.perf_counter() - start_s
+            )
             return None
 
         # Populate the cache (including None for optional resources confirmed missing)
         if pkg_name not in self._distribution_cache.release_resources:
             self._distribution_cache.release_resources[pkg_name] = {}
         self._distribution_cache.release_resources[pkg_name][filepath] = manifest_content
+        status = 'ok' if manifest_content is not None else 'not_found'
+        self.last_fetch_info = {
+            'fetch_type': fetched_provider,
+            'status': status,
+            'provider': fetched_provider,
+        }
+        self._emit_standalone_report(
+            dist_name, pkg_name, filepath, fetched_provider, status, time.perf_counter() - start_s
+        )
         return manifest_content
 
 
@@ -412,6 +468,7 @@ class CachedSourceManifestProvider(object):
         self._distribution_cache = distribution_cache
         self._source_manifest_providers = source_manifest_providers
         self._failed_source_keys = set()
+        self.last_fetch_info = None
 
     def _get_source_query_params(self):
         config = getattr(self._distribution_cache, 'config', None)
@@ -442,11 +499,30 @@ class CachedSourceManifestProvider(object):
             return sanitize_xml(content)
         return sanitize_and_truncate_docs(content, max_length=self._get_max_lines(filepath))
 
+    def _emit_standalone_report(self, repo_name, fetch_type, status, duration_s, detail=None):
+        reporter = get_active_reporter()
+        if reporter is not None and reporter.has_enclosing_fetch():
+            return
+        report_fetch(
+            'source:repo',
+            repo_name,
+            fetch_type,
+            status=status,
+            duration_s=duration_s,
+            detail=detail,
+            level='top',
+        )
+
     def __call__(self, repo):
         assert repo.url
+        start_s = time.perf_counter()
+        self.last_fetch_info = None
+        fetched_provider = 'cache'
+
         repo_cache = self._distribution_cache.source_repo_resources.get(repo.name, None)
         if repo_cache is None:
             if not self._source_manifest_providers:
+                self.last_fetch_info = {'fetch_type': 'cache_miss', 'status': 'not_found', 'provider': None}
                 return None
             source_key = (repo.url, repo.version)
             is_cached_failure = (
@@ -456,18 +532,19 @@ class CachedSourceManifestProvider(object):
                 )
             )
             if is_cached_failure:
-                logger.debug(
-                    'Skipping source manifest fetch for repo "%s" (%s @ %s): previously failed'
-                    % (repo.name, repo.url, repo.version)
+                self.last_fetch_info = {'fetch_type': 'cached_failure', 'status': 'skipped', 'provider': None}
+                self._emit_standalone_report(
+                    repo.name, 'cached_failure', 'skipped', time.perf_counter() - start_s
                 )
                 return None
 
-            logger.debug(f"Internal Cache Miss for {repo.name} Loading from Source Manifest Providers")
             filepaths, metadata = self._get_source_query_params()
             # Use manifest providers to lazy load
             errors = []
             permanent_failure = False
+            fetched_provider = None
             for mp in self._source_manifest_providers or []:
+                mp_name = getattr(mp, '__name__', str(mp))
                 try:
                     try:
                         repo_cache = mp(repo, filepaths=filepaths, metadata=metadata)
@@ -477,7 +554,6 @@ class CachedSourceManifestProvider(object):
                         except TypeError:
                             repo_cache = mp(repo)
                 except PermanentManifestError as e:
-                    mp_name = getattr(mp, '__name__', str(mp))
                     logger.debug(
                         'Permanent failure in "%s()": %s; skipping fallback providers' % (mp_name, e)
                     )
@@ -486,12 +562,12 @@ class CachedSourceManifestProvider(object):
                     break
                 except Exception as e:
                     # pass and try next manifest provider
-                    mp_name = getattr(mp, '__name__', str(mp))
                     logger.debug('Skipped "%s()": %s' % (mp_name, e))
                     errors.append((mp_name, e, isinstance(e, SkipManifestProvider)))
                     continue
 
                 if repo_cache is not None:
+                    fetched_provider = get_provider_name(mp)
                     if hasattr(repo_cache, 'last_update_time') and repo_cache.last_update_time() is None:
                         repo_cache.set_last_update_time(datetime.datetime.now())
                     self._distribution_cache.source_repo_resources[repo.name] = repo_cache
@@ -526,8 +602,11 @@ class CachedSourceManifestProvider(object):
                         error=summary,
                         permanent=permanent_failure,
                     )
-        else:
-            logger.debug('Load package XMLs for repo "%s" from cache' % repo.name)
+                self.last_fetch_info = {'fetch_type': 'failed', 'status': 'failed', 'provider': None}
+                self._emit_standalone_report(
+                    repo.name, 'failed', 'failed', time.perf_counter() - start_s
+                )
+                return None
 
         # Sanitize/truncate and de-duplicate with the release resources so the YAML writer uses aliases
         if repo_cache is not None:
@@ -559,4 +638,16 @@ class CachedSourceManifestProvider(object):
                         package_name, pkg_entries['package_path'],
                         content, resource_type, increment_update_time=False
                     )
+            self.last_fetch_info = {
+                'fetch_type': fetched_provider,
+                'status': 'ok',
+                'provider': fetched_provider if fetched_provider != 'cache' else None,
+            }
+            self._emit_standalone_report(
+                repo.name,
+                fetched_provider,
+                'ok',
+                time.perf_counter() - start_s,
+                detail='packages=%d' % len(repo_cache),
+            )
         return repo_cache

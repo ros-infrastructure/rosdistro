@@ -37,6 +37,7 @@ import sys
 
 from rosdistro import logger
 from rosdistro.distribution_cache_generator import generate_distribution_caches
+from rosdistro.fetch_reporter import FetchReporter, use_reporter
 
 logging.basicConfig(level=logging.INFO)
 
@@ -85,17 +86,18 @@ def main(args=None):
         logger.level = logging.DEBUG
 
     config = args.config if args.config is not None else ('extended' if args.extended else None)
+    reporter = FetchReporter(debug=args.debug)
 
-    try:
-        generate_distribution_caches(
-            args.index, dist_names=args.dist_names, preclean=args.preclean,
-            ignore_local=args.ignore_local, include_source=args.include_source,
-            debug=args.debug, limit=args.limit, config=config,
-            output_dir='.')
-    except RuntimeError as e:
-        print(str(e), file=sys.stderr)
-        return 1
-
+    with use_reporter(reporter):
+        try:
+            generate_distribution_caches(
+                args.index, dist_names=args.dist_names, preclean=args.preclean,
+                ignore_local=args.ignore_local, include_source=args.include_source,
+                debug=args.debug, limit=args.limit, config=config,
+                output_dir='.')
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            return 1
 
 if __name__ == '__main__':
     sys.exit(main())

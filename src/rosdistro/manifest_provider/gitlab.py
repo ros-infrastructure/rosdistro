@@ -44,6 +44,7 @@ from urllib.parse import urlencode
 from catkin_pkg.package import parse_package_string
 
 from rosdistro import logger
+from rosdistro.fetch_reporter import report_instant_sub_fetch, report_sub_fetch
 from rosdistro.manifest_provider import (
     PermanentManifestError,
     SkipManifestProvider,
@@ -165,7 +166,6 @@ def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
         raise SkipManifestProvider('Cannot handle non-git repository.')
     server, path = repo.get_url_parts()
     if not server.endswith('gitlab.com') and server != ROSDISTRO_GITLAB_SERVER:
-        logger.debug('Skip non-gitlab url "%s"' % repo.url)
         raise SkipManifestProvider('can not handle non gitlab urls')
 
     resource = 'repository/files/%s/raw' % urlquote(filepath, safe='')
@@ -177,16 +177,13 @@ def gitlab_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml')
             return res.read().decode('utf-8')
     except HTTPError as e:
         if e.code == 404 and filepath != 'package.xml':
-            logger.debug('- File not found (%s), trying "%s"' % (e, e.filename))
             return None
-        logger.debug('- failed (%s), trying "%s"' % (e, e.filename))
         if _is_definitive_gitlab_failure(e, repo.url):
             raise PermanentManifestError(
                 'Failed to fetch "%s" from "%s": %s' % (filepath, repo.url, e)
             ) from e
         raise
-    except (URLError, TimeoutError, socket.timeout) as e:
-        logger.debug('- failed (%s), trying "%s"' % (e, getattr(e, 'filename', None) or repo.url))
+    except (URLError, TimeoutError, socket.timeout):
         raise
 
 
@@ -196,41 +193,45 @@ def gitlab_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, me
         raise SkipManifestProvider('Cannot handle non-git repository.')
     server, path = repo.get_url_parts()
     if not server.endswith('gitlab.com') and server != ROSDISTRO_GITLAB_SERVER:
-        logger.debug('Skip non-gitlab url "%s"' % repo.url)
         raise SkipManifestProvider('can not handle non gitlab urls')
 
-    # Resolve the version ref to a sha since we need to make multiple queries
-    attrs = {
-        'per_page': 1,
-        'ref_name': repo.version,
-    }
-    try:
-        commit_obj = next(_gitlab_paged_api_query(server, path, 'repository/commits', attrs))
-    except StopIteration:
-        msg = 'No commits found for ref "%s" in repository "%s"' % (repo.version, repo.url)
-        if is_unauthenticated_http_url(repo.url):
-            raise PermanentManifestError(msg)
-        raise RuntimeError(msg)
-    except HTTPError as e:
-        if _is_definitive_gitlab_failure(e, repo.url):
-            raise PermanentManifestError(
-                'Unable to fetch commits for ref "%s" from "%s": %s' % (repo.version, repo.url, e)
-            ) from e
-        raise
-    sha = commit_obj['id']
-    commit_date = commit_obj.get('committed_date') or commit_obj.get('created_at')
+    with report_sub_fetch('source:repo_tree', repo.name, 'gitlab') as ctx:
+        # Resolve the version ref to a sha since we need to make multiple queries
+        attrs = {
+            'per_page': 1,
+            'ref_name': repo.version,
+        }
+        try:
+            commit_obj = next(_gitlab_paged_api_query(server, path, 'repository/commits', attrs))
+        except StopIteration:
+            ctx.status = 'failed'
+            msg = 'No commits found for ref "%s" in repository "%s"' % (repo.version, repo.url)
+            if is_unauthenticated_http_url(repo.url):
+                raise PermanentManifestError(msg)
+            raise RuntimeError(msg)
+        except HTTPError as e:
+            ctx.status = 'failed'
+            if _is_definitive_gitlab_failure(e, repo.url):
+                raise PermanentManifestError(
+                    'Unable to fetch commits for ref "%s" from "%s": %s' % (repo.version, repo.url, e)
+                ) from e
+            raise
+        sha = commit_obj['id']
+        commit_date = commit_obj.get('committed_date') or commit_obj.get('created_at')
 
-    # Look for package.xml files and assets in the tree
-    attrs = {
-        'recursive': 'true',
-        'ref': sha,
-    }
-    blob_paths = [
-        obj['path']
-        for obj in _gitlab_paged_api_query(server, path, 'repository/tree', attrs)
-        if obj.get('type', 'blob') not in ('tree', 'commit')
-    ]
-    package_xml_paths, package_assets, root_files = partition_repo_tree(blob_paths)
+        # Look for package.xml files and assets in the tree
+        attrs = {
+            'recursive': 'true',
+            'ref': sha,
+        }
+        blob_paths = [
+            obj['path']
+            for obj in _gitlab_paged_api_query(server, path, 'repository/tree', attrs)
+            if obj.get('type', 'blob') not in ('tree', 'commit')
+        ]
+
+    with report_sub_fetch('source:partition_tree', repo.name, 'gitlab'):
+        package_xml_paths, package_assets, root_files = partition_repo_tree(blob_paths)
 
     cache = SourceRepositoryCache.from_ref(sha)
 
@@ -240,61 +241,79 @@ def gitlab_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, me
     # Fetch project info for configured metadata (stars, description, tags, etc.)
     if metadata is None or len(metadata) > 0:
         if metadata is None or any(k in metadata for k in GITLAB_REPO_METADATA_FIELDS):
-            try:
-                with _gitlab_api_query(server, path, '', {}) as res:
-                    project_json = json.loads(res.read().decode('utf-8'))
-                    for meta_key, api_field in GITLAB_REPO_METADATA_FIELDS.items():
-                        if meta_key == 'last_commit_time' and cache.get_metadata('last_commit_time') is not None:
-                            continue
-                        if (metadata is None or meta_key in metadata) and api_field in project_json:
-                            cache.set_metadata(meta_key, project_json[api_field])
-            except (URLError, TimeoutError, socket.timeout) as e:
-                logger.debug('- failed to load project info from %s: %s' % (path, e))
+            with report_sub_fetch('source:metadata:repo_info', repo.name, 'gitlab') as ctx:
+                try:
+                    with _gitlab_api_query(server, path, '', {}) as res:
+                        project_json = json.loads(res.read().decode('utf-8'))
+                        for meta_key, api_field in GITLAB_REPO_METADATA_FIELDS.items():
+                            if meta_key == 'last_commit_time' and cache.get_metadata('last_commit_time') is not None:
+                                continue
+                            if (metadata is None or meta_key in metadata) and api_field in project_json:
+                                cache.set_metadata(meta_key, project_json[api_field])
+                except (URLError, TimeoutError, socket.timeout):
+                    ctx.status = 'failed'
 
         for meta_key, candidates in ROOT_DOC_CANDIDATES.items():
             if metadata is None or meta_key in metadata:
-                for candidate in candidates:
-                    if candidate not in root_files:
-                        continue
-                    resource = 'repository/files/' + urlquote(candidate, safe='') + '/raw'
-                    try:
-                        with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
-                            doc_contents = res.read().decode('utf-8')
-                    except (URLError, TimeoutError, socket.timeout) as e:
-                        logger.debug('- failed to load %s from %s: %s' % (candidate, path, e))
-                        continue
-                    cache.set_metadata(meta_key, sanitize_and_truncate_docs(doc_contents))
-                    break
+                matching_candidates = [c for c in candidates if c in root_files]
+                if not matching_candidates:
+                    report_instant_sub_fetch(
+                        'source:metadata:%s' % meta_key, repo.name, 'gitlab',
+                        status='not_found', detail='not_in_tree',
+                    )
+                    continue
+                with report_sub_fetch('source:metadata:%s' % meta_key, repo.name, 'gitlab') as ctx:
+                    found_doc = False
+                    for candidate in matching_candidates:
+                        resource = 'repository/files/' + urlquote(candidate, safe='') + '/raw'
+                        try:
+                            with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
+                                doc_contents = res.read().decode('utf-8')
+                        except (URLError, TimeoutError, socket.timeout):
+                            continue
+                        cache.set_metadata(meta_key, sanitize_and_truncate_docs(doc_contents))
+                        found_doc = True
+                        break
+                    if not found_doc:
+                        ctx.status = 'failed'
 
     for package_xml_path in package_xml_paths:
         package_xml_filename = 'package.xml'
         resource_path = urlquote(
             package_xml_path + '/' + package_xml_filename if package_xml_path else package_xml_filename, safe='')
         resource = 'repository/files/' + resource_path + '/raw'
-        with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
-            package_xml = res.read().decode('utf-8')
-        name = parse_package_string(package_xml).name
+        pkg_target = '%s/%s' % (repo.name, package_xml_path) if package_xml_path else repo.name
+        with report_sub_fetch('source:package.xml', pkg_target, 'gitlab') as ctx:
+            with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
+                package_xml = res.read().decode('utf-8')
+            name = parse_package_string(package_xml).name
+            ctx.target = '%s/%s' % (repo.name, name)
         cache.add(name, package_xml_path, package_xml, package_xml_filename)
+        pkg_label = '%s/%s' % (repo.name, name)
         for filepath in filepaths:
             if filepath == package_xml_filename:
                 continue
             if filepath in PACKAGE_ASSET_LIST_RESOURCES:
-                cache.add(
-                    name,
-                    package_xml_path,
-                    package_assets.get(package_xml_path, {}).get(filepath, []),
-                    filepath,
+                assets = package_assets.get(package_xml_path, {}).get(filepath, [])
+                cache.add(name, package_xml_path, assets, filepath)
+                report_instant_sub_fetch(
+                    'source:%s' % filepath, pkg_label, 'gitlab',
+                    status='ok', detail='count=%d' % len(assets),
                 )
                 continue
             resource_path = urlquote(
                 package_xml_path + '/' + filepath if package_xml_path else filepath, safe='')
             resource = 'repository/files/' + resource_path + '/raw'
-            try:
-                with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
-                    contents = res.read().decode('utf-8')
-            except (URLError, TimeoutError, socket.timeout) as e:
-                logger.debug('- failed to load %s from %s: %s' % (filepath, path, e))
-                continue
+            with report_sub_fetch('source:%s' % filepath, pkg_label, 'gitlab') as ctx:
+                try:
+                    with _gitlab_api_query(server, path, resource, {'ref': sha}) as res:
+                        contents = res.read().decode('utf-8')
+                except HTTPError as e:
+                    ctx.status = 'not_found' if e.code == 404 else 'failed'
+                    continue
+                except (URLError, TimeoutError, socket.timeout):
+                    ctx.status = 'failed'
+                    continue
             cache.add(name, package_xml_path, contents, filepath)
 
     return cache

@@ -39,6 +39,7 @@ from contextlib import contextmanager
 from catkin_pkg.package import InvalidPackage, parse_package_string
 
 from rosdistro.common import rmtree
+from rosdistro.fetch_reporter import report_instant_sub_fetch, report_sub_fetch
 from rosdistro.manifest_provider import SkipManifestProvider
 from rosdistro.manifest_provider.cache import (
     DEFAULT_SOURCE_FILEPATHS,
@@ -76,62 +77,94 @@ def git_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metad
         raise SkipManifestProvider('Cannot handle non-git repository.')
     xmlpath = 'package.xml'
     try:
-        with _temp_git_clone(repo.url, repo.version) as git_repo_path:
-            logger.debug(f'Cloning repository {repo.url} to get source info')
-            git_client = Git(git_repo_path)
-            # Include the git hash in our cache dictionary.
-            git_hash = git_client.command('rev-parse', 'HEAD')['output']
-            cache = SourceRepositoryCache.from_ref(git_hash)
+        clone_ctx = _temp_git_clone(repo.url, repo.version)
+        entered = False
+        try:
+            with report_sub_fetch('source:repo_tree', repo.name, 'git') as ctx:
+                try:
+                    git_repo_path = clone_ctx.__enter__()
+                    entered = True
+                    git_client = Git(git_repo_path)
+                    # Include the git hash in our cache dictionary.
+                    git_hash = git_client.command('rev-parse', 'HEAD')['output']
+                    cache = SourceRepositoryCache.from_ref(git_hash)
+                    local_files = list_local_repo_files(git_repo_path)
+                except BaseException:
+                    ctx.status = 'failed'
+                    raise
 
-            package_xml_paths, package_assets, root_files = partition_repo_tree(
-                list_local_repo_files(git_repo_path)
-            )
+            with report_sub_fetch('source:partition_tree', repo.name, 'git'):
+                package_xml_paths, package_assets, root_files = partition_repo_tree(local_files)
 
             if metadata is None or 'last_commit_time' in metadata:
-                commit_time_res = git_client.command('log', '-1', '--format=%cI', 'HEAD')
-                if commit_time_res.get('returncode', 0) == 0 and commit_time_res.get('output'):
-                    cache.set_metadata('last_commit_time', commit_time_res['output'].strip())
+                with report_sub_fetch('source:metadata:last_commit_time', repo.name, 'git') as ctx:
+                    commit_time_res = git_client.command('log', '-1', '--format=%cI', 'HEAD')
+                    if commit_time_res.get('returncode', 0) == 0 and commit_time_res.get('output'):
+                        cache.set_metadata('last_commit_time', commit_time_res['output'].strip())
+                    else:
+                        ctx.status = 'not_found'
 
             for meta_key, candidates in ROOT_DOC_CANDIDATES.items():
                 if metadata is None or meta_key in metadata:
-                    for candidate in candidates:
-                        if candidate not in root_files:
-                            continue
-                        candidate_path = os.path.join(git_repo_path, candidate)
-                        if os.path.isfile(candidate_path):
-                            with open(candidate_path, 'r') as f:
-                                cache.set_metadata(meta_key, sanitize_and_truncate_docs(f.read()))
-                            break
+                    matching_candidates = [c for c in candidates if c in root_files]
+                    if not matching_candidates:
+                        report_instant_sub_fetch(
+                            'source:metadata:%s' % meta_key, repo.name, 'git',
+                            status='not_found', detail='not_in_tree',
+                        )
+                        continue
+                    with report_sub_fetch('source:metadata:%s' % meta_key, repo.name, 'git') as ctx:
+                        found_doc = False
+                        for candidate in matching_candidates:
+                            candidate_path = os.path.join(git_repo_path, candidate)
+                            if os.path.isfile(candidate_path):
+                                with open(candidate_path, 'r') as f:
+                                    cache.set_metadata(meta_key, sanitize_and_truncate_docs(f.read()))
+                                found_doc = True
+                                break
+                        if not found_doc:
+                            ctx.status = 'not_found'
 
             # Find filepath files inside the repo.
             for package_path in package_xml_paths:
                 local_pkg_dir = os.path.join(git_repo_path, *package_path.split('/')) if package_path else git_repo_path
-                with open(os.path.join(local_pkg_dir, xmlpath), 'r') as f:
-                    package_xml = f.read()
-                try:
-                    name = parse_package_string(package_xml).name
-                except InvalidPackage:
-                    raise RuntimeError('Unable to parse %s file found in %s' % (xmlpath, repo.url))
+                pkg_target = '%s/%s' % (repo.name, package_path) if package_path else repo.name
+                with report_sub_fetch('source:package.xml', pkg_target, 'git') as ctx:
+                    with open(os.path.join(local_pkg_dir, xmlpath), 'r') as f:
+                        package_xml = f.read()
+                    try:
+                        name = parse_package_string(package_xml).name
+                    except InvalidPackage:
+                        ctx.status = 'failed'
+                        raise RuntimeError('Unable to parse %s file found in %s' % (xmlpath, repo.url))
+                    ctx.target = '%s/%s' % (repo.name, name)
                 cache.add(name, package_path, package_xml, xmlpath)
+                pkg_label = '%s/%s' % (repo.name, name)
                 for filepath in filepaths:
                     if filepath == xmlpath:
                         continue
                     if filepath in PACKAGE_ASSET_LIST_RESOURCES:
-                        cache.add(
-                            name,
-                            package_path,
-                            package_assets.get(package_path, {}).get(filepath, []),
-                            filepath,
+                        assets = package_assets.get(package_path, {}).get(filepath, [])
+                        cache.add(name, package_path, assets, filepath)
+                        report_instant_sub_fetch(
+                            'source:%s' % filepath, pkg_label, 'git',
+                            status='ok', detail='count=%d' % len(assets),
                         )
                         continue
                     repo_filename = os.path.join(local_pkg_dir, *filepath.split('/'))
                     if not os.path.exists(repo_filename):
-                        logger.debug(f'- git load of {filepath} from {repo.url} at {repo.version} skipped because it did not exist.')
+                        report_instant_sub_fetch(
+                            'source:%s' % filepath, pkg_label, 'git',
+                            status='not_found', detail='not_in_tree',
+                        )
                         continue
-                    with open(repo_filename, 'r') as f:
-                        logger.debug('- git load %s from %s' % (filepath, repo_filename))
-                        contents = f.read()
-                        cache.add(name, package_path, contents, filepath)
+                    with report_sub_fetch('source:%s' % filepath, pkg_label, 'git'):
+                        with open(repo_filename, 'r') as f:
+                            contents = f.read()
+                    cache.add(name, package_path, contents, filepath)
+        finally:
+            if entered:
+                clone_ctx.__exit__(None, None, None)
 
     except Exception as e:
         raise RuntimeError('Unable to fetch source files: %s' % (e))

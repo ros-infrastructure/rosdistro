@@ -61,6 +61,13 @@ class FormatVersionError(Exception):
 
 
 from .distribution import Distribution  # noqa
+from .fetch_reporter import (  # noqa
+    FetchReporter,
+    format_fetch_event,
+    get_active_reporter,
+    get_provider_name,
+    use_reporter,
+)
 from .distribution_cache import (  # noqa
     CacheConfig,
     DEFAULT_EXTENDED_CONFIG,
