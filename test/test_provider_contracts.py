@@ -668,10 +668,8 @@ def test_gitlab_source_optional_file_transient_error_quirk():
     assert 'README.md' not in cache['pkg_a']
 
 
-def test_tar_source_dot_prefix_normalization_quirk():
-    # QUIRK(commit 5): tar_source_manifest_provider currently uses `m.name.lstrip('./')`,
-    # which strips the leading dot from `./.rosindex_ignore`, turning it into `rosindex_ignore`
-    # so the root ignore marker fails to take effect.
+def test_tar_source_dot_prefix_normalization_preserves_hidden_ignore_markers():
+    # Leading `./` prefixes are stripped without mangling hidden filenames like `.rosindex_ignore`.
     tar_bytes = _build_tar_bytes({
         './.rosindex_ignore': '',
         './pkg_a/package.xml': _pkg_xml('pkg_a'),
@@ -682,4 +680,4 @@ def test_tar_source_dot_prefix_normalization_quirk():
             filepaths=(),
             metadata=(),
         )
-    assert set(cache.keys()) == {'pkg_a'}
+    assert set(cache.keys()) == set()
