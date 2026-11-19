@@ -660,8 +660,13 @@ def test_github_source_transient_and_ssh_errors_still_fall_back_to_git():
     provider = CachedSourceManifestProvider(
         cache, [github_mp.github_source_manifest_provider, git_fallback]
     )
-    with patch('rosdistro.manifest_provider.github.urlopen',
-               return_value=_make_mock_http_response(json.dumps({'sha': 'abc', 'truncated': True, 'tree': []}))):
+    def fake_truncated_urlopen(req, timeout=None):
+        url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+        if '/commits/' in url:
+            return _make_mock_http_response('a' * 40)
+        return _make_mock_http_response(json.dumps({'sha': 'abc', 'truncated': True, 'tree': []}))
+
+    with patch('rosdistro.manifest_provider.github.urlopen', side_effect=fake_truncated_urlopen):
         result = provider(https_repo)
     assert result is expected_cache
     assert git_fallback.call_count == 1
@@ -688,7 +693,7 @@ def test_github_source_quotes_version_in_tree_url():
             pass
 
     assert seen_urls == [
-        'https://api.github.com/repos/org/special/git/trees/release/v1%2Bbeta%232?recursive=1'
+        'https://api.github.com/repos/org/special/commits/release/v1%2Bbeta%232'
     ]
 
 

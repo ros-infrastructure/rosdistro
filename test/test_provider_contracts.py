@@ -1,9 +1,4 @@
-"""Offline contract tests pinning the observable behaviour of all manifest providers.
-
-Every test in this file runs offline against module patch points so later
-refactoring commits can verify exact compatibility. Known quirks that later
-commits intentionally fix are annotated with ``# QUIRK(commit N)``.
-"""
+"""Offline contract tests pinning the observable behaviour of all manifest providers."""
 
 from contextlib import contextmanager
 import io
@@ -401,6 +396,9 @@ def test_source_provider_contracts_discovery_metadata_assets_and_labels(tmp_path
     def gh_urlopen(req, timeout=None):
         url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
         gh_requested.append(url)
+        if '/commits/' in url:
+            assert req.get_header('Accept') == 'application/vnd.github.sha'
+            return _mock_http_response(commit_sha)
         if '/git/trees/' in url:
             return _mock_http_response(json.dumps({
                 'sha': tree_sha,
@@ -414,7 +412,7 @@ def test_source_provider_contracts_discovery_metadata_assets_and_labels(tmp_path
                 'topics': ['ros2'],
                 'pushed_at': '2026-03-01T00:00:00Z',
             }))
-        raw_prefix = f'https://raw.githubusercontent.com/org/my_repo/{tree_sha}/'
+        raw_prefix = f'https://raw.githubusercontent.com/org/my_repo/{commit_sha}/'
         if url.startswith(raw_prefix):
             rel = url[len(raw_prefix):]
             if rel in files:
@@ -426,8 +424,9 @@ def test_source_provider_contracts_discovery_metadata_assets_and_labels(tmp_path
             patch('rosdistro.manifest_provider.github.urlopen', side_effect=gh_urlopen):
         gh_cache = github_source_manifest_provider(_src_repo('https://github.com/org/my_repo.git'))
 
-    # QUIRK(commit 13): github_source_manifest_provider currently stores the tree SHA as _ref
-    assert gh_cache.ref() == tree_sha
+    # GitHub source stores the resolved commit SHA as _ref (not the tree SHA).
+    assert gh_cache.ref() == commit_sha
+    assert gh_cache.ref() != tree_sha
     assert set(gh_cache.keys()) == {'pkg_a'}
     assert gh_cache['pkg_a']['package_path'] == 'pkg_a'
     assert gh_cache.msg_files('pkg_a') == ['msg/Alpha.msg']
@@ -605,8 +604,13 @@ def test_source_http_error_classification():
             github_source_manifest_provider(gh_ssh)
         assert not isinstance(exc_info.value, PermanentManifestError)
 
-    with patch('rosdistro.manifest_provider.github.urlopen',
-               return_value=_mock_http_response(json.dumps({'sha': 'a' * 40, 'truncated': True, 'tree': []}))):
+    def _gh_truncated(req, timeout=None):
+        url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+        if '/commits/' in url:
+            return _mock_http_response('a' * 40)
+        return _mock_http_response(json.dumps({'sha': 'b' * 40, 'truncated': True, 'tree': []}))
+
+    with patch('rosdistro.manifest_provider.github.urlopen', side_effect=_gh_truncated):
         with pytest.raises(RuntimeError) as exc_info:
             github_source_manifest_provider(gh_https)
         assert not isinstance(exc_info.value, PermanentManifestError)
@@ -724,3 +728,108 @@ def test_root_doc_max_lines_truncation_and_apply_config_invalidation():
     assert 'my_repo' in c_default.source_repo_resources
     c_default.apply_config(cfg_150)
     assert c_default.source_repo_resources == {}
+
+
+def test_github_commit_sha_pinned_hash_422_and_post_ttl_validation():
+    import datetime
+    from rosdistro import CacheConfig, DistributionCache
+
+    commit_sha = 'a' * 40
+    tree_sha = 'b' * 40
+    pkg_xml = _pkg_xml('pkg_a', '1.0.0')
+
+    # 1. Pinned 40-char commit hash skips /commits/{ref} and queries /git/trees/{hash} directly
+    seen_urls = []
+
+    def pinned_urlopen(req, timeout=None):
+        url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+        seen_urls.append(url)
+        if '/git/trees/' in url:
+            return _mock_http_response(json.dumps({
+                'sha': tree_sha,
+                'truncated': False,
+                'tree': [{'path': 'package.xml', 'type': 'blob'}],
+            }))
+        if url.endswith('/package.xml'):
+            return _mock_http_response(pkg_xml)
+        raise HTTPError(url, 404, 'Not Found', {}, io.BytesIO(b''))
+
+    with patch('rosdistro.manifest_provider.github.urlopen', side_effect=pinned_urlopen):
+        pinned_cache = github_source_manifest_provider(
+            _src_repo('https://github.com/org/my_repo.git', version=commit_sha),
+            filepaths=(),
+            metadata=(),
+        )
+    assert pinned_cache.ref() == commit_sha
+    assert not any('/commits/' in u for u in seen_urls)
+    assert any(f'/git/trees/{commit_sha}?recursive=1' in u for u in seen_urls)
+
+    # 2. HTTP 422 "No commit found for SHA" on unauthenticated https raises PermanentManifestError
+    def err_422(req, timeout=None):
+        url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+        raise HTTPError(
+            url, 422, 'Unprocessable Entity', {},
+            io.BytesIO(b'{"message": "No commit found for SHA: nonexistent-branch"}'),
+        )
+
+    with patch('rosdistro.manifest_provider.github.urlopen', side_effect=err_422):
+        with pytest.raises(PermanentManifestError):
+            github_source_manifest_provider(
+                _src_repo('https://github.com/org/my_repo.git', version='nonexistent-branch'),
+                filepaths=(),
+                metadata=(),
+            )
+
+    # 3. An unchanged GitHub source entry is KEPT after TTL expiry because _ref matches ls-remote
+    def branch_urlopen(req, timeout=None):
+        url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+        if '/commits/' in url:
+            return _mock_http_response(commit_sha)
+        if '/git/trees/' in url:
+            return _mock_http_response(json.dumps({
+                'sha': tree_sha,
+                'truncated': False,
+                'tree': [{'path': 'package.xml', 'type': 'blob'}],
+            }))
+        if url.endswith('/package.xml'):
+            return _mock_http_response(pkg_xml)
+        raise HTTPError(url, 404, 'Not Found', {}, io.BytesIO(b''))
+
+    with patch('rosdistro.manifest_provider.github.urlopen', side_effect=branch_urlopen):
+        crawled = github_source_manifest_provider(
+            _src_repo('https://github.com/org/my_repo.git', version='main'),
+            filepaths=(),
+            metadata=(),
+        )
+    assert crawled.ref() == commit_sha
+    # Backdate _last_update_time past min_update_delta to force ls-remote validation
+    crawled.set_last_update_time(datetime.datetime.now() - datetime.timedelta(hours=10))
+
+    dist_data = {
+        'type': 'distribution',
+        'version': 2,
+        'repositories': {
+            'my_repo': {
+                'source': {
+                    'type': 'git',
+                    'url': 'https://github.com/org/my_repo.git',
+                    'version': 'main',
+                },
+            },
+        },
+    }
+    dist_cache = DistributionCache(
+        'rolling',
+        distribution_file_data=dist_data,
+        config=CacheConfig({'source_package_resources': {'package.xml': True}, 'min_update_delta': 60}),
+    )
+    dist_cache.source_repo_resources['my_repo'] = crawled
+
+    with patch(
+        'rosdistro.distribution_cache._resolve_git_remote_ref_details',
+        return_value=(commit_sha, None, {'returncode': 0, 'output': commit_sha + '\trefs/heads/main\n'}),
+    ):
+        dist_cache.update_distribution([dist_data])
+
+    assert 'my_repo' in dist_cache.source_repo_resources
+    assert dist_cache.source_repo_resources['my_repo'].ref() == commit_sha

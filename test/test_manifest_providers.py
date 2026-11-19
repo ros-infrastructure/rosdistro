@@ -102,6 +102,8 @@ def mock_get_url_contents(req):
     # can properly close it during 'unmock_urlopen'.
     if re.search('.*package.xml$', haystack) is not None:
         fname = 'test/github-genmsg-package.xml'
+    elif '/commits/' in haystack:
+        return 'a189fc78558e7276df59d2961cfe4f8b4de08a8b'
     elif re.search(r'.*/repos/[^/]+/[^/]+$', haystack) is not None:
         return '{"stargazers_count": 42}'
     else:
@@ -117,8 +119,8 @@ def mock_get_url_contents(req):
 def test_github_source():
     repo_cache = rosdistro.manifest_provider.github.github_source_manifest_provider(_genmsg_source_repo())
 
-    # This hash corresponds to the 0.5.7 tag.
-    assert repo_cache.ref() == '81b66fe5eb00043c43894ddeee07e738d9b9712f'
+    # This commit SHA corresponds to the 0.5.11 tag (not the tree SHA in github-tree-data.json).
+    assert repo_cache.ref() == 'a189fc78558e7276df59d2961cfe4f8b4de08a8b'
 
     assert '' == repo_cache['genmsg']['package_path']
     assert '<version>0.5.11</version>' in repo_cache['genmsg']['package.xml']
@@ -502,9 +504,13 @@ def test_github_source_metadata_assets_and_ignore_markers():
     }
     requested_urls = []
 
+    commit_sha = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
+
     def fake_get_url(req):
         url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
         requested_urls.append(url)
+        if '/commits/' in url:
+            return commit_sha
         if '/git/trees/' in url:
             return json.dumps(tree_payload)
         if url.endswith('/repos/ros/genmsg'):
@@ -528,6 +534,7 @@ def test_github_source_metadata_assets_and_ignore_markers():
         repo_cache = rosdistro.manifest_provider.github.github_source_manifest_provider(
             _genmsg_source_repo()
         )
+        assert repo_cache.ref() == commit_sha
         assert list(repo_cache.keys()) == ['pkg_a']
         assert repo_cache.stars() == 88
         assert repo_cache.description() == 'Multi-package repo'
@@ -552,12 +559,15 @@ def test_github_source_metadata_assets_and_ignore_markers():
             {'path': 'pkg_a/package.xml', 'type': 'blob'},
         ],
     }
-    with patch(
-        'rosdistro.manifest_provider.github._get_url_contents',
-        side_effect=lambda req: json.dumps(root_ignored_tree)
-        if '/git/trees/' in (req.get_full_url() if hasattr(req, 'get_full_url') else str(req))
-        else '{}',
-    ):
+    def fake_ignored_url(req):
+        url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
+        if '/commits/' in url:
+            return commit_sha
+        if '/git/trees/' in url:
+            return json.dumps(root_ignored_tree)
+        return '{}'
+
+    with patch('rosdistro.manifest_provider.github._get_url_contents', side_effect=fake_ignored_url):
         ignored_cache = rosdistro.manifest_provider.github.github_source_manifest_provider(
             _genmsg_source_repo()
         )

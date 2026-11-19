@@ -478,6 +478,8 @@ def test_real_providers_sub_resource_and_operation_tracing(tmp_path):
         if 'raw.githubusercontent.com/org/gh_repo-release' in url and rate_limit_calls['n'] == 0:
             rate_limit_calls['n'] += 1
             raise HTTPError(url, 429, 'Too Many Requests', {'Retry-After': '0.01'}, io.BytesIO(b'rate limit'))
+        if '/commits/' in url:
+            return _make_mock_http_response('a' * 40)
         if '/git/trees/' in url:
             return _make_mock_http_response(json.dumps(gh_tree))
         if url.endswith('/repos/org/gh_repo'):

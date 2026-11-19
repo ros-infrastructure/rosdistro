@@ -60,6 +60,7 @@ from rosdistro.manifest_provider.engine import (
     fetch_source_cache,
 )
 from rosdistro.manifest_provider.tree import DEFAULT_SOURCE_FILEPATHS
+from rosdistro.vcs import ref_is_hash
 
 GITHUB_USER = os.getenv('GITHUB_USER', None)
 GITHUB_PASSWORD = os.getenv('GITHUB_PASSWORD', None)
@@ -105,6 +106,10 @@ def _is_definitive_github_failure(err, repo_url):
     code = getattr(err, 'code', None)
     if code in (404, 410, 451):
         return True
+    if code == 422:
+        body = read_http_error_body(err).lower()
+        if 'no commit found' in body:
+            return True
     return _is_permanent_403(err)
 
 
@@ -222,10 +227,37 @@ class _GitHubSession(ManifestSession):
         if query.ref_is_tag and not query.repo.has_remote_tag(query.ref):
             raise PermanentManifestError('specified tag "%s" is not a git tag' % query.ref)
 
+    def _resolve_commit_sha(self):
+        ref_str = str(self._query.ref)
+        if ref_is_hash(ref_str):
+            return ref_str
+        quoted_version = urlquote(ref_str, safe='/')
+        commit_url = 'https://api.github.com/repos/%s/commits/%s' % (self._path, quoted_version)
+        req = _build_github_api_request(commit_url)
+        req.add_header('Accept', 'application/vnd.github.sha')
+        try:
+            body = _get_url_contents(req).strip()
+        except HTTPError as e:
+            if _is_definitive_github_failure(e, self._query.repo.url):
+                raise PermanentManifestError(
+                    'Unable to resolve commit SHA from %s: %s' % (commit_url, e)
+                ) from e
+            raise RuntimeError('Unable to resolve commit SHA from %s: %s' % (commit_url, e)) from e
+        except (URLError, TimeoutError, socket.timeout) as e:
+            raise RuntimeError('Unable to resolve commit SHA from %s: %s' % (commit_url, e)) from e
+
+        if body.startswith('{'):
+            commit_json = json.loads(body)
+            body = str(commit_json['sha']).strip()
+        if not body:
+            raise RuntimeError('Empty commit SHA returned from %s' % commit_url)
+        return body
+
     def list_files(self):
-        quoted_version = urlquote(str(self._query.ref), safe='/')
+        commit_sha = self._resolve_commit_sha()
+        quoted_sha = urlquote(commit_sha, safe='/')
         tree_url = 'https://api.github.com/repos/%s/git/trees/%s?recursive=1' % (
-            self._path, quoted_version
+            self._path, quoted_sha
         )
         req = _build_github_api_request(tree_url)
         try:
@@ -242,7 +274,7 @@ class _GitHubSession(ManifestSession):
         if tree_json['truncated']:
             raise RuntimeError('JSON tree is truncated, must perform full clone.')
 
-        self.ref = tree_json['sha']
+        self.ref = commit_sha
         return [
             obj['path']
             for obj in tree_json['tree']
