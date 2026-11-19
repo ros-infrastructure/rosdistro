@@ -38,17 +38,13 @@ import json
 import os
 import socket
 import time
-
-from urllib.request import urlopen, Request
-from urllib.error import HTTPError
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote as urlquote
-
-from catkin_pkg.package import parse_package_string
+from urllib.request import Request, urlopen
 
 from rosdistro import logger
 from rosdistro.cache_profiler import sanitize_url_for_trace, trace_operation
-from rosdistro.fetch_reporter import report_instant_sub_fetch, report_sub_fetch
+from rosdistro.fetch_reporter import report_sub_fetch
 from rosdistro.manifest_provider import (
     PermanentManifestError,
     SkipManifestProvider,
@@ -57,14 +53,13 @@ from rosdistro.manifest_provider import (
     is_unauthenticated_http_url,
     read_http_error_body,
 )
-from rosdistro.manifest_provider.sanitize import sanitize_and_truncate_docs
-from rosdistro.manifest_provider.tree import (
-    DEFAULT_SOURCE_FILEPATHS,
-    PACKAGE_ASSET_LIST_RESOURCES,
-    ROOT_DOC_CANDIDATES,
-    partition_repo_tree,
+from rosdistro.manifest_provider.engine import (
+    ManifestProvider,
+    ManifestSession,
+    fetch_release_file,
+    fetch_source_cache,
 )
-from rosdistro.source_repository_cache import SourceRepositoryCache
+from rosdistro.manifest_provider.tree import DEFAULT_SOURCE_FILEPATHS
 
 GITHUB_USER = os.getenv('GITHUB_USER', None)
 GITHUB_PASSWORD = os.getenv('GITHUB_PASSWORD', None)
@@ -207,167 +202,121 @@ def _get_url_contents(url):
             backoff *= 1.5
 
 
-def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
-    assert repo.version
-    if getattr(repo, 'type', 'git') != 'git':
-        raise SkipManifestProvider('Cannot handle non-git repository.')
-    server, path = repo.get_url_parts()
-    if not server.endswith('github.com'):
-        raise SkipManifestProvider('can not handle non github urls')
-
-    release_tag = repo.get_release_tag(pkg_name)
-
-    if not repo.has_remote_tag(release_tag):
-        raise PermanentManifestError('specified tag "%s" is not a git tag' % release_tag)
-
-    url = 'https://raw.githubusercontent.com/%s/%s/%s' % (path, urlquote(release_tag, safe='/'), filepath)
-    try:
-        return _get_url_contents(url)
-    except HTTPError as e:
-        if e.code == 404 and filepath != 'package.xml':
-            return None
-        if _is_definitive_github_failure(e, repo.url):
-            raise PermanentManifestError('Failed to fetch "%s": %s' % (url, e)) from e
-        raise e
-    except (URLError, TimeoutError, socket.timeout) as e:
-        raise RuntimeError('Failed to fetch "%s": %s' % (url, e))
-
-
-def github_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metadata=None):
-    if getattr(repo, 'type', 'git') != 'git':
-        raise SkipManifestProvider('Cannot handle non-git repository.')
-    server, path = repo.get_url_parts()
-    if not server.endswith('github.com'):
-        raise SkipManifestProvider('can not handle non github urls')
-
-    quoted_version = urlquote(str(repo.version), safe='/')
-    tree_url = 'https://api.github.com/repos/%s/git/trees/%s?recursive=1' % (path, quoted_version)
-    req = Request(tree_url)
+def _build_github_api_request(url):
+    req = Request(url)
     if GITHUB_TOKEN:
-        req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
+        req.add_header('Authorization', f'Bearer {GITHUB_TOKEN}')
     if GITHUB_USER and GITHUB_PASSWORD:
         credential_pair = '%s:%s' % (GITHUB_USER, GITHUB_PASSWORD)
         authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
         req.add_header('Authorization', authheader)
-    with report_sub_fetch('source:repo_tree', repo.name, 'github') as ctx:
+    return req
+
+
+class _GitHubSession(ManifestSession):
+
+    def __init__(self, query):
+        self._query = query
+        self._server, self._path = query.repo.get_url_parts()
+        self.ref = None
+        if query.ref_is_tag and not query.repo.has_remote_tag(query.ref):
+            raise PermanentManifestError('specified tag "%s" is not a git tag' % query.ref)
+
+    def list_files(self):
+        quoted_version = urlquote(str(self._query.ref), safe='/')
+        tree_url = 'https://api.github.com/repos/%s/git/trees/%s?recursive=1' % (
+            self._path, quoted_version
+        )
+        req = _build_github_api_request(tree_url)
         try:
             tree_json = json.loads(_get_url_contents(req))
         except HTTPError as e:
-            ctx.status = 'failed'
-            if _is_definitive_github_failure(e, repo.url):
+            if _is_definitive_github_failure(e, self._query.repo.url):
                 raise PermanentManifestError(
                     'Unable to fetch JSON tree from %s: %s' % (tree_url, e)
                 ) from e
-            raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e))
+            raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e)) from e
         except (URLError, TimeoutError, socket.timeout) as e:
-            ctx.status = 'failed'
-            raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e))
+            raise RuntimeError('Unable to fetch JSON tree from %s: %s' % (tree_url, e)) from e
 
         if tree_json['truncated']:
-            ctx.status = 'failed'
             raise RuntimeError('JSON tree is truncated, must perform full clone.')
 
-    blob_paths = [
-        obj['path']
-        for obj in tree_json['tree']
-        if obj.get('type', 'blob') not in ('tree', 'commit')
-    ]
-    blob_path_set = {p.replace('\\', '/').strip('/') for p in blob_paths if p and p.strip('/')}
-    with report_sub_fetch('source:partition_tree', repo.name, 'github'):
-        package_xml_paths, package_assets, root_files = partition_repo_tree(blob_paths)
+        self.ref = tree_json['sha']
+        return [
+            obj['path']
+            for obj in tree_json['tree']
+            if obj.get('type', 'blob') not in ('tree', 'commit')
+        ]
 
-    cache = SourceRepositoryCache.from_ref(tree_json['sha'])
+    def read_file(self, path):
+        ref_segment = (
+            self.ref if self.ref is not None else urlquote(str(self._query.ref), safe='/')
+        )
+        url = 'https://raw.githubusercontent.com/%s/%s/%s' % (self._path, ref_segment, path)
+        try:
+            return _get_url_contents(url)
+        except HTTPError as e:
+            if e.code == 404:
+                return None
+            raise
+        except (URLError, TimeoutError, socket.timeout) as e:
+            raise RuntimeError('Failed to fetch "%s": %s' % (url, e)) from e
 
-    # Fetch repository info for configured metadata (stars, description, tags, last_commit_time, etc.)
-    if metadata is None or len(metadata) > 0:
-        if metadata is None or any(k in metadata for k in GITHUB_REPO_METADATA_FIELDS):
-            repo_url = 'https://api.github.com/repos/%s' % path
-            repo_req = Request(repo_url)
-            if GITHUB_TOKEN:
-                repo_req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
-            if GITHUB_USER and GITHUB_PASSWORD:
-                credential_pair = '%s:%s' % (GITHUB_USER, GITHUB_PASSWORD)
-                authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
-                repo_req.add_header('Authorization', authheader)
-            with report_sub_fetch('source:metadata:repo_info', repo.name, 'github') as ctx:
+    def fetch_metadata(self, keys):
+        result = {}
+        if keys is None or any(k in GITHUB_REPO_METADATA_FIELDS for k in keys):
+            repo_url = 'https://api.github.com/repos/%s' % self._path
+            repo_req = _build_github_api_request(repo_url)
+            with report_sub_fetch(
+                '%s:metadata:repo_info' % self._query.label,
+                self._query.repo.name,
+                'github',
+            ) as ctx:
                 try:
                     repo_json = json.loads(_get_url_contents(repo_req))
                     for meta_key, api_field in GITHUB_REPO_METADATA_FIELDS.items():
-                        if (metadata is None or meta_key in metadata) and api_field in repo_json:
-                            cache.set_metadata(meta_key, repo_json[api_field])
+                        if (keys is None or meta_key in keys) and api_field in repo_json:
+                            result[meta_key] = repo_json[api_field]
                 except (URLError, TimeoutError, socket.timeout):
                     ctx.status = 'failed'
+        return result
 
-        for meta_key, candidates in ROOT_DOC_CANDIDATES.items():
-            if metadata is None or meta_key in metadata:
-                matching_candidates = [c for c in candidates if c in root_files]
-                if not matching_candidates:
-                    report_instant_sub_fetch(
-                        'source:metadata:%s' % meta_key, repo.name, 'github',
-                        status='not_found', detail='not_in_tree',
-                    )
-                    continue
-                with report_sub_fetch('source:metadata:%s' % meta_key, repo.name, 'github') as ctx:
-                    found_doc = False
-                    for candidate in matching_candidates:
-                        doc_url = 'https://raw.githubusercontent.com/%s/%s/%s' % (path, cache.ref(), candidate)
-                        try:
-                            doc_contents = _get_url_contents(doc_url)
-                        except (URLError, TimeoutError, socket.timeout):
-                            continue
-                        cache.set_metadata(meta_key, sanitize_and_truncate_docs(doc_contents))
-                        found_doc = True
-                        break
-                    if not found_doc:
-                        ctx.status = 'failed'
 
-    for package_xml_path in package_xml_paths:
-        package_xml_filename = 'package.xml'
-        url = 'https://raw.githubusercontent.com/%s/%s/%s' % \
-            (path, cache.ref(), package_xml_path + '/' + package_xml_filename if package_xml_path else package_xml_filename)
-        pkg_target = '%s/%s' % (repo.name, package_xml_path) if package_xml_path else repo.name
-        with report_sub_fetch('source:package.xml', pkg_target, 'github') as ctx:
-            try:
-                package_xml = _get_url_contents(url)
-            except (URLError, TimeoutError, socket.timeout) as e:
-                ctx.status = 'failed'
-                raise RuntimeError('Unable to fetch %s from %s: %s' % (package_xml_filename, url, e))
-            name = parse_package_string(package_xml).name
-            ctx.target = '%s/%s' % (repo.name, name)
-        cache.add(name, package_xml_path, package_xml, package_xml_filename)
-        pkg_label = '%s/%s' % (repo.name, name)
-        for filepath in filepaths:
-            if filepath == package_xml_filename:
-                continue
-            if filepath in PACKAGE_ASSET_LIST_RESOURCES:
-                assets = package_assets.get(package_xml_path, {}).get(filepath, [])
-                cache.add(name, package_xml_path, assets, filepath)
-                report_instant_sub_fetch(
-                    'source:%s' % filepath, pkg_label, 'github',
-                    status='ok', detail='count=%d' % len(assets),
-                )
-                continue
-            rel_target = (package_xml_path + '/' + filepath if package_xml_path else filepath).replace('\\', '/').strip('/')
-            if rel_target not in blob_path_set:
-                report_instant_sub_fetch(
-                    'source:%s' % filepath, pkg_label, 'github',
-                    status='not_found', detail='not_in_tree',
-                )
-                continue
-            url = 'https://raw.githubusercontent.com/%s/%s/%s' % \
-                (path, cache.ref(), package_xml_path + '/' + filepath if package_xml_path else filepath)
-            with report_sub_fetch('source:%s' % filepath, pkg_label, 'github') as ctx:
-                try:
-                    contents = _get_url_contents(url)
-                except HTTPError as e:
-                    if e.code == 404:
-                        ctx.status = 'not_found'
-                        continue
-                    ctx.status = 'failed'
-                    raise e
-                except (URLError, TimeoutError, socket.timeout) as e:
-                    ctx.status = 'failed'
-                    raise RuntimeError('Unable to fetch %s from %s: %s' % (filepath, url, e))
-            cache.add(name, package_xml_path, contents, filepath)
+class GitHubProvider(ManifestProvider):
 
-    return cache
+    name = 'github'
+
+    def accepts(self, repo):
+        if getattr(repo, 'type', 'git') != 'git':
+            raise SkipManifestProvider('Cannot handle non-git repository.')
+        server, _ = repo.get_url_parts()
+        if not server.endswith('github.com'):
+            raise SkipManifestProvider('can not handle non github urls')
+
+    def open(self, query):
+        return _GitHubSession(query)
+
+    def is_permanent_error(self, err, repo):
+        return _is_definitive_github_failure(err, repo.url)
+
+    def missing_is_permanent(self, repo):
+        return is_unauthenticated_http_url(repo.url)
+
+
+GITHUB = GitHubProvider()
+
+
+def github_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
+    assert repo.version
+    return fetch_release_file(GITHUB, repo, pkg_name, filepath)
+
+
+github_manifest_provider._unified_provider = GITHUB
+
+
+def github_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metadata=None):
+    return fetch_source_cache(GITHUB, repo, filepaths=filepaths, metadata=metadata)
+
+
+github_source_manifest_provider._unified_provider = GITHUB
