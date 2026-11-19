@@ -565,7 +565,7 @@ def _noop_context():
 def generate_distribution_caches(
     index, dist_names=None, preclean=False,
     ignore_local=False, include_source=False, debug=False, limit=None, config=None,
-    output_dir=None, profiler=None,
+    output_dir=None, profiler=None, strict=False,
 ):
     active_profiler = profiler
     if active_profiler is None:
@@ -604,7 +604,7 @@ def generate_distribution_caches(
                             ignore_local=ignore_local, include_source=include_source,
                             debug=debug, limit=limit, config=config,
                             neighbor_caches=neighbor_pool, cache_dir=output_dir,
-                            profiler=active_profiler)
+                            profiler=active_profiler, strict=strict)
                     except RuntimeError as e:
                         errors.append(str(e))
                         continue
@@ -627,7 +627,7 @@ def generate_distribution_caches(
 def generate_distribution_cache(
     index, dist_name, preclean=False, ignore_local=False,
     include_source=False, debug=False, limit=None, config=None,
-    neighbor_caches=None, cache_dir=None, profiler=None,
+    neighbor_caches=None, cache_dir=None, profiler=None, strict=False,
 ):
     active_profiler = profiler
     if active_profiler is None:
@@ -648,13 +648,14 @@ def generate_distribution_cache(
                 index, dist_name, preclean=preclean, ignore_local=ignore_local,
                 include_source=include_source, debug=debug, limit=limit, config=config,
                 neighbor_caches=neighbor_caches, cache_dir=cache_dir, active_profiler=active_profiler,
+                strict=strict,
             )
 
 
 def _generate_distribution_cache_impl(
     index, dist_name, preclean=False, ignore_local=False,
     include_source=False, debug=False, limit=None, config=None,
-    neighbor_caches=None, cache_dir=None, active_profiler=None,
+    neighbor_caches=None, cache_dir=None, active_profiler=None, strict=False,
 ):
     cache_config = CacheConfig.from_input(config, include_source=include_source, limit=limit)
     if preclean:
@@ -743,11 +744,19 @@ def _generate_distribution_cache_impl(
                 if resource_name == 'package.xml':
                     if not content:
                         errors.append('%s: missing package.xml file for package "%s"' % (dist_name, pkg_name))
+                        if has_release_cache_dict and pkg_name in cache.release_resources:
+                            cache.release_resources[pkg_name].pop('package.xml', None)
+                            if set(cache.release_resources[pkg_name].keys()) <= {'version'}:
+                                del cache.release_resources[pkg_name]
                         break
                     try:
                         pkg = parse_package_string(content)
                     except InvalidPackage as e:
                         errors.append('%s: invalid package.xml file for package "%s": %s' % (dist_name, pkg_name, e))
+                        if has_release_cache_dict and pkg_name in cache.release_resources:
+                            cache.release_resources[pkg_name].pop('package.xml', None)
+                            if set(cache.release_resources[pkg_name].keys()) <= {'version'}:
+                                del cache.release_resources[pkg_name]
                         break
                     if not re.match(r'^%s(-[\dA-z~\+\.]+)?$' % re.escape(pkg.version), repo.version):
                         errors.append(
@@ -901,7 +910,15 @@ def _generate_distribution_cache_impl(
         )
 
     if errors:
-        raise RuntimeError('\n'.join(errors))
+        if strict:
+            raise RuntimeError('\n'.join(errors))
+        logger.warning(
+            'Completed cache build for "%s" with %d release package error(s) '
+            '(continuing; pass --strict to treat as fatal):',
+            dist_name, len(errors),
+        )
+        for error in errors:
+            logger.error(error)
 
     return cache
 

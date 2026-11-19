@@ -858,7 +858,7 @@ def test_cli_writes_profiling_even_on_build_error(tmp_path, monkeypatch, capsys)
 
     with patch('rosdistro.Distribution.default_manifest_providers', [failing_rel]):
         rc = build_cache_main([
-            index_path, 'rolling', '--profile-folded', str(folded_path),
+            index_path, 'rolling', '--strict', '--profile-folded', str(folded_path),
         ])
 
     assert rc == 1

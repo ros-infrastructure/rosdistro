@@ -78,6 +78,9 @@ def parse_args(args=None):
         '--limit', type=int, default=None,
         help='Limit the number of packages/repositories to scan (useful for testing)')
     add(
+        '--strict', action='store_true', default=False,
+        help='Fail and skip writing a distribution cache if any release package.xml is missing, invalid, or has a version mismatch')
+    add(
         '--profile', action='store_true', default=False,
         help='Collect OpenTelemetry profiling timings and print a timing summary report')
     add(
@@ -130,7 +133,7 @@ def main(args=None):
                         args.index, dist_names=args.dist_names, preclean=args.preclean,
                         ignore_local=args.ignore_local, include_source=args.include_source,
                         debug=args.debug, limit=args.limit, config=config,
-                        output_dir='.')
+                        output_dir='.', strict=args.strict)
                 except RuntimeError as e:
                     print(str(e), file=sys.stderr)
                     rc = 1

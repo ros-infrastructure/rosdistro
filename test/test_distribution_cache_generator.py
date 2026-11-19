@@ -814,7 +814,7 @@ def test_cli_build_cache_writes_completed_distros_when_another_distro_errors(tmp
 
     def fake_release_mp(dist_name, repo, pkg_name, filepath='package.xml'):
         if dist_name == 'distro_b':
-            # Missing package.xml triggers RuntimeError for distro_b only
+            # Missing package.xml triggers RuntimeError for distro_b in --strict mode
             return None
         if filepath == 'package.xml':
             return _make_pkg_xml(pkg_name)
@@ -826,7 +826,7 @@ def test_cli_build_cache_writes_completed_distros_when_another_distro_errors(tmp
 
     with patch('rosdistro.Distribution.default_manifest_providers', [fake_release_mp]), \
          patch('rosdistro.Distribution.default_source_manifest_providers', [fake_source_mp]):
-        rc = main([index_path, 'distro_a', 'distro_b', 'distro_c', '--extended'])
+        rc = main([index_path, 'distro_a', 'distro_b', 'distro_c', '--extended', '--strict'])
 
     assert rc == 1
     for ok_dist in ('distro_a', 'distro_c'):
@@ -836,4 +836,140 @@ def test_cli_build_cache_writes_completed_distros_when_another_distro_errors(tmp
         assert (tmp_path / f'{ok_dist}-extended-cache.yaml.gz').exists()
     assert not (tmp_path / 'distro_b-cache.yaml').exists()
     assert not (tmp_path / 'distro_b-extended-cache.yaml').exists()
+
+
+def test_cli_build_cache_tolerates_release_package_errors_by_default(tmp_path, monkeypatch, caplog):
+    import logging
+    from rosdistro.cli.rosdistro_build_cache import main
+
+    monkeypatch.chdir(tmp_path)
+    schema = _load_schema()
+    dist_dir = tmp_path / 'hydro'
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    dist_yaml = dist_dir / 'distribution.yaml'
+    dist_yaml.write_text(yaml.safe_dump({
+        'type': 'distribution',
+        'version': 2,
+        'repositories': {
+            'repo_ok': {
+                'release': {
+                    'packages': ['pkg_ok'],
+                    'tags': {'release': 'release/hydro/{package}/{version}'},
+                    'url': 'https://example.com/repo_ok-release.git',
+                    'version': '1.0.0-1',
+                },
+                'source': {
+                    'type': 'git',
+                    'url': 'https://example.com/repo_ok.git',
+                    'version': 'main',
+                },
+            },
+            'repo_missing': {
+                'release': {
+                    'packages': ['pkg_missing'],
+                    'tags': {'release': 'release/hydro/{package}/{version}'},
+                    'url': 'https://example.com/repo_missing-release.git',
+                    'version': '1.0.0-1',
+                },
+            },
+            'repo_invalid': {
+                'release': {
+                    'packages': ['pkg_invalid'],
+                    'tags': {'release': 'release/hydro/{package}/{version}'},
+                    'url': 'https://example.com/repo_invalid-release.git',
+                    'version': '1.0.0-1',
+                },
+            },
+            'repo_mismatch': {
+                'release': {
+                    'packages': ['pkg_mismatch'],
+                    'tags': {'release': 'release/hydro/{package}/{version}'},
+                    'url': 'https://example.com/repo_mismatch-release.git',
+                    'version': '1.0.0-1',
+                },
+            },
+        },
+    }))
+    index_path = tmp_path / 'index.yaml'
+    index_path.write_text(yaml.safe_dump({
+        'type': 'index',
+        'version': 4,
+        'distributions': {
+            'hydro': {'distribution': ['hydro/distribution.yaml']},
+        },
+    }))
+
+    def fake_release_mp(dist_name, repo, pkg_name, filepath='package.xml'):
+        if pkg_name == 'pkg_missing':
+            return None
+        if pkg_name == 'pkg_invalid' and filepath == 'package.xml':
+            return '<package format="2"><name>pkg_invalid</name></package>'
+        if pkg_name == 'pkg_mismatch' and filepath == 'package.xml':
+            return _make_pkg_xml('pkg_mismatch', version='2.0.0')
+        if filepath == 'package.xml':
+            return _make_pkg_xml(pkg_name, version='1.0.0')
+        return f'# {pkg_name} {filepath}'
+
+    def fake_source_mp(repo, filepaths=None, metadata=None):
+        return _make_source_cache_for_pkg('pkg_ok', '4' * 40)
+
+    with caplog.at_level(logging.WARNING, logger='rosdistro'), \
+         patch('rosdistro.Distribution.default_manifest_providers', [fake_release_mp]), \
+         patch('rosdistro.Distribution.default_source_manifest_providers', [fake_source_mp]):
+        rc = main([str(index_path), 'hydro', '--extended'])
+
+    # Default mode logs release package errors as non-fatal, writes the cache, and exits 0
+    assert not rc
+    for fname in (
+        'hydro-cache.yaml',
+        'hydro-cache.yaml.gz',
+        'hydro-extended-cache.yaml',
+        'hydro-extended-cache.yaml.gz',
+    ):
+        assert (tmp_path / fname).exists()
+
+    ext = yaml.safe_load((tmp_path / 'hydro-extended-cache.yaml').read_text())
+    validate(instance=ext, schema=schema)
+    assert 'pkg_ok' in ext['release_resources']
+    assert 'pkg_mismatch' in ext['release_resources']
+    # Failed missing/invalid packages should not leave broken or empty version-only stubs
+    assert 'pkg_missing' not in ext['release_resources']
+    assert 'pkg_invalid' not in ext['release_resources']
+    assert 'repo_ok' in ext['source_repo_resources']
+
+    legacy = yaml.safe_load((tmp_path / 'hydro-cache.yaml').read_text())
+    assert 'pkg_ok' in legacy['release_package_xmls']
+    assert 'pkg_missing' not in legacy['release_package_xmls']
+    assert 'pkg_invalid' not in legacy['release_package_xmls']
+
+    log_text = caplog.text
+    assert 'missing package.xml file for package "pkg_missing"' in log_text
+    assert 'invalid package.xml file for package "pkg_invalid"' in log_text
+    assert 'different version in package.xml (2.0.0) for package "pkg_mismatch"' in log_text
+
+
+def test_cli_build_cache_fatal_distro_error_still_fails_in_default_mode(tmp_path, monkeypatch):
+    from rosdistro.cli.rosdistro_build_cache import main
+
+    monkeypatch.chdir(tmp_path)
+    index_path = _write_multi_distro_index(tmp_path, {'distro_a': 'pkg_a'})
+
+    def fake_release_mp(dist_name, repo, pkg_name, filepath='package.xml'):
+        if filepath == 'package.xml':
+            return _make_pkg_xml(pkg_name)
+        return f'# {pkg_name} {filepath}'
+
+    def fake_source_mp(repo, filepaths=None, metadata=None):
+        return _make_source_cache_for_pkg('pkg_a', '5' * 40)
+
+    with patch('rosdistro.Distribution.default_manifest_providers', [fake_release_mp]), \
+         patch('rosdistro.Distribution.default_source_manifest_providers', [fake_source_mp]):
+        rc = main([index_path, 'distro_a', 'nonexistent_distro', '--extended'])
+
+    # Unbuildable distro (unknown distribution) still returns exit code 1, while distro_a is written
+    assert rc == 1
+    assert (tmp_path / 'distro_a-cache.yaml').exists()
+    assert (tmp_path / 'distro_a-extended-cache.yaml').exists()
+    assert not (tmp_path / 'nonexistent_distro-cache.yaml').exists()
+
 
