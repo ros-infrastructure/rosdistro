@@ -31,29 +31,15 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import inspect
-
 from .distribution_cache import ResourceNotCrawledError
 from .manifest_provider.bitbucket import bitbucket_manifest_provider
+from .manifest_provider.chain import call_release_provider
 from .manifest_provider.git import git_manifest_provider, git_source_manifest_provider
 from .manifest_provider.github import github_manifest_provider, github_source_manifest_provider
 from .manifest_provider.gitlab import gitlab_manifest_provider, gitlab_source_manifest_provider
 from .manifest_provider.tar import tar_manifest_provider, tar_source_manifest_provider
 from .package import Package
 from . import logger
-
-
-def _accepts_filepath(mp):
-    try:
-        sig = inspect.signature(mp)
-    except (TypeError, ValueError):
-        return True
-    positional = [
-        p for p in sig.parameters.values()
-        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    ]
-    has_varargs = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values())
-    return has_varargs or len(positional) >= 4
 
 
 class Distribution(object):
@@ -182,12 +168,9 @@ class Distribution(object):
             final_exception = None
             for mp in self._manifest_providers:
                 try:
-                    if _accepts_filepath(mp):
-                        content = mp(self._distribution_file.name, repo, pkg_name, filepath)
-                    elif filepath == 'package.xml':
-                        content = mp(self._distribution_file.name, repo, pkg_name)
-                    else:
-                        content = None
+                    content = call_release_provider(
+                        mp, self._distribution_file.name, repo, pkg_name, filepath
+                    )
                 except Exception as e:
                     # pass and try next manifest provider
                     logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', str(mp)), e))
