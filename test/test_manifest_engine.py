@@ -181,7 +181,7 @@ def test_engine_tree_query_discovery_assets_metadata_and_not_in_tree():
     assert cache.stars() == 42
     assert cache.description() == 'Desc'
     assert cache.tags() == ['ros2']
-    assert cache.readme() == '# Root README'
+    assert cache.readme() == '# Root README\n'
     assert cache.contributing() is None
     assert cache['pkg_a']['README.md'] == '# pkg_a README\n'
     assert 'CHANGELOG.rst' not in cache['pkg_a']

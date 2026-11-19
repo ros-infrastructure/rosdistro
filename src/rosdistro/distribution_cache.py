@@ -663,6 +663,7 @@ class DistributionCache(object):
                 for r in enabled_src_res
             ) or any(
                 not old_cfg.is_source_metadata_enabled(m)
+                or old_cfg.get_source_metadata_max_lines(m) != new_cfg.get_source_metadata_max_lines(m)
                 for m in enabled_src_meta
             )
             if not new_cfg.fallback_src_to_doc:

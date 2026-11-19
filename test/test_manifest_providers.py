@@ -533,8 +533,8 @@ def test_github_source_metadata_assets_and_ignore_markers():
         assert repo_cache.description() == 'Multi-package repo'
         assert repo_cache.tags() == ['ros2', 'msgs']
         assert repo_cache.last_commit_time() == '2026-03-15T08:30:00Z'
-        assert repo_cache.readme() == '# Multi-pkg Repository Root README'
-        assert 'Truncated content at 100 of 120 lines' in repo_cache.contributing()
+        assert repo_cache.readme() == root_readme
+        assert repo_cache.contributing() == long_contributing
         # Verify CONTRIBUTING.md was NOT requested because it was not in root_files
         assert not any(u.endswith('/CONTRIBUTING.md') for u in requested_urls)
 
@@ -605,8 +605,8 @@ def test_gitlab_source_metadata_assets_and_ignore_markers():
         repo_cache = gitlab_source_manifest_provider(_tracetools_analysis_source_repo())
         assert list(repo_cache.keys()) == ['ros2trace_analysis']
         assert repo_cache.last_commit_time() == '2026-02-20T14:00:00Z'
-        assert repo_cache.contributing() == '# GitLab Contributing'
-        assert repo_cache.readme() == 'GitLab Root README'
+        assert repo_cache.contributing() == '# GitLab Contributing\n'
+        assert repo_cache.readme() == 'GitLab Root README\n'
         assert repo_cache.msg_files('ros2trace_analysis') == ['msg/TraceEvent.msg']
         assert repo_cache.srv_files('ros2trace_analysis') == ['srv/Analyze.srv']
         assert repo_cache.action_files('ros2trace_analysis') == ['action/RunTrace.action']
@@ -661,8 +661,8 @@ def test_git_and_tar_source_metadata_assets_and_ignore_markers(tmp_path):
         assert list(git_cache.keys()) == ['genmsg']
         assert git_cache.ref() == 'deadbeef1234567890'
         assert git_cache.last_commit_time() == '2026-04-05T16:45:00+00:00'
-        assert git_cache.contributing() == '# Local Contributing Guide'
-        assert git_cache.readme() == '# Local Repo Root README'
+        assert git_cache.contributing() == '# Local Contributing Guide\n'
+        assert git_cache.readme() == '# Local Repo Root README\n'
         assert git_cache.msg_files('genmsg') == ['msg/State.msg']
         assert git_cache.srv_files('genmsg') == ['srv/Trigger.srv']
         assert git_cache.action_files('genmsg') == ['action/Move.action']
@@ -684,8 +684,8 @@ def test_git_and_tar_source_metadata_assets_and_ignore_markers(tmp_path):
                side_effect=lambda req, timeout=None: _make_mock_http_response(tar_bytes)):
         tar_cache = tar_source_manifest_provider(_genmsg_source_tarball())
         assert list(tar_cache.keys()) == ['genmsg']
-        assert tar_cache.contributing() == '# Tar Contributing'
-        assert tar_cache.readme() == '# Tar Root README'
+        assert tar_cache.contributing() == '# Tar Contributing\n'
+        assert tar_cache.readme() == '# Tar Root README\n'
         assert tar_cache.msg_files('genmsg') == ['msg/State.msg']
         assert tar_cache.srv_files('genmsg') == ['srv/Trigger.srv']
         assert tar_cache.action_files('genmsg') == ['action/Move.action']

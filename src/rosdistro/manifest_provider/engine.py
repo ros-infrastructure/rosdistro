@@ -40,7 +40,6 @@ from catkin_pkg.package import InvalidPackage, parse_package_string
 
 from rosdistro.fetch_reporter import report_instant_sub_fetch, report_sub_fetch
 from rosdistro.manifest_provider import PermanentManifestError, SkipManifestProvider
-from rosdistro.manifest_provider.sanitize import sanitize_and_truncate_docs
 from rosdistro.manifest_provider.tree import (
     DEFAULT_SOURCE_FILEPATHS,
     PACKAGE_ASSET_LIST_RESOURCES,
@@ -290,9 +289,7 @@ def _execute_tree_query(provider, session, query):
                         continue
                     if doc_contents is None:
                         continue
-                    # Root-doc truncation is preserved here until commit 12 moves it solely
-                    # into CachedSourceManifestProvider.
-                    metadata[meta_key] = sanitize_and_truncate_docs(doc_contents)
+                    metadata[meta_key] = doc_contents
                     found_doc = True
                     break
                 if not found_doc:

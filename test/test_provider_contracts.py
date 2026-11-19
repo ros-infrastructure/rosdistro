@@ -441,9 +441,9 @@ def test_source_provider_contracts_discovery_metadata_assets_and_labels(tmp_path
     assert gh_cache.description() == 'GH desc'
     assert gh_cache.tags() == ['ros2']
     assert gh_cache.last_commit_time() == '2026-03-01T00:00:00Z'
-    # QUIRK(commit 12): raw providers currently truncate root docs at 100 lines
-    assert 'Truncated content at 100 of 120 lines' in gh_cache.readme()
-    assert 'Truncated content at 100 of 120 lines' in gh_cache.contributing()
+    # Raw providers preserve full root docs; truncation happens in CachedSourceManifestProvider.
+    assert gh_cache.readme() == files['README.md']
+    assert gh_cache.contributing() == files['CONTRIBUTING.rst']
 
     gh_pairs = _extract_sub_fetch_pairs(gh_stream.getvalue())
     for expected in (
@@ -495,9 +495,8 @@ def test_source_provider_contracts_discovery_metadata_assets_and_labels(tmp_path
     assert gl_cache.description() == 'GL desc'
     assert gl_cache.tags() == ['ros2']
     assert gl_cache.last_commit_time() == '2026-03-02T00:00:00Z'
-    # QUIRK(commit 12): raw providers currently truncate root docs at 100 lines
-    assert 'Truncated content at 100 of 120 lines' in gl_cache.readme()
-    assert 'Truncated content at 100 of 120 lines' in gl_cache.contributing()
+    assert gl_cache.readme() == files['README.md']
+    assert gl_cache.contributing() == files['CONTRIBUTING.rst']
 
     gl_pairs = _extract_sub_fetch_pairs(gl_stream.getvalue())
     for expected in (
@@ -543,9 +542,8 @@ def test_source_provider_contracts_discovery_metadata_assets_and_labels(tmp_path
     assert git_cache.action_files('pkg_a') == ['action/Go.action']
     assert git_cache.launch_files('pkg_a') == ['launch/run.launch.py']
     assert git_cache.last_commit_time() == '2026-03-04T00:00:00+00:00'
-    # QUIRK(commit 12): raw providers currently truncate root docs at 100 lines
-    assert 'Truncated content at 100 of 120 lines' in git_cache.readme()
-    assert 'Truncated content at 100 of 120 lines' in git_cache.contributing()
+    assert git_cache.readme() == files['README.md']
+    assert git_cache.contributing() == files['CONTRIBUTING.rst']
 
     git_pairs = _extract_sub_fetch_pairs(git_stream.getvalue())
     for expected in (
@@ -571,9 +569,8 @@ def test_source_provider_contracts_discovery_metadata_assets_and_labels(tmp_path
     assert tar_cache.srv_files('pkg_a') == ['srv/Query.srv']
     assert tar_cache.action_files('pkg_a') == ['action/Go.action']
     assert tar_cache.launch_files('pkg_a') == ['launch/run.launch.py']
-    # QUIRK(commit 12): raw providers currently truncate root docs at 100 lines
-    assert 'Truncated content at 100 of 120 lines' in tar_cache.readme()
-    assert 'Truncated content at 100 of 120 lines' in tar_cache.contributing()
+    assert tar_cache.readme() == files['README.md']
+    assert tar_cache.contributing() == files['CONTRIBUTING.rst']
 
     tar_pairs = _extract_sub_fetch_pairs(tar_stream.getvalue())
     for expected in (
@@ -680,3 +677,50 @@ def test_tar_source_dot_prefix_normalization_preserves_hidden_ignore_markers():
             metadata=(),
         )
     assert set(cache.keys()) == set()
+
+
+def test_root_doc_max_lines_truncation_and_apply_config_invalidation():
+    from rosdistro import CacheConfig, DistributionCache
+    from rosdistro.manifest_provider.cache import CachedSourceManifestProvider
+
+    long_doc = '\n'.join(f'Line {i}' for i in range(1, 121))
+    tar_bytes = _build_tar_bytes({
+        'README.md': long_doc,
+        'CONTRIBUTING.md': long_doc,
+        'pkg_a/package.xml': _pkg_xml('pkg_a'),
+    })
+    dist_data = {'type': 'distribution', 'version': 2, 'repositories': {}}
+    repo = _src_repo('https://example.com/my_repo.tar.gz', repo_type='tar', version=None)
+
+    with patch('rosdistro.manifest_provider.tar.urlopen', return_value=_mock_http_response(tar_bytes)):
+        # Default extended config truncates root docs at 100 lines
+        c_default = DistributionCache('rolling', distribution_file_data=dist_data, config=CacheConfig.extended())
+        rc_default = CachedSourceManifestProvider(c_default, [tar_source_manifest_provider])(repo)
+        assert 'Truncated content at 100 of 120 lines' in rc_default.readme()
+        assert 'Truncated content at 100 of 120 lines' in rc_default.contributing()
+
+        # max_lines=150 preserves all 120 lines
+        cfg_150 = CacheConfig({
+            'source_package_resources': {'package.xml': True},
+            'source_repo_metadata': {'readme': {'max_lines': 150}, 'contributing': {'max_lines': 150}},
+        })
+        c_150 = DistributionCache('rolling', distribution_file_data=dist_data, config=cfg_150)
+        rc_150 = CachedSourceManifestProvider(c_150, [tar_source_manifest_provider])(repo)
+        assert 'Truncated content' not in rc_150.readme()
+        assert len(rc_150.readme().splitlines()) == 120
+        assert len(rc_150.contributing().splitlines()) == 120
+
+        # max_lines=None preserves all 120 lines without truncation
+        cfg_none = CacheConfig({
+            'source_package_resources': {'package.xml': True},
+            'source_repo_metadata': {'readme': {'max_lines': None}, 'contributing': {'max_lines': None}},
+        })
+        c_none = DistributionCache('rolling', distribution_file_data=dist_data, config=cfg_none)
+        rc_none = CachedSourceManifestProvider(c_none, [tar_source_manifest_provider])(repo)
+        assert 'Truncated content' not in rc_none.readme()
+        assert len(rc_none.readme().splitlines()) == 120
+
+    # Changing source_repo_metadata.<key>.max_lines in apply_config invalidates source cache
+    assert 'my_repo' in c_default.source_repo_resources
+    c_default.apply_config(cfg_150)
+    assert c_default.source_repo_resources == {}
