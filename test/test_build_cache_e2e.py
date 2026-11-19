@@ -3,11 +3,14 @@ import json
 import os
 import shutil
 import tempfile
+import pytest
 import yaml
 from jsonschema import validate
 
 from rosdistro.distribution_cache_generator import generate_distribution_caches
 
+
+@pytest.mark.network
 def test_build_cache_e2e_rolling_schema():
     # Use the default rolling index URL
     index_url = 'https://raw.githubusercontent.com/ros/rosdistro/master/index-v4.yaml'

@@ -27,14 +27,17 @@ from rosdistro.source_repository_specification import SourceRepositorySpecificat
 from rosdistro.distribution_cache import CacheConfig
 
 
+@pytest.mark.network
 def test_bitbucket():
     assert '</package>' in bitbucket_manifest_provider('indigo', _rospeex_release_repo(), 'rospeex_msgs')
 
 
+@pytest.mark.network
 def test_gitlab():
     assert '</package>' in gitlab_manifest_provider('foxy', _tracetools_analysis_release_repo(), 'tracetools_analysis')
 
 
+@pytest.mark.network
 def test_cached():
     class FakeDistributionCache(object):
         def __init__(self):
@@ -45,24 +48,29 @@ def test_cached():
     assert '</package>' in cache('melodic', _genmsg_release_repo(), 'genmsg')
 
 
+@pytest.mark.network
 def test_git():
     assert '</package>' in git_manifest_provider('melodic', _genmsg_release_repo(), 'genmsg')
 
 
+@pytest.mark.network
 def test_git_legacy():
     rosdistro.vcs.Git._client_version = '1.7.0'
     assert '</package>' in git_manifest_provider('melodic', _genmsg_release_repo(), 'genmsg')
     rosdistro.vcs.Git._client_version = None
 
 
+@pytest.mark.network
 def test_github():
     assert '</package>' in rosdistro.manifest_provider.github.github_manifest_provider('melodic', _genmsg_release_repo(), 'genmsg')
 
 
+@pytest.mark.network
 def test_tar():
     assert '</package>' in rosdistro.manifest_provider.tar.tar_manifest_provider('melodic', _genmsg_release_tarball(), 'genmsg')
 
 
+@pytest.mark.network
 def test_git_source():
     repo_cache = git_source_manifest_provider(_genmsg_source_repo())
 
@@ -117,6 +125,7 @@ def test_github_source():
     assert repo_cache._data.get('_stars') == 42
 
 
+@pytest.mark.network
 def test_gitlab_source():
     repo_cache = gitlab_source_manifest_provider(_tracetools_analysis_source_repo())
 
@@ -128,12 +137,14 @@ def test_gitlab_source():
     assert type(repo_cache._data.get('_stars')) is int
 
 
+@pytest.mark.network
 def test_git_source_multi():
     repo_cache = git_source_manifest_provider(_ros_source_repo())
     assert repo_cache.ref()
     assert repo_cache['roslib']['package_path'] == 'core/roslib'
 
 
+@pytest.mark.network
 def test_tar_source():
     repo_cache = rosdistro.manifest_provider.tar.tar_source_manifest_provider(_genmsg_source_tarball())
 
