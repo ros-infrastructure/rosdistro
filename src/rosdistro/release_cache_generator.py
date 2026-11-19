@@ -38,9 +38,8 @@ import sys
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
 
-import yaml
-
 from . import _get_dist_file_data, get_cached_release, get_index, get_release_cache
+from .distribution_cache import load_cache_yaml
 from .release_cache import ReleaseCache
 
 
@@ -122,7 +121,7 @@ def _get_cached_release(index, dist_name, preclean=False):
                 with open('%s-cache.yaml' % dist_name, 'r') as f:
                     yaml_str = f.read()
             if yaml_str is not None:
-                data = yaml.safe_load(yaml_str)
+                data = load_cache_yaml(yaml_str)
                 cache = ReleaseCache(dist_name, data)
             if not cache:
                 print('- trying to fetch cache')

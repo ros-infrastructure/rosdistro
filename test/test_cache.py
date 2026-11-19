@@ -368,3 +368,162 @@ def test_package_path_posix_normalization():
 
     reloaded_v3 = yaml.safe_load(yaml.dump(v3_data, Dumper=CacheYamlDumper))
     assert reloaded_v3['source_repo_resources']['bar_repo']['bar_repo']['package_path'] == 'core/bar_repo'
+
+
+def test_load_cache_yaml_legacy_python2_string_tags():
+    from rosdistro import load_cache_yaml
+
+    legacy_yaml = (
+        'type: cache\n'
+        'version: 2\n'
+        'name: hydro\n'
+        'release_package_xmls:\n'
+        '  ar_sys: !!python/str "<?xml version=\\"1.0\\"?><package><name>ar_sys</name></package>"\n'
+        '  uni_pkg: !!python/unicode "<?xml version=\\"1.0\\"?><package><name>uni_pkg</name>'
+        '<maintainer email=\\"a@b.c\\">Ren\\u00e9</maintainer></package>"\n'
+    )
+
+    for payload in (legacy_yaml, legacy_yaml.encode('utf-8')):
+        loaded = load_cache_yaml(payload)
+        assert loaded['name'] == 'hydro'
+        assert type(loaded['release_package_xmls']['ar_sys']) is str
+        assert '<name>ar_sys</name>' in loaded['release_package_xmls']['ar_sys']
+        assert type(loaded['release_package_xmls']['uni_pkg']) is str
+        assert 'René' in loaded['release_package_xmls']['uni_pkg']
+
+    # Unsafe Python object tags must still be strictly rejected
+    for unsafe_yaml in (
+        'bad: !!python/object/apply:os.system ["echo unsafe"]',
+        'bad: !!python/name:os.system',
+    ):
+        with pytest.raises(yaml.constructor.ConstructorError):
+            load_cache_yaml(unsafe_yaml)
+
+    # PyYAML's global SafeLoader must remain unmodified
+    with pytest.raises(yaml.constructor.ConstructorError):
+        yaml.safe_load('x: !!python/str "should still fail"')
+
+
+def test_legacy_python2_tagged_cache_loads_in_get_cache_and_build_cache(tmp_path, monkeypatch):
+    import gzip
+    import json
+    from unittest.mock import patch
+
+    from rosdistro.cli.rosdistro_build_cache import main as build_cache_main
+
+    dist_dir = tmp_path / 'hydro'
+    dist_dir.mkdir()
+    dist_data = {
+        'type': 'distribution',
+        'version': 2,
+        'repositories': {
+            'ar_sys': {
+                'release': {
+                    'packages': ['ar_sys'],
+                    'tags': {'release': 'release/hydro/{package}/{version}'},
+                    'url': 'https://github.com/Sahloul/arsys_release.git',
+                    'version': '1.0.4-0',
+                },
+            },
+        },
+    }
+    (dist_dir / 'distribution.yaml').write_text(yaml.safe_dump(dist_data))
+
+    ar_sys_xml = (
+        '<?xml version="1.0"?><package><name>ar_sys</name><version>1.0.4</version>'
+        '<description>ar_sys</description><maintainer email="a@example.com">René</maintainer>'
+        '<license>BSD</license></package>'
+    )
+    legacy_cache_yaml = (
+        'type: cache\n'
+        'version: 2\n'
+        'name: hydro\n'
+        'distribution_file:\n'
+        '  type: distribution\n'
+        '  version: 2\n'
+        '  repositories:\n'
+        '    ar_sys:\n'
+        '      release:\n'
+        '        packages: [ar_sys]\n'
+        '        tags:\n'
+        '          release: release/hydro/{package}/{version}\n'
+        '        url: https://github.com/Sahloul/arsys_release.git\n'
+        '        version: 1.0.4-0\n'
+        'release_package_xmls:\n'
+        '  ar_sys: !!python/str ' + json.dumps(ar_sys_xml, ensure_ascii=False) + '\n'
+    )
+    remote_cache_gz = tmp_path / 'remote_hydro-cache.yaml.gz'
+    with gzip.open(remote_cache_gz, 'wb') as f:
+        f.write(legacy_cache_yaml.encode('utf-8'))
+
+    index_path = tmp_path / 'index.yaml'
+    index_path.write_text(yaml.safe_dump({
+        'type': 'index',
+        'version': 4,
+        'distributions': {
+            'hydro': {
+                'distribution': ['hydro/distribution.yaml'],
+                'distribution_cache': path_to_url(str(remote_cache_gz)),
+            },
+        },
+    }))
+
+    index = get_index(path_to_url(str(index_path)))
+    dist_cache = get_distribution_cache(index, 'hydro')
+    assert 'ar_sys' in dist_cache.release_package_xmls
+    assert '<name>ar_sys</name>' in dist_cache.release_package_xmls['ar_sys']
+
+    # Also verify deprecated get_release_cache() loads legacy !!python/str caches (dist format v1)
+    legacy_v1_cache_gz = tmp_path / 'remote_v1_hydro-cache.yaml.gz'
+    with gzip.open(legacy_v1_cache_gz, 'wb') as f:
+        f.write(legacy_cache_yaml.replace('  version: 2\n', '  version: 1\n', 1).encode('utf-8'))
+    v1_index_path = tmp_path / 'index_v1.yaml'
+    v1_index_path.write_text(yaml.safe_dump({
+        'type': 'index',
+        'version': 3,
+        'distributions': {
+            'hydro': {
+                'distribution': ['hydro/distribution.yaml'],
+                'distribution_cache': path_to_url(str(legacy_v1_cache_gz)),
+            },
+        },
+    }))
+    rel_cache = get_release_cache(get_index(path_to_url(str(v1_index_path))), 'hydro')
+    assert isinstance(rel_cache, ReleaseCache)
+    assert 'ar_sys' in rel_cache.release_package_xmls
+
+    # Even if the upstream release repo has been deleted, rosdistro_build_cache should
+    # reuse the historical package.xml from the legacy cache without fetching it, and
+    # write clean Python 3 SafeDumper output loadable by plain yaml.safe_load().
+    out_dir = tmp_path / 'out'
+    out_dir.mkdir()
+    monkeypatch.chdir(out_dir)
+
+    fetched_package_xml = []
+
+    def dead_repo_provider(dist_name, repo, pkg_name, filepath='package.xml'):
+        if filepath == 'package.xml':
+            fetched_package_xml.append(pkg_name)
+        raise RuntimeError('Repository not found')
+
+    with patch('rosdistro.Distribution.default_manifest_providers', [dead_repo_provider]):
+        rc = build_cache_main([str(index_path), 'hydro', '--strict'])
+
+    assert not rc
+    assert fetched_package_xml == []
+    regenerated_text = (out_dir / 'hydro-cache.yaml').read_text()
+    regenerated = yaml.safe_load(regenerated_text)
+    assert 'ar_sys' in regenerated['release_package_xmls']
+    assert '!!python/' not in regenerated_text
+
+    # Also verify local legacy cache file loading via _load_local_cache_file()
+    local_dir = tmp_path / 'local_out'
+    local_dir.mkdir()
+    with gzip.open(local_dir / 'hydro-cache.yaml.gz', 'wb') as f:
+        f.write(legacy_cache_yaml.encode('utf-8'))
+    monkeypatch.chdir(local_dir)
+    with patch('rosdistro.Distribution.default_manifest_providers', [dead_repo_provider]):
+        rc_local = build_cache_main([str(index_path), 'hydro', '--strict'])
+    assert not rc_local
+    assert fetched_package_xml == []
+

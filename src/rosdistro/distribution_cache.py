@@ -47,6 +47,45 @@ from .source_repository_cache import SourceRepositoryCache
 from .vcs import Git, normalize_git_url, ref_is_hash
 
 
+# Backwards compatibility for legacy ROS 1 distribution caches (notably
+# http://repositories.ros.org/rosdistro_cache/hydro-cache.yaml.gz) generated
+# with Python 2 and older PyYAML, which emitted explicit ``!!python/str`` and
+# ``!!python/unicode`` tags on some ``package.xml`` strings. Plain
+# ``yaml.safe_load()`` rejects those tags, causing cache loading to fall back
+# to a from-scratch build that cannot recover manifests for deleted or moved
+# EOL release repositories.
+#
+# Only those two string scalar tags are mapped to ``construct_yaml_str`` on a
+# dedicated SafeLoader subclass, so all other Python object tags remain
+# rejected and PyYAML's global SafeLoader is left unmodified.
+#
+# Removal criteria: this backwards compatibility can be removed once all
+# hosted/archived EOL ROS 1 cache files (such as hydro-cache.yaml.gz) have been
+# regenerated with Python 3 / yaml.SafeDumper, or are no longer referenced or
+# supported in rosdistro indexes.
+_BaseSafeLoader = getattr(yaml, 'CSafeLoader', yaml.SafeLoader)
+
+
+class _LegacyCacheSafeLoader(_BaseSafeLoader):
+    pass
+
+
+_LegacyCacheSafeLoader.add_constructor(
+    'tag:yaml.org,2002:python/str',
+    _LegacyCacheSafeLoader.construct_yaml_str,
+)
+_LegacyCacheSafeLoader.add_constructor(
+    'tag:yaml.org,2002:python/unicode',
+    _LegacyCacheSafeLoader.construct_yaml_str,
+)
+
+
+def load_cache_yaml(yaml_str):
+    """Safely parse a distribution or release cache YAML payload, tolerating
+    legacy Python 2 ``!!python/str`` and ``!!python/unicode`` string tags."""
+    return yaml.load(yaml_str, Loader=_LegacyCacheSafeLoader)
+
+
 def _resolve_git_remote_ref_details(url, version):
     result = Git().command('ls-remote', normalize_git_url(url), version)
     output = result.get('output') or ''

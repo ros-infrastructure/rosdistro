@@ -79,6 +79,7 @@ from .distribution_cache import (  # noqa
     DistributionCache,
     MINIMAL_CACHE_CONFIG,
     ResourceNotCrawledError,
+    load_cache_yaml,
 )
 from .distribution_file import DistributionFile  # noqa
 from .distribution_file import create_distribution_file  # noqa
@@ -226,7 +227,7 @@ def get_extended_distribution_cache_string(index, dist_name):
 
 def get_distribution_cache(index, dist_name, extended=False):
     yaml_str = get_distribution_cache_string(index, dist_name, extended=extended)
-    data = yaml.safe_load(yaml_str)
+    data = load_cache_yaml(yaml_str)
     return DistributionCache(dist_name, data)
 
 

@@ -51,7 +51,13 @@ from .cache_profiler import (
     trace_span,
     use_profiler,
 )
-from .distribution_cache import CacheConfig, DistributionCache, NO_MAX_LINES_RESOURCES, resolve_git_remote_ref
+from .distribution_cache import (
+    CacheConfig,
+    DistributionCache,
+    NO_MAX_LINES_RESOURCES,
+    load_cache_yaml,
+    resolve_git_remote_ref,
+)
 from .fetch_reporter import format_phase_summary, report_fetch
 from .manifest_provider.cache import PACKAGE_ASSET_LIST_RESOURCES, sanitize_and_truncate_docs
 from .source_repository_cache import SourceRepositoryCache
@@ -83,7 +89,7 @@ def _load_local_cache_file(dist_name, path=None):
         with open(candidate, 'r') as f:
             yaml_str = f.read()
     with trace_operation('yaml:load', target=candidate):
-        data = yaml.safe_load(yaml_str)
+        data = load_cache_yaml(yaml_str)
     return DistributionCache(dist_name, data), candidate
 
 
