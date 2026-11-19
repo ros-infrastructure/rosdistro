@@ -274,3 +274,144 @@ def test_engine_skips_before_opening_session_and_provider_for_ignores_magicmock(
     assert provider_for(legacy_fn) is provider
     legacy_fn._unified_provider = MagicMock()
     assert provider_for(legacy_fn) is None
+
+
+def test_single_provider_list_serves_both_release_and_source_queries(tmp_path):
+    from contextlib import contextmanager
+    import logging
+    from unittest.mock import patch
+
+    import yaml
+
+    from rosdistro import (
+        CacheConfig,
+        Distribution,
+        DistributionCache,
+        DistributionFile,
+        ManifestProvider as ExportedProvider,
+        ManifestQuery as ExportedQuery,
+        get_cached_distribution,
+        get_index,
+        get_provider_name,
+        logger,
+    )
+    from rosdistro.manifest_provider.bitbucket import BITBUCKET
+    from rosdistro.manifest_provider.cache import CachedSourceManifestProvider
+    from rosdistro.manifest_provider.git import GIT
+
+    assert ExportedProvider is ManifestProvider
+    assert ExportedQuery is ManifestQuery
+    assert [get_provider_name(p) for p in Distribution.default_providers] == [
+        'github', 'gitlab', 'bitbucket', 'git', 'tar'
+    ]
+    assert get_provider_name(MagicMock()) == 'MagicMock'
+
+    dist_data = {
+        'type': 'distribution',
+        'version': 2,
+        'repositories': {
+            'my_repo': {
+                'release': {
+                    'packages': ['pkg_a'],
+                    'tags': {'release': 'release/rolling/{package}/{version}'},
+                    'url': 'https://example.com/my_repo-release.git',
+                    'version': '1.0.0-1',
+                },
+                'source': {
+                    'type': 'git',
+                    'url': 'https://example.com/my_repo.git',
+                    'version': 'main',
+                },
+            },
+        },
+    }
+    dist_file = DistributionFile('rolling', dist_data)
+
+    unified = DictProvider(
+        files={
+            'package.xml': _pkg_xml('pkg_a', '1.0.0'),
+            'README.md': '# pkg_a README\n',
+        },
+        resolved_ref='c' * 40,
+        metadata={'stars': 9},
+    )
+
+    # 1. Direct Distribution(..., providers=[unified])
+    dist = Distribution(dist_file, providers=[unified])
+    assert '<name>pkg_a</name>' in dist.get_release_package_xml('pkg_a')
+    assert dist.get_release_readme('pkg_a') == '# pkg_a README\n'
+    assert '<name>pkg_a</name>' in dist.get_source_package_xml('pkg_a')
+    assert dist.get_source_repo_metadata('my_repo', 'stars') == 9
+
+    # 2. Cached get_cached_distribution(..., providers=[unified])
+    dist_dir = tmp_path / 'rolling'
+    dist_dir.mkdir()
+    (dist_dir / 'distribution.yaml').write_text(yaml.safe_dump(dist_data))
+    index_path = tmp_path / 'index.yaml'
+    index_path.write_text(yaml.safe_dump({
+        'type': 'index',
+        'version': 4,
+        'distributions': {'rolling': {'distribution': ['rolling/distribution.yaml']}},
+    }))
+    index = get_index('file://' + str(index_path))
+    cache = DistributionCache('rolling', distribution_file_data=dist_data, config=CacheConfig.extended())
+    cached_dist = get_cached_distribution(
+        index, 'rolling', cache=cache, allow_lazy_load=True, providers=[unified]
+    )
+    assert '<name>pkg_a</name>' in cached_dist.get_release_package_xml('pkg_a')
+    assert cached_dist.get_source_repo_metadata('my_repo', 'stars') == 9
+    assert 'pkg_a' in cache.release_resources
+    assert 'my_repo' in cache.source_repo_resources
+
+    # 3. BITBUCKET in a unified provider list skips cleanly on source queries and falls back to GIT
+    bb_src = SourceRepositorySpecification('bb_repo', {
+        'type': 'git',
+        'url': 'https://bitbucket.org/org/bb_repo.git',
+        'version': 'main',
+    })
+    git_dir = tmp_path / 'bb_clone'
+    git_dir.mkdir()
+    (git_dir / 'package.xml').write_text(_pkg_xml('bb_pkg', '1.0.0'))
+
+    @contextmanager
+    def fake_clone(_url, _ref):
+        yield str(git_dir)
+
+    class FakeGit:
+        def __init__(self, cwd=None):
+            self.cwd = cwd
+
+        def command(self, *args):
+            if args == ('rev-parse', 'HEAD'):
+                return {'returncode': 0, 'output': 'd' * 40}
+            return {'returncode': 0, 'output': ''}
+
+    bb_cache = DistributionCache('rolling', distribution_file_data=dist_data)
+    cached_src = CachedSourceManifestProvider(bb_cache, [BITBUCKET, GIT])
+    with patch('rosdistro.manifest_provider.git._temp_git_clone', fake_clone), \
+            patch('rosdistro.manifest_provider.git.Git', FakeGit):
+        res = cached_src(bb_src)
+    assert res is not None
+    assert 'bb_pkg' in res
+    assert cached_src.last_fetch_info['fetch_type'] == 'git'
+
+    # If GIT also fails, BITBUCKET's SkipManifestProvider is excluded from error logs
+    records = []
+
+    class _Cap(logging.Handler):
+        def emit(self, rec):
+            records.append(rec)
+
+    handler = _Cap(level=logging.ERROR)
+    logger.addHandler(handler)
+    try:
+        bb_cache2 = DistributionCache('rolling', distribution_file_data=dist_data)
+        cached_src2 = CachedSourceManifestProvider(bb_cache2, [BITBUCKET, GIT])
+        with patch('rosdistro.manifest_provider.git._temp_git_clone', side_effect=RuntimeError('clone boom')):
+            assert cached_src2(bb_src) is None
+    finally:
+        logger.removeHandler(handler)
+    assert len(records) == 1
+    msg = records[0].getMessage()
+    assert 'git():' in msg
+    assert 'bitbucket():' not in msg

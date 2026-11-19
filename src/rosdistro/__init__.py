@@ -87,6 +87,7 @@ from .external.appdirs import site_config_dir, user_config_dir  # noqa
 from .index import Index, _derive_extended_cache_url  # noqa
 from .loader import load_url  # noqa
 from .manifest_provider.cache import CachedManifestProvider, CachedSourceManifestProvider  # noqa
+from .manifest_provider.engine import ManifestProvider, ManifestQuery  # noqa
 
 
 # same version as in:
@@ -162,7 +163,9 @@ def get_distribution_files(index, dist_name):
     return dist_files
 
 
-def get_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False, extended=False):
+def get_cached_distribution(
+    index, dist_name, cache=None, allow_lazy_load=False, extended=False, providers=None
+):
     if cache is None:
         try:
             cache = get_distribution_cache(index, dist_name, extended=extended)
@@ -176,16 +179,20 @@ def get_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False,
                 distribution_file_data=dist_file_data,
                 config=CacheConfig.extended() if extended else CacheConfig.minimal(),
             )
+    release_providers = providers if providers is not None else Distribution.default_manifest_providers
+    source_providers = providers if providers is not None else Distribution.default_source_manifest_providers
     dist = Distribution(
         cache.distribution_file,
-        [CachedManifestProvider(cache, Distribution.default_manifest_providers if allow_lazy_load else None)],
-        [CachedSourceManifestProvider(cache, Distribution.default_source_manifest_providers if allow_lazy_load else None)])
+        [CachedManifestProvider(cache, release_providers if allow_lazy_load else None)],
+        [CachedSourceManifestProvider(cache, source_providers if allow_lazy_load else None)])
     assert cache.distribution_file.name == dist_name
     return dist
 
 
-def get_extended_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False):
-    return get_cached_distribution(index, dist_name, cache=cache, allow_lazy_load=allow_lazy_load, extended=True)
+def get_extended_cached_distribution(index, dist_name, cache=None, allow_lazy_load=False, providers=None):
+    return get_cached_distribution(
+        index, dist_name, cache=cache, allow_lazy_load=allow_lazy_load, extended=True, providers=providers
+    )
 
 
 def get_distribution_cache_string(index, dist_name, extended=False):

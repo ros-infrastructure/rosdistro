@@ -201,6 +201,7 @@ class ManifestSession(object):
 class ManifestProvider(object):
     """Stateless transport provider capable of executing ``ManifestQuery`` profiles."""
 
+    _is_rosdistro_manifest_provider = True
     name = None
 
     def accepts(self, repo):

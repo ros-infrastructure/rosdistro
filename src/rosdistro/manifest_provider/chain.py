@@ -38,6 +38,11 @@ from rosdistro import logger
 from rosdistro.cache_profiler import trace_span
 from rosdistro.fetch_reporter import get_provider_name
 from rosdistro.manifest_provider import PermanentManifestError, SkipManifestProvider
+from rosdistro.manifest_provider.engine import (
+    ManifestProvider,
+    fetch_release_file,
+    fetch_source_cache,
+)
 
 REJECT = object()
 
@@ -83,7 +88,9 @@ def _can_bind(sig, *args, **kwargs):
 
 
 def call_release_provider(mp, dist_name, repo, pkg_name, filepath='package.xml'):
-    """Invoke a release manifest provider callable, adapting legacy 3-argument signatures."""
+    """Invoke a release manifest provider callable or ``ManifestProvider`` instance."""
+    if isinstance(mp, ManifestProvider):
+        return fetch_release_file(mp, repo, pkg_name, filepath)
     try:
         sig = inspect.signature(mp)
     except (TypeError, ValueError):
@@ -96,7 +103,9 @@ def call_release_provider(mp, dist_name, repo, pkg_name, filepath='package.xml')
 
 
 def call_source_provider(mp, repo, filepaths=None, metadata=None):
-    """Invoke a source manifest provider callable, adapting 1-, 2-, and 3-argument signatures."""
+    """Invoke a source manifest provider callable or ``ManifestProvider`` instance."""
+    if isinstance(mp, ManifestProvider):
+        return fetch_source_cache(mp, repo, filepaths=filepaths, metadata=metadata)
     try:
         sig = inspect.signature(mp)
     except (TypeError, ValueError):
@@ -109,7 +118,9 @@ def call_source_provider(mp, repo, filepaths=None, metadata=None):
 
 
 def provider_display_name(mp):
-    """Return the callable name used in error logs for *mp*."""
+    """Return the provider name used in error logs for *mp*."""
+    if isinstance(mp, ManifestProvider) and isinstance(mp.name, str) and mp.name:
+        return mp.name
     return getattr(mp, '__name__', str(mp))
 
 

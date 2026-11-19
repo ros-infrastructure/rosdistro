@@ -45,11 +45,15 @@ _active_reporter_local = threading.local()
 
 
 def get_provider_name(provider):
-    """Return a canonical short fetch-type name for a manifest provider callable."""
+    """Return a canonical short fetch-type name for a manifest provider callable or object."""
     if provider is None:
         return 'unknown'
     if isinstance(provider, str):
         return provider
+    if getattr(type(provider), '_is_rosdistro_manifest_provider', False):
+        provider_name = getattr(provider, 'name', None)
+        if isinstance(provider_name, str) and provider_name:
+            return provider_name
     name = getattr(provider, '__name__', None)
     if not name:
         name = type(provider).__name__

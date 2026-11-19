@@ -32,24 +32,25 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from .distribution_cache import ResourceNotCrawledError
-from .manifest_provider.bitbucket import bitbucket_manifest_provider
+from .manifest_provider.bitbucket import BITBUCKET, bitbucket_manifest_provider
 from .manifest_provider.cache import CachedManifestProvider
-from .manifest_provider.chain import call_release_provider
+from .manifest_provider.chain import call_release_provider, call_source_provider
 from .manifest_provider.engine import ManifestQuery, execute_query, provider_for
-from .manifest_provider.git import git_manifest_provider, git_source_manifest_provider
-from .manifest_provider.github import github_manifest_provider, github_source_manifest_provider
-from .manifest_provider.gitlab import gitlab_manifest_provider, gitlab_source_manifest_provider
-from .manifest_provider.tar import tar_manifest_provider, tar_source_manifest_provider
+from .manifest_provider.git import GIT, git_manifest_provider, git_source_manifest_provider
+from .manifest_provider.github import GITHUB, github_manifest_provider, github_source_manifest_provider
+from .manifest_provider.gitlab import GITLAB, gitlab_manifest_provider, gitlab_source_manifest_provider
+from .manifest_provider.tar import TAR, tar_manifest_provider, tar_source_manifest_provider
 from .package import Package
 from . import logger
 
 
 class Distribution(object):
 
+    default_providers = [GITHUB, GITLAB, BITBUCKET, GIT, TAR]
     default_manifest_providers = [github_manifest_provider, gitlab_manifest_provider, bitbucket_manifest_provider, git_manifest_provider, tar_manifest_provider]
     default_source_manifest_providers = [github_source_manifest_provider, gitlab_source_manifest_provider, git_source_manifest_provider, tar_source_manifest_provider]
 
-    def __init__(self, distribution_file, manifest_providers=None, source_manifest_providers=None):
+    def __init__(self, distribution_file, manifest_providers=None, source_manifest_providers=None, providers=None):
         self._distribution_file = distribution_file
 
         # Use default
@@ -57,6 +58,9 @@ class Distribution(object):
         self._source_manifest_providers = Distribution.default_source_manifest_providers
 
         # Override default if given
+        if providers is not None:
+            self._manifest_providers = providers
+            self._source_manifest_providers = providers
         if manifest_providers is not None:
             self._manifest_providers = manifest_providers
         if source_manifest_providers is not None:
@@ -400,7 +404,7 @@ class Distribution(object):
             final_exception = None
             for mp in self._source_manifest_providers:
                 try:
-                    repo_cache = mp(repo)
+                    repo_cache = call_source_provider(mp, repo)
                 except Exception as e:
                     # pass and try next manifest provider
                     logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', str(mp)), e))
