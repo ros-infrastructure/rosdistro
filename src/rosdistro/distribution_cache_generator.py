@@ -37,6 +37,7 @@ import datetime
 import gzip
 import os
 import re
+import threading
 import time
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
@@ -56,6 +57,7 @@ from .distribution_cache import (
     DistributionCache,
     NO_MAX_LINES_RESOURCES,
     _age_seconds,
+    _run_parallel,
     load_cache_yaml,
     resolve_git_remote_ref,
 )
@@ -63,6 +65,28 @@ from .fetch_reporter import format_phase_summary, report_fetch
 from .manifest_provider.cache import PACKAGE_ASSET_LIST_RESOURCES, sanitize_and_truncate_docs
 from .source_repository_cache import SourceRepositoryCache
 from .vcs import ref_is_hash
+
+DEFAULT_SOURCE_WORKERS = 4
+
+
+def get_default_source_workers():
+    """Return the default number of parallel worker threads for source repository queries."""
+    raw = os.getenv('ROSDISTRO_SOURCE_WORKERS')
+    if raw is None or raw == '':
+        return DEFAULT_SOURCE_WORKERS
+    workers = int(raw)
+    if workers < 1:
+        raise ValueError('ROSDISTRO_SOURCE_WORKERS must be >= 1, got %r' % (raw,))
+    return workers
+
+
+def _resolve_max_workers(max_workers):
+    if max_workers is None:
+        return get_default_source_workers()
+    workers = int(max_workers)
+    if workers < 1:
+        raise ValueError('max_workers must be >= 1, got %r' % (max_workers,))
+    return workers
 
 
 def _find_local_cache_file(dist_name, cache_dir=None):
@@ -219,6 +243,8 @@ class _NeighborCachePool(object):
     """
 
     def __init__(self, index=None, ignore_local=False, initial_caches=None, cache_dir=None):
+        self._lock = threading.RLock()
+        self._ref_locks = {}
         self._ignore_local = ignore_local
         self._processed_order = []
         self._processed_caches = {}
@@ -255,89 +281,101 @@ class _NeighborCachePool(object):
     def add_cache(self, dist_name, cache):
         if not isinstance(cache, DistributionCache):
             return
-        self._processed_caches[dist_name] = cache
-        self._local_caches.pop(dist_name, None)
-        self._source_url_indexes.pop(dist_name, None)
-        if dist_name in self._processed_order:
-            self._processed_order.remove(dist_name)
-        self._processed_order.append(dist_name)
+        with self._lock:
+            self._processed_caches[dist_name] = cache
+            self._local_caches.pop(dist_name, None)
+            self._source_url_indexes.pop(dist_name, None)
+            if dist_name in self._processed_order:
+                self._processed_order.remove(dist_name)
+            self._processed_order.append(dist_name)
 
     def take_local_cache(self, dist_name):
         """Transfer ownership of a local DistributionCache already loaded on demand for a future
         distro, avoiding re-reading its cache file from disk when it is updated.
         """
-        self._source_url_indexes.pop(dist_name, None)
-        return self._local_caches.pop(dist_name, None)
+        with self._lock:
+            self._source_url_indexes.pop(dist_name, None)
+            return self._local_caches.pop(dist_name, None)
 
     def record_remote_ref(self, url, version, ref_hash):
         if url and version and ref_hash:
-            self.known_remote_refs[(url, version)] = ref_hash
+            with self._lock:
+                self.known_remote_refs[(url, version)] = ref_hash
 
     def _get_source_url_index(self, dist_name, cache):
-        url_index = self._source_url_indexes.get(dist_name)
-        if url_index is None:
-            url_index = {}
-            dist_file = cache.distribution_file
-            fallback_src_to_doc = cache.config.fallback_src_to_doc
-            for repo_name, repo_cache in (cache.source_repo_resources or {}).items():
-                if not isinstance(repo_cache, SourceRepositoryCache) or len(repo_cache) == 0:
-                    continue
-                src_repo = _effective_source_repo(dist_file, repo_name, fallback_src_to_doc)
-                if src_repo is None or not src_repo.url:
-                    continue
-                url_index.setdefault(src_repo.url, []).append((repo_name, src_repo, repo_cache))
-            self._source_url_indexes[dist_name] = url_index
-        return url_index
+        with self._lock:
+            url_index = self._source_url_indexes.get(dist_name)
+            if url_index is None:
+                url_index = {}
+                dist_file = cache.distribution_file
+                fallback_src_to_doc = cache.config.fallback_src_to_doc
+                for repo_name, repo_cache in (cache.source_repo_resources or {}).items():
+                    if not isinstance(repo_cache, SourceRepositoryCache) or len(repo_cache) == 0:
+                        continue
+                    src_repo = _effective_source_repo(dist_file, repo_name, fallback_src_to_doc)
+                    if src_repo is None or not src_repo.url:
+                        continue
+                    url_index.setdefault(src_repo.url, []).append((repo_name, src_repo, repo_cache))
+                self._source_url_indexes[dist_name] = url_index
+            return url_index
 
     def _iter_neighbors(self, exclude_dist_name):
-        # 1. Already-processed in-memory DistributionCache instances (most recent first)
-        for d_name in reversed(self._processed_order):
-            if d_name == exclude_dist_name:
-                continue
-            yield d_name, self._processed_caches[d_name]
+        with self._lock:
+            processed = [
+                (d, self._processed_caches[d])
+                for d in reversed(self._processed_order) if d != exclude_dist_name
+            ]
+            seen = {d for d, _ in processed}
+            loaded_local = [
+                (d, self._local_caches[d][0])
+                for d in self._local_order
+                if d != exclude_dist_name and d not in seen and d in self._local_caches
+            ]
+            seen.update(d for d, _ in loaded_local)
+            pending = [(d, p) for d, p in self._pending_local if d != exclude_dist_name and d not in seen]
 
-        # 2. Already-loaded local neighbor DistributionCache instances (newest file mtime first)
-        for d_name in self._local_order:
-            if d_name == exclude_dist_name or d_name in self._processed_caches:
-                continue
-            loaded = self._local_caches.get(d_name)
-            if loaded is not None:
-                yield d_name, loaded[0]
+        for item in processed:
+            yield item
+        for item in loaded_local:
+            yield item
 
-        # 3. Lazily load any remaining local neighbor cache files on disk
-        for d_name, path in self._pending_local:
-            if d_name == exclude_dist_name or d_name in self._processed_caches or d_name in self._attempted_local:
-                continue
-            self._attempted_local.add(d_name)
-            loaded_cache = None
-            with trace_span(
-                'cache:neighbor_load',
-                kind='fetch',
-                resource_type='cache:neighbor_load',
-                fetch_type='local_file',
-                target=d_name,
-                detail='path=%s' % path,
-            ) as lspan:
-                try:
-                    loaded_cache, _ = _load_local_cache_file(d_name, path=path)
-                    if loaded_cache is None:
-                        lspan.status = 'not_found'
-                except Exception as e:
-                    lspan.status = 'failed'
-                    logger.debug('Failed to load neighboring local cache "%s" from "%s": %s' % (d_name, path, e))
-            if loaded_cache is not None:
-                self._local_caches[d_name] = (loaded_cache, path)
-                self._local_order.append(d_name)
+        # Lazily load any remaining local neighbor cache files on disk (at most once per file)
+        for d_name, path in pending:
+            yield_cache = None
+            loaded_dur = None
+            with self._lock:
+                if d_name in self._processed_caches:
+                    yield_cache = self._processed_caches[d_name]
+                elif d_name in self._local_caches:
+                    yield_cache = self._local_caches[d_name][0]
+                elif d_name in self._attempted_local:
+                    continue
+                else:
+                    self._attempted_local.add(d_name)
+                    loaded_cache = None
+                    with trace_span(
+                        'cache:neighbor_load', kind='fetch', resource_type='cache:neighbor_load',
+                        fetch_type='local_file', target=d_name, detail='path=%s' % path,
+                    ) as lspan:
+                        try:
+                            loaded_cache, _ = _load_local_cache_file(d_name, path=path)
+                            if loaded_cache is None:
+                                lspan.status = 'not_found'
+                        except Exception as e:
+                            lspan.status = 'failed'
+                            logger.debug('Failed to load neighboring local cache "%s" from "%s": %s' % (d_name, path, e))
+                    if loaded_cache is not None:
+                        self._local_caches[d_name] = (loaded_cache, path)
+                        self._local_order.append(d_name)
+                        yield_cache = loaded_cache
+                        loaded_dur = lspan.duration_s
+            if loaded_dur is not None:
                 report_fetch(
-                    'cache:neighbor_load',
-                    d_name,
-                    'local_file',
-                    status='ok',
-                    duration_s=lspan.duration_s,
-                    detail='path=%s' % path,
-                    level='top',
+                    'cache:neighbor_load', d_name, 'local_file', status='ok',
+                    duration_s=loaded_dur, detail='path=%s' % path, level='top',
                 )
-                yield d_name, loaded_cache
+            if yield_cache is not None:
+                yield d_name, yield_cache
 
     def find_release_resource(self, exclude_dist_name, pkg_name, repo, filepath, target_config):
         if repo is None or repo.version is None:
@@ -396,10 +434,12 @@ class _NeighborCachePool(object):
             if target_repo.type == 'git':
                 if ref_is_hash(target_repo.version):
                     expected_sha = target_repo.version
-                elif ref_key in self.known_remote_refs:
-                    expected_sha = self.known_remote_refs[ref_key]
-                    if expected_sha is None:
-                        ls_remote_failed = True
+                else:
+                    with self._lock:
+                        if ref_key in self.known_remote_refs:
+                            expected_sha = self.known_remote_refs[ref_key]
+                            if expected_sha is None:
+                                ls_remote_failed = True
 
             min_update_delta = target_config.min_update_delta
 
@@ -446,8 +486,16 @@ class _NeighborCachePool(object):
                         expired_git_candidates.append((neighbor_dist, neighbor_cache, repo_cache))
 
             if expected_sha is None and not ls_remote_failed and expired_git_candidates:
-                remote_hash, _ = resolve_git_remote_ref(target_repo.url, target_repo.version)
-                self.known_remote_refs[ref_key] = remote_hash
+                with self._lock:
+                    ref_lock = self._ref_locks.setdefault(ref_key, threading.Lock())
+                with ref_lock:
+                    with self._lock:
+                        already_known = ref_key in self.known_remote_refs
+                        remote_hash = self.known_remote_refs.get(ref_key)
+                    if not already_known:
+                        remote_hash, _ = resolve_git_remote_ref(target_repo.url, target_repo.version)
+                        with self._lock:
+                            self.known_remote_refs[ref_key] = remote_hash
                 if remote_hash is not None:
                     for neighbor_dist, neighbor_cache, url_entries in compatible_neighbors:
                         for _, n_repo, repo_cache in url_entries:
@@ -798,11 +846,103 @@ def _noop_context():
     yield
 
 
+def _fetch_source_repo(
+    dist, dist_name, cache, repo_name, source_repo,
+    cache_config, neighbor_pool, has_source_cache_dict, active_profiler,
+):
+    """Fetch a single source repository via cache, local neighbor, or manifest providers."""
+    cache_lock = getattr(cache, '_lock', None) or _noop_context()
+    with cache_lock:
+        was_cached = bool(
+            has_source_cache_dict and cache.source_repo_resources.get(repo_name) is not None
+        )
+        is_known_failed = bool(
+            not was_cached
+            and hasattr(cache, 'is_source_repo_failed')
+            and cache.is_source_repo_failed(repo_name, source_repo.url, source_repo.version)
+        )
+    copied_from_neighbor = False
+    neighbor_dist = None
+
+    with active_profiler.span(
+        'source:repo',
+        kind='fetch',
+        resource_type='source:repo',
+        target=repo_name,
+        dist_name=dist_name,
+        deferred_label=True,
+    ) as fetch_span:
+        if not was_cached and not is_known_failed and neighbor_pool is not None and has_source_cache_dict:
+            copied_repo_cache, neighbor_dist = neighbor_pool.find_source_repo_cache(
+                dist_name, source_repo, cache_config
+            )
+            if copied_repo_cache is not None:
+                with cache_lock:
+                    cache.source_repo_resources[repo_name] = copied_repo_cache
+                    if hasattr(cache, 'clear_source_repo_failure'):
+                        cache.clear_source_repo_failure(
+                            repo_name, source_repo.url, source_repo.version
+                        )
+                copied_from_neighbor = True
+
+        repo_cache = dist.get_source_repo_resources(repo_name)
+        if (
+            not was_cached
+            and not copied_from_neighbor
+            and neighbor_pool is not None
+            and isinstance(repo_cache, SourceRepositoryCache)
+            and getattr(source_repo, 'type', 'git') == 'git'
+            and getattr(source_repo, 'version', None)
+            and repo_cache.ref()
+        ):
+            neighbor_pool.record_remote_ref(
+                source_repo.url, source_repo.version, repo_cache.ref()
+            )
+
+        detail_parts = []
+        if copied_from_neighbor:
+            fetch_type, status = 'local_neighbor', 'ok'
+            detail_parts.append('neighbor=%s' % neighbor_dist)
+        elif was_cached:
+            fetch_type, status = 'cache', 'ok'
+        elif is_known_failed:
+            fetch_type, status = 'cached_failure', 'skipped'
+        else:
+            info = _get_last_provider_fetch_info(dist, '_source_manifest_providers')
+            if info is not None:
+                fetch_type = info.get('fetch_type') or 'unknown'
+                status = info.get('status') or ('ok' if repo_cache is not None else 'failed')
+            elif repo_cache is not None:
+                fetch_type, status = 'provider', 'ok'
+            else:
+                fetch_type, status = 'failed', 'failed'
+
+        if isinstance(repo_cache, SourceRepositoryCache):
+            detail_parts.append('packages=%d' % len(repo_cache))
+        detail = ', '.join(detail_parts) if detail_parts else None
+        fetch_span.fetch_type = fetch_type
+        fetch_span.status = status
+        fetch_span.detail = detail
+
+    active_profiler.report_fetch(
+        'source:repo',
+        repo_name,
+        fetch_type,
+        status=status,
+        duration_s=fetch_span.duration_s,
+        dist_name=dist_name,
+        detail=detail,
+        level='top',
+    )
+    return fetch_type, status, fetch_span.duration_s
+
+
 def generate_distribution_caches(
     index, dist_names=None, preclean=False,
     ignore_local=False, include_source=False, debug=False, limit=None, config=None,
-    output_dir=None, profiler=None, strict=False, min_update_delta=None,
+    output_dir=None, profiler=None, strict=False, min_update_delta=None, max_workers=None,
 ):
+    effective_workers = _resolve_max_workers(max_workers)
     active_profiler = profiler
     if active_profiler is None:
         active_profiler = get_active_profiler()
@@ -841,7 +981,7 @@ def generate_distribution_caches(
                             debug=debug, limit=limit, config=config,
                             neighbor_caches=neighbor_pool, cache_dir=output_dir,
                             profiler=active_profiler, strict=strict,
-                            min_update_delta=min_update_delta)
+                            min_update_delta=min_update_delta, max_workers=effective_workers)
                     except RuntimeError as e:
                         errors.append(str(e))
                         continue
@@ -865,8 +1005,9 @@ def generate_distribution_cache(
     index, dist_name, preclean=False, ignore_local=False,
     include_source=False, debug=False, limit=None, config=None,
     neighbor_caches=None, cache_dir=None, profiler=None, strict=False,
-    min_update_delta=None,
+    min_update_delta=None, max_workers=None,
 ):
+    effective_workers = _resolve_max_workers(max_workers)
     active_profiler = profiler
     if active_profiler is None:
         active_profiler = get_active_profiler()
@@ -886,7 +1027,7 @@ def generate_distribution_cache(
                 index, dist_name, preclean=preclean, ignore_local=ignore_local,
                 include_source=include_source, debug=debug, limit=limit, config=config,
                 neighbor_caches=neighbor_caches, cache_dir=cache_dir, active_profiler=active_profiler,
-                strict=strict, min_update_delta=min_update_delta,
+                strict=strict, min_update_delta=min_update_delta, max_workers=effective_workers,
             )
 
 
@@ -894,8 +1035,9 @@ def _generate_distribution_cache_impl(
     index, dist_name, preclean=False, ignore_local=False,
     include_source=False, debug=False, limit=None, config=None,
     neighbor_caches=None, cache_dir=None, active_profiler=None, strict=False,
-    min_update_delta=None,
+    min_update_delta=None, max_workers=None,
 ):
+    effective_workers = _resolve_max_workers(max_workers)
     cache_config = CacheConfig.from_input(
         config, include_source=include_source, limit=limit, min_update_delta=min_update_delta
     )
@@ -917,6 +1059,8 @@ def _generate_distribution_cache_impl(
         preloaded = neighbor_pool.take_local_cache(dist_name)
         if preloaded is not None:
             get_cached_kwargs['preloaded_cache'] = preloaded
+    if effective_workers > 1:
+        get_cached_kwargs['max_workers'] = effective_workers
     dist, cache = _get_cached_distribution(
         index, dist_name, preclean=preclean, ignore_local=ignore_local,
         include_source=include_source, config=cache_config, **get_cached_kwargs)
@@ -998,8 +1142,13 @@ def _generate_distribution_cache_impl(
             ' (limited to %d of %d)' % (len(repos_to_scan), len(all_repos))
             if effective_limit is not None and len(all_repos) > effective_limit else ''
         )
+        worker_note = (
+            ', %d workers' % min(effective_workers, len(repos_to_scan))
+            if effective_workers > 1 and len(repos_to_scan) > 1 else ''
+        )
         print(
-            '- fetch source repositories (%d repositories%s)' % (len(repos_to_scan), src_limit_note),
+            '- fetch source repositories (%d repositories%s%s)'
+            % (len(repos_to_scan), src_limit_note, worker_note),
             flush=True,
         )
 
@@ -1007,6 +1156,7 @@ def _generate_distribution_cache_impl(
         src_durations = {}
         src_phase_start = time.perf_counter()
         with active_profiler.span('phase:source_fetch', kind='phase', dist_name=dist_name):
+            repos_with_source = []
             for repo_name in repos_to_scan:
                 repo_entry = dist.repositories[repo_name]
                 source_repo = (
@@ -1027,94 +1177,20 @@ def _generate_distribution_cache_impl(
                     )
                     src_counts['skipped'] = src_counts.get('skipped', 0) + 1
                     continue
+                repos_with_source.append((repo_name, source_repo))
 
-                was_cached = bool(
-                    has_source_cache_dict and cache.source_repo_resources.get(repo_name) is not None
+            def _fetch_item(item):
+                repo_name, source_repo = item
+                return _fetch_source_repo(
+                    dist, dist_name, cache, repo_name, source_repo,
+                    cache_config, neighbor_pool, has_source_cache_dict, active_profiler,
                 )
-                is_known_failed = bool(
-                    not was_cached
-                    and hasattr(cache, 'is_source_repo_failed')
-                    and cache.is_source_repo_failed(repo_name, source_repo.url, source_repo.version)
-                )
-                copied_from_neighbor = False
-                neighbor_dist = None
 
-                with active_profiler.span(
-                    'source:repo',
-                    kind='fetch',
-                    resource_type='source:repo',
-                    target=repo_name,
-                    dist_name=dist_name,
-                    deferred_label=True,
-                ) as fetch_span:
-                    if not was_cached and not is_known_failed and neighbor_pool is not None and has_source_cache_dict:
-                        copied_repo_cache, neighbor_dist = neighbor_pool.find_source_repo_cache(
-                            dist_name, source_repo, cache_config
-                        )
-                        if copied_repo_cache is not None:
-                            cache.source_repo_resources[repo_name] = copied_repo_cache
-                            if hasattr(cache, 'clear_source_repo_failure'):
-                                cache.clear_source_repo_failure(
-                                    repo_name, source_repo.url, source_repo.version
-                                )
-                            copied_from_neighbor = True
-
-                    repo_cache = dist.get_source_repo_resources(repo_name)
-                    if (
-                        not was_cached
-                        and not copied_from_neighbor
-                        and neighbor_pool is not None
-                        and isinstance(repo_cache, SourceRepositoryCache)
-                        and getattr(source_repo, 'type', 'git') == 'git'
-                        and getattr(source_repo, 'version', None)
-                        and repo_cache.ref()
-                    ):
-                        neighbor_pool.record_remote_ref(
-                            source_repo.url, source_repo.version, repo_cache.ref()
-                        )
-
-                    detail_parts = []
-                    if copied_from_neighbor:
-                        fetch_type = 'local_neighbor'
-                        status = 'ok'
-                        detail_parts.append('neighbor=%s' % neighbor_dist)
-                    elif was_cached:
-                        fetch_type = 'cache'
-                        status = 'ok'
-                    elif is_known_failed:
-                        fetch_type = 'cached_failure'
-                        status = 'skipped'
-                    else:
-                        info = _get_last_provider_fetch_info(dist, '_source_manifest_providers')
-                        if info is not None:
-                            fetch_type = info.get('fetch_type') or 'unknown'
-                            status = info.get('status') or ('ok' if repo_cache is not None else 'failed')
-                        elif repo_cache is not None:
-                            fetch_type = 'provider'
-                            status = 'ok'
-                        else:
-                            fetch_type = 'failed'
-                            status = 'failed'
-
-                    if isinstance(repo_cache, SourceRepositoryCache):
-                        detail_parts.append('packages=%d' % len(repo_cache))
-                    detail = ', '.join(detail_parts) if detail_parts else None
-                    fetch_span.fetch_type = fetch_type
-                    fetch_span.status = status
-                    fetch_span.detail = detail
-
+            for fetch_type, _, dur_s in _run_parallel(
+                repos_with_source, _fetch_item, effective_workers, 'rosdistro-src'
+            ):
                 src_counts[fetch_type] = src_counts.get(fetch_type, 0) + 1
-                src_durations[fetch_type] = src_durations.get(fetch_type, 0.0) + fetch_span.duration_s
-                active_profiler.report_fetch(
-                    'source:repo',
-                    repo_name,
-                    fetch_type,
-                    status=status,
-                    duration_s=fetch_span.duration_s,
-                    dist_name=dist_name,
-                    detail=detail,
-                    level='top',
-                )
+                src_durations[fetch_type] = src_durations.get(fetch_type, 0.0) + dur_s
 
         src_phase_dur = time.perf_counter() - src_phase_start
         print(
@@ -1246,7 +1322,7 @@ def write_distribution_cache(
 def _get_cached_distribution(
     index, dist_name, preclean=False, ignore_local=False,
     include_source=False, config=None, known_remote_refs=None, preloaded_cache=None,
-    cache_dir=None
+    cache_dir=None, max_workers=None
 ):
     print('Build cache for "%s"' % dist_name, flush=True)
     cache_config = CacheConfig.from_input(config, include_source=include_source)
@@ -1320,7 +1396,9 @@ def _get_cached_distribution(
                 cache.source_repo_resources = {}
                 cache.failed_source_repos = {}
             # update cache with current distribution file, which filters existing cache by validity.
-            cache.update_distribution(rel_file_data, known_remote_refs=known_remote_refs)
+            cache.update_distribution(
+                rel_file_data, known_remote_refs=known_remote_refs, max_workers=max_workers
+            )
         else:
             # get empty cache with distribution file
             with trace_operation('cache:fetch_dist_file', target=dist_name):

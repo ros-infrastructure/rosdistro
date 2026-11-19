@@ -32,6 +32,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import datetime
+import threading
 import time
 
 from rosdistro import logger
@@ -71,7 +72,25 @@ class _CachedProviderBase(object):
 
     def __init__(self, distribution_cache):
         self._distribution_cache = distribution_cache
+        self._local = threading.local()
         self.last_fetch_info = None
+
+    @property
+    def last_fetch_info(self):
+        return getattr(self._local, 'last_fetch_info', None)
+
+    @last_fetch_info.setter
+    def last_fetch_info(self, value):
+        self._local.last_fetch_info = value
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('_local', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._local = threading.local()
 
     def _get_max_lines(self, filepath):
         return 100
@@ -131,6 +150,18 @@ class CachedManifestProvider(_CachedProviderBase):
         self._failed_requests = set()
         self._failed_tags = set()
         self.last_fetch_infos = {}
+
+    @property
+    def last_fetch_infos(self):
+        infos = getattr(self._local, 'last_fetch_infos', None)
+        if infos is None:
+            infos = {}
+            self._local.last_fetch_infos = infos
+        return infos
+
+    @last_fetch_infos.setter
+    def last_fetch_infos(self, value):
+        self._local.last_fetch_infos = value
 
     @staticmethod
     def _get_release_failure_key(repo, pkg_name):
@@ -511,6 +542,30 @@ class CachedSourceManifestProvider(_CachedProviderBase):
         super(CachedSourceManifestProvider, self).__init__(distribution_cache)
         self._source_manifest_providers = source_manifest_providers
         self._failed_source_keys = set()
+        self._lock = threading.RLock()
+        self._inflight_locks = {}
+
+    def __getstate__(self):
+        state = super(CachedSourceManifestProvider, self).__getstate__()
+        state.pop('_lock', None)
+        state.pop('_inflight_locks', None)
+        return state
+
+    def __setstate__(self, state):
+        super(CachedSourceManifestProvider, self).__setstate__(state)
+        self._lock = threading.RLock()
+        self._inflight_locks = {}
+
+    def _get_cache_lock(self):
+        return getattr(self._distribution_cache, '_lock', None) or self._lock
+
+    def _get_source_key_lock(self, source_key):
+        with self._lock:
+            lock = self._inflight_locks.get(source_key)
+            if lock is None:
+                lock = threading.Lock()
+                self._inflight_locks[source_key] = lock
+            return lock
 
     def _get_source_query_params(self):
         config = getattr(self._distribution_cache, 'config', None)
@@ -534,11 +589,17 @@ class CachedSourceManifestProvider(_CachedProviderBase):
 
     def __call__(self, repo):
         assert repo.url
+        with self._get_source_key_lock((repo.url, repo.version)):
+            return self._fetch_repo(repo)
+
+    def _fetch_repo(self, repo):
         start_s = time.perf_counter()
         self.last_fetch_info = None
         fetched_provider = 'cache'
+        cache_lock = self._get_cache_lock()
 
-        repo_cache = self._distribution_cache.source_repo_resources.get(repo.name, None)
+        with cache_lock:
+            repo_cache = self._distribution_cache.source_repo_resources.get(repo.name, None)
         if repo_cache is None:
             if not self._source_manifest_providers:
                 self._record_and_report(
@@ -546,8 +607,10 @@ class CachedSourceManifestProvider(_CachedProviderBase):
                 )
                 return None
             source_key = (repo.url, repo.version)
+            with self._lock:
+                in_failed_keys = source_key in self._failed_source_keys
             is_cached_failure = (
-                source_key in self._failed_source_keys or (
+                in_failed_keys or (
                     hasattr(self._distribution_cache, 'is_source_repo_failed') and
                     self._distribution_cache.is_source_repo_failed(repo.name, repo.url, repo.version)
                 )
@@ -570,11 +633,12 @@ class CachedSourceManifestProvider(_CachedProviderBase):
                 fetched_provider = outcome.provider_name
                 if hasattr(repo_cache, 'last_update_time') and repo_cache.last_update_time() is None:
                     repo_cache.set_last_update_time(datetime.datetime.now())
-                self._distribution_cache.source_repo_resources[repo.name] = repo_cache
-                if hasattr(self._distribution_cache, 'clear_source_repo_failure'):
-                    self._distribution_cache.clear_source_repo_failure(
-                        repo.name, repo.url, repo.version
-                    )
+                with cache_lock:
+                    self._distribution_cache.source_repo_resources[repo.name] = repo_cache
+                    if hasattr(self._distribution_cache, 'clear_source_repo_failure'):
+                        self._distribution_cache.clear_source_repo_failure(
+                            repo.name, repo.url, repo.version
+                        )
             else:
                 details = format_attempts(outcome.attempts, multiline=True)
                 if details:
@@ -585,7 +649,8 @@ class CachedSourceManifestProvider(_CachedProviderBase):
                     logger.error(
                         'Failed to fetch source package.xml files for repo "%s" from "%s"' %
                         (repo.name, repo.url))
-                self._failed_source_keys.add(source_key)
+                with self._lock:
+                    self._failed_source_keys.add(source_key)
                 if hasattr(self._distribution_cache, 'record_source_repo_failure'):
                     summary = format_attempts(outcome.attempts, multiline=False) or None
                     self._distribution_cache.record_source_repo_failure(

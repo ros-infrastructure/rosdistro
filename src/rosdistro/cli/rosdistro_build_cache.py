@@ -39,7 +39,10 @@ import sys
 from rosdistro import logger
 from rosdistro.cache_profiler import CacheProfiler, use_profiler
 from rosdistro.distribution_cache import CacheConfig
-from rosdistro.distribution_cache_generator import generate_distribution_caches
+from rosdistro.distribution_cache_generator import (
+    DEFAULT_SOURCE_WORKERS,
+    generate_distribution_caches,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -51,6 +54,16 @@ def _non_negative_int(value):
         raise argparse.ArgumentTypeError(str(e))
     if parsed < 0:
         raise argparse.ArgumentTypeError('must be >= 0 (got %d)' % parsed)
+    return parsed
+
+
+def _positive_int(value):
+    try:
+        parsed = int(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
+    if parsed < 1:
+        raise argparse.ArgumentTypeError('must be >= 1, got %r' % (value,))
     return parsed
 
 
@@ -96,6 +109,10 @@ def parse_args(args=None):
     add(
         '--strict', action='store_true', default=False,
         help='Fail and skip writing a distribution cache if any release package.xml is missing, invalid, or has a version mismatch')
+    add(
+        '-j', '--jobs', type=_positive_int, default=None, metavar='N',
+        help='Number of parallel worker threads for source repository queries '
+             '(default: ROSDISTRO_SOURCE_WORKERS or %d)' % DEFAULT_SOURCE_WORKERS)
     add(
         '--profile', action='store_true', default=False,
         help='Collect OpenTelemetry profiling timings and print a timing summary report')
@@ -150,8 +167,8 @@ def main(args=None):
                         ignore_local=args.ignore_local, include_source=args.include_source,
                         debug=args.debug, limit=args.limit, config=config,
                         output_dir='.', strict=args.strict,
-                        min_update_delta=args.min_update_delta)
-                except RuntimeError as e:
+                        min_update_delta=args.min_update_delta, max_workers=args.jobs)
+                except (RuntimeError, ValueError) as e:
                     print(str(e), file=sys.stderr)
                     rc = 1
                     return rc

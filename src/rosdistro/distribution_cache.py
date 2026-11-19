@@ -31,17 +31,19 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import copy
 import datetime
 import os
+import threading
 import time
 
 import yaml
 
 from . import logger
-from .cache_profiler import trace_operation, trace_span
+from .cache_profiler import get_active_profiler, trace_operation, trace_span
 from .distribution_file import create_distribution_file
-from .fetch_reporter import report_fetch
+from .fetch_reporter import get_active_reporter, report_fetch
 from .package import Package
 from .source_repository_cache import SourceRepositoryCache
 from .vcs import Git, normalize_git_url, ref_is_hash
@@ -84,6 +86,39 @@ def load_cache_yaml(yaml_str):
     """Safely parse a distribution or release cache YAML payload, tolerating
     legacy Python 2 ``!!python/str`` and ``!!python/unicode`` string tags."""
     return yaml.load(yaml_str, Loader=_LegacyCacheSafeLoader)
+
+
+def _run_parallel(items, fn, max_workers, thread_name_prefix='rosdistro'):
+    """Run *fn(item)* sequentially or in a ThreadPoolExecutor, propagating profiler/reporter context."""
+    if max_workers <= 1 or len(items) <= 1:
+        for item in items:
+            yield fn(item)
+        return
+
+    ctx_owner = get_active_profiler() or get_active_reporter()
+    captured = (
+        ctx_owner.capture_thread_context()
+        if ctx_owner is not None and hasattr(ctx_owner, 'capture_thread_context')
+        else None
+    )
+
+    def _wrapped(item):
+        if ctx_owner is not None and captured is not None:
+            with ctx_owner.attach_thread_context(captured):
+                return fn(item)
+        return fn(item)
+
+    with ThreadPoolExecutor(
+        max_workers=min(max_workers, len(items)), thread_name_prefix=thread_name_prefix
+    ) as executor:
+        futures = [executor.submit(_wrapped, item) for item in items]
+        try:
+            for future in as_completed(futures):
+                yield future.result()
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
 
 
 def _resolve_git_remote_ref_details(url, version):
@@ -557,6 +592,7 @@ class DistributionCache(object):
             if data and isinstance(data.get('failed_source_repos'), dict) else {}
         )
         self._session_failed_source_repos = set()
+        self._lock = threading.RLock()
         self.distribution_file.source_packages = self.get_source_packages()
 
         if config is not None:
@@ -565,6 +601,15 @@ class DistributionCache(object):
             self.config = CacheConfig.from_cache_data(data, inbound_version=inbound_version)
         else:
             self.config = CacheConfig.minimal()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('_lock', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._lock = threading.RLock()
 
     @staticmethod
     def _parse_timestamp(value):
@@ -583,7 +628,6 @@ class DistributionCache(object):
         self, repo_name, url, version=None, error=None, permanent=False, failed_at=None
     ):
         """Record a failed source repository fetch for within-run and cross-run negative caching."""
-        self._session_failed_source_repos.add((url, version))
         ts = failed_at if failed_at is not None else datetime.datetime.now()
         if isinstance(ts, datetime.datetime):
             ts = ts.isoformat()
@@ -598,19 +642,23 @@ class DistributionCache(object):
             if len(error_str) > 500:
                 error_str = error_str[:497] + '...'
             entry['error'] = error_str
-        self.failed_source_repos[repo_name] = entry
+        with self._lock:
+            self._session_failed_source_repos.add((url, version))
+            self.failed_source_repos[repo_name] = entry
 
     def clear_source_repo_failure(self, repo_name, url=None, version=None):
         """Clear any cached failure record for *repo_name*."""
-        self.failed_source_repos.pop(repo_name, None)
-        if url is not None:
-            self._session_failed_source_repos.discard((url, version))
+        with self._lock:
+            self.failed_source_repos.pop(repo_name, None)
+            if url is not None:
+                self._session_failed_source_repos.discard((url, version))
 
     def is_source_repo_failed(self, repo_name, url, version=None, now=None):
         """Return True if *(repo_name, url, version)* failed earlier in this run or within TTL."""
-        if (url, version) in self._session_failed_source_repos:
-            return True
-        entry = self.failed_source_repos.get(repo_name)
+        with self._lock:
+            if (url, version) in self._session_failed_source_repos:
+                return True
+            entry = self.failed_source_repos.get(repo_name)
         if not isinstance(entry, dict):
             return False
         if entry.get('url') != url or entry.get('version') != version:
@@ -854,7 +902,9 @@ class DistributionCache(object):
             data['failed_source_repos'] = self.failed_source_repos
         return data
 
-    def _validate_source_repo_entry(self, dist_file, repo, min_update_delta, known_remote_refs):
+    def _validate_source_repo_entry(
+        self, dist_file, repo, min_update_delta, known_remote_refs, ref_locks=None,
+    ):
         """Validate a single cached source repo entry; return ``(fetch_type, status)``."""
         try:
             repo_entry = dist_file.repositories[repo]
@@ -867,40 +917,46 @@ class DistributionCache(object):
                 raise AttributeError()
         except (KeyError, AttributeError):
             logger.debug('Unable to find source repository info for repo "%s".' % repo)
-            del self.source_repo_resources[repo]
+            with self._lock:
+                self.source_repo_resources.pop(repo, None)
             return 'obsolete', 'dropped'
 
         ref_key = (source_repository.url, source_repository.version)
-        known_hash = (
-            known_remote_refs.get(ref_key)
-            if known_remote_refs is not None
-            and source_repository.type == 'git'
-            and source_repository.version is not None
-            else None
-        )
+        with self._lock:
+            repo_cache = self.source_repo_resources.get(repo)
+            if repo_cache is None:
+                return 'obsolete', 'dropped'
+            can_use_known = (
+                known_remote_refs is not None
+                and source_repository.type == 'git'
+                and source_repository.version is not None
+            )
+            has_known_key = can_use_known and ref_key in known_remote_refs
+            known_hash = known_remote_refs.get(ref_key) if can_use_known else None
+            last_update_time = repo_cache.last_update_time()
+            cached_hash = repo_cache.ref()
 
-        last_update_time = self.source_repo_resources[repo].last_update_time()
         if known_hash is None and min_update_delta > 0 and last_update_time is not None:
             if _age_seconds(last_update_time) < min_update_delta:
                 return 'ttl_skip', 'kept'
 
         if source_repository.version and ref_is_hash(source_repository.version):
-            source_hash = source_repository.version
-            fetch_type = 'pinned_hash'
+            source_hash, fetch_type = source_repository.version, 'pinned_hash'
         elif known_hash is not None:
-            source_hash = known_hash
-            fetch_type = 'known_remote_ref'
+            source_hash, fetch_type = known_hash, 'known_remote_ref'
         elif source_repository.type != 'git' or not source_repository.version:
             logger.debug(
                 'Unable to check hash for non-git or unversioned repo "%s", dropping cache entry.' % repo
             )
-            del self.source_repo_resources[repo]
+            with self._lock:
+                self.source_repo_resources.pop(repo, None)
             return 'non_git_or_unversioned', 'dropped'
-        elif known_remote_refs is not None and ref_key in known_remote_refs:
+        elif has_known_key:
             logger.warning(
                 "Unable to check hash for branch %s of %s, dropping cache entry." %
                 (source_repository.version, source_repository.url))
-            del self.source_repo_resources[repo]
+            with self._lock:
+                self.source_repo_resources.pop(repo, None)
             if self._should_record_ls_remote_failure(source_repository, {'returncode': 1}):
                 self.record_source_repo_failure(
                     repo,
@@ -913,13 +969,14 @@ class DistributionCache(object):
                 )
             return 'known_remote_ref_failed', 'failed'
         else:
-            fetch_type = 'git_ls_remote'
-            source_hash, error_msg, result = _resolve_git_remote_ref_details(
-                source_repository.url, source_repository.version
+            ref_lock = None
+            if ref_locks is not None:
+                with self._lock:
+                    ref_lock = ref_locks.setdefault(ref_key, threading.Lock())
+            fetch_type, source_hash, error_msg, result = self._resolve_source_ref(
+                source_repository, ref_key, known_remote_refs, ref_lock,
             )
             if source_hash is None:
-                if known_remote_refs is not None:
-                    known_remote_refs[ref_key] = None
                 if error_msg:
                     logger.warning(
                         "Unable to check hash for branch %s of %s (%s), dropping cache entry." %
@@ -928,33 +985,27 @@ class DistributionCache(object):
                     logger.warning(
                         "Unable to check hash for branch %s of %s, dropping cache entry." %
                         (source_repository.version, source_repository.url))
-                del self.source_repo_resources[repo]
-                if self._should_record_ls_remote_failure(source_repository, result):
+                with self._lock:
+                    self.source_repo_resources.pop(repo, None)
+                if result is not None and self._should_record_ls_remote_failure(source_repository, result):
                     is_missing_ref = (
-                        result['returncode'] == 0 and not (result.get('output') or '').strip()
+                        result.get('returncode') == 0 and not (result.get('output') or '').strip()
                     )
-                    failure_err = (
-                        error_msg
-                        if error_msg
-                        else 'Remote reference "%s" not found in %s' % (
+                    failure_err = error_msg or (
+                        'Remote reference "%s" not found in %s' % (
                             source_repository.version, source_repository.url
                         )
                     )
                     self.record_source_repo_failure(
-                        repo,
-                        source_repository.url,
-                        source_repository.version,
-                        error=failure_err,
-                        permanent=is_missing_ref,
+                        repo, source_repository.url, source_repository.version,
+                        error=failure_err, permanent=is_missing_ref,
                     )
                 return fetch_type, 'failed'
-            if known_remote_refs is not None:
-                known_remote_refs[ref_key] = source_hash
 
-        cached_hash = self.source_repo_resources[repo].ref()
         if source_hash != cached_hash:
             logger.debug('Repo "%s" has moved from %s to %s, dropping cache.' % (repo, cached_hash, source_hash))
-            del self.source_repo_resources[repo]
+            with self._lock:
+                self.source_repo_resources.pop(repo, None)
             return fetch_type, 'dropped'
         if fetch_type in ('git_ls_remote', 'known_remote_ref'):
             refreshed_at = (
@@ -962,10 +1013,36 @@ class DistributionCache(object):
                 if last_update_time is not None and last_update_time.tzinfo is not None
                 else datetime.datetime.now()
             )
-            self.source_repo_resources[repo].set_last_update_time(refreshed_at)
+            with self._lock:
+                cached_entry = self.source_repo_resources.get(repo)
+                if cached_entry is not None:
+                    cached_entry.set_last_update_time(refreshed_at)
         return fetch_type, 'kept'
 
-    def update_distribution(self, distribution_file_data, known_remote_refs=None):
+    def _resolve_source_ref(self, source_repository, ref_key, known_remote_refs, ref_lock):
+        """Resolve *ref_key* via git ls-remote, deduplicating concurrent checks on the same ref."""
+        def _do():
+            if known_remote_refs is not None:
+                with self._lock:
+                    if ref_key in known_remote_refs:
+                        existing = known_remote_refs[ref_key]
+                        if existing is not None:
+                            return 'known_remote_ref', existing, None, None
+                        return 'known_remote_ref_failed', None, None, {'returncode': 1}
+            resolved_hash, err_msg, res = _resolve_git_remote_ref_details(
+                source_repository.url, source_repository.version
+            )
+            if known_remote_refs is not None and not (res and res.get('rate_limited')):
+                with self._lock:
+                    known_remote_refs[ref_key] = resolved_hash
+            return 'git_ls_remote', resolved_hash, err_msg, res
+
+        if ref_lock is not None:
+            with ref_lock:
+                return _do()
+        return _do()
+
+    def update_distribution(self, distribution_file_data, known_remote_refs=None, max_workers=None):
         dist_name = self.distribution_file.name
         # remove packages which are not in the old distribution file
         self._remove_obsolete_entries()
@@ -1062,40 +1139,52 @@ class DistributionCache(object):
         # the one we have associated with our cache. This requires calling git ls-remote on all affected repos.
         if self.source_repo_resources:
             start_time = time.perf_counter()
-            total_source_repos = len(self.source_repo_resources.keys())
+            repos_to_validate = sorted(self.source_repo_resources.keys())
+            total_source_repos = len(repos_to_validate)
             dropped_count = 0
             kept_count = 0
             method_counts = {}
             min_update_delta = self.config.min_update_delta
+            effective_workers = int(max_workers) if max_workers is not None else 1
+            if effective_workers < 1:
+                raise ValueError('max_workers must be >= 1, got %r' % (max_workers,))
+            ref_locks = {} if effective_workers > 1 else None
+            shared_refs = known_remote_refs if known_remote_refs is not None else ({} if effective_workers > 1 else None)
+
+            def _validate_one(repo_name):
+                with trace_span(
+                    'cache:validate_source_ref',
+                    kind='fetch',
+                    resource_type='cache:validate_source_ref',
+                    target=repo_name,
+                    dist_name=dist_name,
+                    deferred_label=True,
+                ) as vspan:
+                    fetch_type, status = self._validate_source_repo_entry(
+                        dist_file, repo_name, min_update_delta, shared_refs, ref_locks=ref_locks,
+                    )
+                    vspan.fetch_type = fetch_type
+                    vspan.status = status
+                report_fetch(
+                    'cache:validate_source_ref',
+                    repo_name,
+                    fetch_type,
+                    status=status,
+                    duration_s=vspan.duration_s,
+                    dist_name=dist_name,
+                    level='top',
+                )
+                return fetch_type, status
+
             with trace_operation('cache:validate_source', target=dist_name):
-                for repo in sorted(self.source_repo_resources.keys()):
-                    with trace_span(
-                        'cache:validate_source_ref',
-                        kind='fetch',
-                        resource_type='cache:validate_source_ref',
-                        target=repo,
-                        dist_name=dist_name,
-                        deferred_label=True,
-                    ) as vspan:
-                        fetch_type, status = self._validate_source_repo_entry(
-                            dist_file, repo, min_update_delta, known_remote_refs
-                        )
-                        vspan.fetch_type = fetch_type
-                        vspan.status = status
+                for fetch_type, status in _run_parallel(
+                    repos_to_validate, _validate_one, effective_workers, 'rosdistro-val'
+                ):
                     method_counts[fetch_type] = method_counts.get(fetch_type, 0) + 1
                     if status == 'kept':
                         kept_count += 1
                     else:
                         dropped_count += 1
-                    report_fetch(
-                        'cache:validate_source_ref',
-                        repo,
-                        fetch_type,
-                        status=status,
-                        duration_s=vspan.duration_s,
-                        dist_name=dist_name,
-                        level='top',
-                    )
             end_time = time.perf_counter()
             method_summary = ', '.join('%s=%d' % (k, v) for k, v in sorted(method_counts.items()))
             print(

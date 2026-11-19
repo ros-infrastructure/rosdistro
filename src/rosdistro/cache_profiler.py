@@ -43,11 +43,12 @@ import time
 from urllib.parse import urlsplit, urlunsplit
 
 try:
+    from opentelemetry import context as otel_context
     from opentelemetry import trace as otel_trace
     from opentelemetry.trace import Status, StatusCode
     HAS_OTEL_API = True
 except ImportError:
-    otel_trace = Status = StatusCode = None
+    otel_context = otel_trace = Status = StatusCode = None
     HAS_OTEL_API = False
 
 try:
@@ -331,7 +332,7 @@ class RosdistroSpanProcessor(SpanProcessor):
     def _record_slowest_locked(self, attrs, res, ft, status, dur_s):
         if self.slowest_limit <= 0:
             return
-        if ft in ('cache', 'skipped', 'ttl_skip', 'pinned_hash') and dur_s < 0.005:
+        if ft in ('cache', 'skipped', 'ttl_skip', 'pinned_hash', 'known_remote_ref') and dur_s < 0.005:
             return
         self._slowest_seq += 1
         entry = (dur_s, self._slowest_seq, {
@@ -380,6 +381,12 @@ class RosdistroSpanProcessor(SpanProcessor):
                 return max(0, self._last_end_ns - self._origin_ns) / 1e9
             return 0.0
 
+    def wall_duration_s(self):
+        with self._lock:
+            if self._origin_ns is not None and self._last_end_ns is not None:
+                return max(0, self._last_end_ns - self._origin_ns) / 1e9
+            return 0.0
+
     def get_folded_stacks(self):
         """Return dict mapping ``'frame1;frame2;...'`` -> integer microseconds."""
         with self._lock:
@@ -392,9 +399,11 @@ class RosdistroSpanProcessor(SpanProcessor):
 
     def to_dict(self, include_trace_events=True):
         total_s = self.total_duration_s()
+        wall_s = self.wall_duration_s()
+        wall_denom = wall_s if wall_s > 0 else total_s
 
-        def _sorted_map(mapping):
-            return {k: v.to_dict(total_s) for k, v in sorted(mapping.items(), key=lambda kv: -kv[1].total_s)}
+        def _sorted_map(mapping, denom=total_s):
+            return {k: v.to_dict(denom) for k, v in sorted(mapping.items(), key=lambda kv: -kv[1].total_s)}
 
         def _sorted_pairs(mapping):
             return [
@@ -405,9 +414,10 @@ class RosdistroSpanProcessor(SpanProcessor):
         with self._lock:
             summary = {
                 'total_duration_s': round(total_s, 6),
+                'wall_duration_s': round(wall_s, 6),
                 'distros': list(self._distros_seen),
-                'by_phase': _sorted_map(self._by_phase),
-                'by_distro': _sorted_map(self._by_distro),
+                'by_phase': _sorted_map(self._by_phase, denom=wall_denom),
+                'by_distro': _sorted_map(self._by_distro, denom=wall_denom),
                 'by_fetch_type': _sorted_map(self._by_fetch_type),
                 'by_resource_type': _sorted_map(self._by_resource_type),
                 'by_resource_and_fetch_type': _sorted_pairs(self._by_resource_fetch),
@@ -432,11 +442,16 @@ class RosdistroSpanProcessor(SpanProcessor):
     def format_summary(self):
         """Render a human-readable multi-table profiling summary report."""
         data = self.to_dict(include_trace_events=False)['rosdistroProfile']
+        total_s = data['total_duration_s']
+        wall_s = data.get('wall_duration_s', total_s)
+        total_line = 'Total profiled time: %s' % format_duration(total_s)
+        if wall_s > 0 and total_s > wall_s * 1.05:
+            total_line += ' (wall: %s)' % format_duration(wall_s)
         lines = [
             '=' * 88,
             'ROSDISTRO CACHE PROFILING SUMMARY',
             '=' * 88,
-            'Total profiled time: %s' % format_duration(data['total_duration_s']),
+            total_line,
         ]
         if data['distros']:
             lines.append('Distros: %s' % ', '.join(data['distros']))
@@ -567,6 +582,31 @@ class CacheProfiler(FetchReporter):
 
     def has_active_span(self):
         return bool(HAS_OTEL_API and otel_trace.get_current_span().is_recording())
+
+    def capture_thread_context(self):
+        reporter_ctx = super(CacheProfiler, self).capture_thread_context()
+        otel_ctx = (
+            otel_context.get_current()
+            if self.enabled and HAS_OTEL_API and otel_context is not None
+            else None
+        )
+        return (reporter_ctx, otel_ctx)
+
+    @contextmanager
+    def attach_thread_context(self, captured):
+        reporter_ctx, otel_ctx = captured
+        token = None
+        if otel_ctx is not None and HAS_OTEL_API and otel_context is not None:
+            token = otel_context.attach(otel_ctx)
+        try:
+            with use_profiler(self), super(CacheProfiler, self).attach_thread_context(reporter_ctx):
+                yield
+        finally:
+            if token is not None and HAS_OTEL_API and otel_context is not None:
+                otel_context.detach(token)
+
+    def wall_duration_s(self):
+        return self._processor.wall_duration_s() if self._processor is not None else 0.0
 
     def shutdown(self):
         if self._tracer_provider is not None:

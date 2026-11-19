@@ -71,6 +71,7 @@ import os
 import re
 import signal
 import subprocess
+import threading
 
 from packaging.version import parse, InvalidVersion
 try:
@@ -133,12 +134,15 @@ def get_git_timeout(subcommand=None):
 class Git(object):
     _client_executable = None
     _client_version = None
+    _init_lock = threading.RLock()
 
     def __init__(self, cwd=None, timeout=None):
         self.cwd = cwd
         self.timeout = timeout
         if not self._client_executable:
-            self.__class__._client_executable = _find_executable('git')
+            with self.__class__._init_lock:
+                if not self.__class__._client_executable:
+                    self.__class__._client_executable = _find_executable('git')
 
     def command(self, *args, timeout=None):
         assert self._client_executable is not None, "'git' not found"
@@ -175,8 +179,10 @@ class Git(object):
     @classmethod
     def version_gte(cls, version):
         if not cls._client_version:
-            result = cls().command('--version')
-            cls._client_version = result['output'].split()[-1]
+            with cls._init_lock:
+                if not cls._client_version:
+                    result = cls().command('--version')
+                    cls._client_version = result['output'].split()[-1]
         return _version_gte(cls._client_version, version)
 
 

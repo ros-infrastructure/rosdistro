@@ -445,7 +445,7 @@ def test_generate_distribution_cache_crawls_doc_only_repo(mock_get_cached_distri
     generate_distribution_cache(mock_index, 'rolling', include_source=True)
 
     crawled_repos = [call.args[0] for call in mock_dist.get_source_repo_resources.call_args_list]
-    assert crawled_repos == ['a_src_repo', 'b_doc_only_repo']
+    assert sorted(crawled_repos) == ['a_src_repo', 'b_doc_only_repo']
 
     # When fallback_src_to_doc=False, only repositories with a 'source' entry are crawled
     mock_dist.get_source_repo_resources.reset_mock()

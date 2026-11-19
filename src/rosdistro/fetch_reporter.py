@@ -132,6 +132,7 @@ class FetchReporter(object):
         self.debug = bool(debug)
         self._console_stream = console_stream
         self._local = threading.local()
+        self._write_lock = threading.Lock()
 
     def _dist_stack(self):
         stack = getattr(self._local, 'dist_stack', None)
@@ -169,8 +170,30 @@ class FetchReporter(object):
 
     def _write_console(self, line):
         stream = self._console_stream if self._console_stream is not None else sys.stdout
-        stream.write(line + '\n')
-        stream.flush()
+        with self._write_lock:
+            stream.write(line + '\n')
+            stream.flush()
+
+    def capture_thread_context(self):
+        return (list(self._dist_stack()), self._fetch_depth())
+
+    @contextmanager
+    def attach_thread_context(self, captured):
+        dist_stack, fetch_depth = captured
+        prev_stack = getattr(self._local, 'dist_stack', None)
+        prev_depth = getattr(self._local, 'fetch_depth', 0)
+        self._local.dist_stack = list(dist_stack)
+        self._local.fetch_depth = fetch_depth
+        try:
+            with use_reporter(self):
+                yield
+        finally:
+            if prev_stack is None:
+                if hasattr(self._local, 'dist_stack'):
+                    delattr(self._local, 'dist_stack')
+            else:
+                self._local.dist_stack = prev_stack
+            self._local.fetch_depth = prev_depth
 
     def should_print_fetch(self, resource_type, fetch_type, status='ok', level='top'):
         """Decide whether a standardized fetch event should print directly to console."""

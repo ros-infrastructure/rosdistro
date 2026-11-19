@@ -31,6 +31,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import threading
 from .distribution_cache import ResourceNotCrawledError
 from .manifest_provider.bitbucket import BITBUCKET, bitbucket_manifest_provider
 from .manifest_provider.cache import CachedManifestProvider
@@ -68,12 +69,22 @@ class Distribution(object):
 
         self._release_resources = {}
         self._source_repo_resources = {}
+        self._lock = threading.RLock()
 
         self._cache = None
         for mp in (self._manifest_providers or []) + (self._source_manifest_providers or []):
             if hasattr(mp, '_distribution_cache'):
                 self._cache = mp._distribution_cache
                 break
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('_lock', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._lock = threading.RLock()
 
     def __getattr__(self, name):
         return getattr(self._distribution_file, name)
@@ -385,7 +396,9 @@ class Distribution(object):
         return repo_cache.get_metadata(key)
 
     def get_source_repo_resources(self, repo_name):
-        if repo_name not in self._source_repo_resources:
+        with self._lock:
+            if repo_name in self._source_repo_resources:
+                return self._source_repo_resources[repo_name]
             if repo_name not in self._distribution_file.repositories:
                 return None
             fallback_to_doc = (
@@ -401,24 +414,28 @@ class Distribution(object):
             )
             if repo is None:
                 return None
-            final_exception = None
-            for mp in self._source_manifest_providers:
-                try:
-                    repo_cache = call_source_provider(mp, repo)
-                except Exception as e:
-                    # pass and try next manifest provider
-                    logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', str(mp)), e))
-                    final_exception = e
-                    continue
-                if repo_cache is not None:
-                    # Update map of package XMLs, and also list of known package names.
+            providers = list(self._source_manifest_providers)
+
+        final_exception = None
+        for mp in providers:
+            try:
+                repo_cache = call_source_provider(mp, repo)
+            except Exception as e:
+                # pass and try next manifest provider
+                logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', str(mp)), e))
+                final_exception = e
+                continue
+            if repo_cache is not None:
+                # Update map of package XMLs, and also list of known package names.
+                with self._lock:
                     self._source_repo_resources[repo_name] = repo_cache
                     for pkg_name in repo_cache:
                         if pkg_name[0] != '_':
                             self._distribution_file.source_packages[pkg_name] = Package(pkg_name, repo_name)
                     return self._source_repo_resources[repo_name]
-            if final_exception is not None:
-                raise final_exception
+        if final_exception is not None:
+            raise final_exception
 
+        with self._lock:
             self._source_repo_resources[repo_name] = None
-        return self._source_repo_resources.get(repo_name, None)
+        return None
