@@ -55,12 +55,12 @@ from rosdistro.manifest_provider import (
     is_unauthenticated_http_url,
     read_http_error_body,
 )
-from rosdistro.manifest_provider.cache import (
+from rosdistro.manifest_provider.sanitize import sanitize_and_truncate_docs
+from rosdistro.manifest_provider.tree import (
     DEFAULT_SOURCE_FILEPATHS,
     PACKAGE_ASSET_LIST_RESOURCES,
     ROOT_DOC_CANDIDATES,
     partition_repo_tree,
-    sanitize_and_truncate_docs,
 )
 from rosdistro.source_repository_cache import SourceRepositoryCache
 

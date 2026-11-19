@@ -778,7 +778,7 @@ def test_git_and_tar_nested_package_path_posix(tmp_path):
             def relpath(p, start):
                 return _os.path.relpath(p, start).replace('/', '\\')
 
-    with patch('rosdistro.manifest_provider.cache.os', _FakeWinOs):
+    with patch('rosdistro.manifest_provider.tree.os', _FakeWinOs):
         rel_files = list_local_repo_files(str(repo_dir))
         assert 'core/roslib/package.xml' in rel_files
         assert all('\\' not in f for f in rel_files)

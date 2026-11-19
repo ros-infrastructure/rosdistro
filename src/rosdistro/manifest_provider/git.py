@@ -42,13 +42,13 @@ from rosdistro.cache_profiler import trace_operation
 from rosdistro.common import rmtree
 from rosdistro.fetch_reporter import report_instant_sub_fetch, report_sub_fetch
 from rosdistro.manifest_provider import SkipManifestProvider
-from rosdistro.manifest_provider.cache import (
+from rosdistro.manifest_provider.sanitize import sanitize_and_truncate_docs
+from rosdistro.manifest_provider.tree import (
     DEFAULT_SOURCE_FILEPATHS,
     PACKAGE_ASSET_LIST_RESOURCES,
     ROOT_DOC_CANDIDATES,
     list_local_repo_files,
     partition_repo_tree,
-    sanitize_and_truncate_docs,
 )
 from rosdistro.source_repository_cache import SourceRepositoryCache
 from rosdistro.vcs import Git, normalize_git_url, ref_is_hash

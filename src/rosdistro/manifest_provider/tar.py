@@ -45,13 +45,13 @@ from rosdistro.cache_profiler import sanitize_url_for_trace, trace_operation
 from rosdistro.common import rmtree
 from rosdistro.fetch_reporter import report_instant_sub_fetch, report_sub_fetch
 from rosdistro.manifest_provider import SkipManifestProvider, get_http_timeout
-from rosdistro.manifest_provider.cache import (
+from rosdistro.manifest_provider.sanitize import sanitize_and_truncate_docs
+from rosdistro.manifest_provider.tree import (
     DEFAULT_SOURCE_FILEPATHS,
     IGNORE_MARKERS,
     PACKAGE_ASSET_LIST_RESOURCES,
     ROOT_DOC_CANDIDATES,
     partition_repo_tree,
-    sanitize_and_truncate_docs,
 )
 from rosdistro.source_repository_cache import SourceRepositoryCache
 
