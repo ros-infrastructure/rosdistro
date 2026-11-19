@@ -336,11 +336,10 @@ def test_source_providers_skip_mismatched_host_or_type(provider, repo):
         provider(repo)
 
 
-def test_gitlab_source_tar_repo_without_version_quirk():
-    # QUIRK(commit 7): gitlab_source_manifest_provider currently runs `assert repo.version`
-    # before checking repo.type != 'git', raising AssertionError instead of SkipManifestProvider.
+def test_gitlab_source_tar_repo_without_version_skips_cleanly():
+    # GitLab checks repo.type != 'git' before asserting repo.version, so tar repos skip cleanly.
     tar_repo = _src_repo('https://gitlab.com/org/repo.tar.gz', repo_type='tar', version=None)
-    with pytest.raises(AssertionError):
+    with pytest.raises(SkipManifestProvider):
         gitlab_source_manifest_provider(tar_repo)
 
 
@@ -490,8 +489,8 @@ def test_source_provider_contracts_discovery_metadata_assets_and_labels(tmp_path
     assert gl_cache.action_files('pkg_a') == ['action/Go.action']
     assert gl_cache.launch_files('pkg_a') == ['launch/run.launch.py']
     assert 'CHANGELOG.rst' not in gl_cache['pkg_a']
-    # QUIRK(commit 7): GitLab source currently requests optional files absent from the tree
-    assert any('pkg_a%2FCHANGELOG.rst/raw' in u for u in gl_requested)
+    # GitLab skips optional files absent from the tree instead of sending 404 requests.
+    assert not any('pkg_a%2FCHANGELOG.rst/raw' in u for u in gl_requested)
     assert gl_cache.stars() == 7
     assert gl_cache.description() == 'GL desc'
     assert gl_cache.tags() == ['ros2']
@@ -638,9 +637,9 @@ def test_source_http_error_classification():
         assert not isinstance(exc_info.value, PermanentManifestError)
 
 
-def test_gitlab_source_optional_file_transient_error_quirk():
-    # QUIRK(commit 7): GitLab source currently swallows transient errors (e.g. 500/URLError)
-    # on optional per-package files and omits the file instead of aborting so git fallback runs.
+def test_gitlab_source_optional_file_transient_error_aborts_attempt():
+    # Under the unified engine (D2), transient errors on optional per-package files abort the
+    # attempt so fallback providers (e.g. git) can produce a complete cache entry.
     commit_sha = '3' * 40
 
     def gl_urlopen(req, timeout=None):
@@ -659,13 +658,13 @@ def test_gitlab_source_optional_file_transient_error_quirk():
         raise HTTPError(url, 404, 'Not Found', {}, io.BytesIO(b''))
 
     with patch('rosdistro.manifest_provider.gitlab.urlopen', side_effect=gl_urlopen):
-        cache = gitlab_source_manifest_provider(
-            _src_repo('https://gitlab.com/org/my_repo.git'),
-            filepaths=('README.md',),
-            metadata=(),
-        )
-    assert 'pkg_a' in cache
-    assert 'README.md' not in cache['pkg_a']
+        with pytest.raises(RuntimeError) as exc_info:
+            gitlab_source_manifest_provider(
+                _src_repo('https://gitlab.com/org/my_repo.git'),
+                filepaths=('README.md',),
+                metadata=(),
+            )
+        assert not isinstance(exc_info.value, PermanentManifestError)
 
 
 def test_tar_source_dot_prefix_normalization_preserves_hidden_ignore_markers():
