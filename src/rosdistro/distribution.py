@@ -33,7 +33,9 @@
 
 from .distribution_cache import ResourceNotCrawledError
 from .manifest_provider.bitbucket import bitbucket_manifest_provider
+from .manifest_provider.cache import CachedManifestProvider
 from .manifest_provider.chain import call_release_provider
+from .manifest_provider.engine import ManifestQuery, execute_query, provider_for
 from .manifest_provider.git import git_manifest_provider, git_source_manifest_provider
 from .manifest_provider.github import github_manifest_provider, github_source_manifest_provider
 from .manifest_provider.gitlab import gitlab_manifest_provider, gitlab_source_manifest_provider
@@ -184,6 +186,112 @@ class Distribution(object):
 
             self._release_resources[pkg_name][filepath] = content
         return self._release_resources.get(pkg_name, {}).get(filepath, None)
+
+    def _supports_batched_release_fetch(self):
+        if not self._manifest_providers:
+            return False
+        for mp in self._manifest_providers:
+            if isinstance(mp, CachedManifestProvider):
+                if mp._has_unified_providers():
+                    return True
+            elif provider_for(mp) is not None:
+                return True
+        return False
+
+    def get_release_resources(self, pkg_name, filepaths=('package.xml',), require_crawled=False):
+        """Fetch multiple release resources for *pkg_name* in a single provider query when possible."""
+        ordered_fps = list(dict.fromkeys(filepaths))
+        if require_crawled and not self._has_lazy_release_providers():
+            for fp in ordered_fps:
+                if not self.is_release_resource_crawled(fp, pkg_name=pkg_name):
+                    raise ResourceNotCrawledError(
+                        "Release resource '%s' was not crawled in the cache for '%s'"
+                        % (fp, self._distribution_file.name)
+                    )
+        if not ordered_fps:
+            return {}
+        if pkg_name not in self._release_resources:
+            self._release_resources[pkg_name] = {}
+
+        missing = [fp for fp in ordered_fps if fp not in self._release_resources[pkg_name]]
+        if missing:
+            if pkg_name not in self._distribution_file.release_packages:
+                return {fp: self._release_resources[pkg_name].get(fp) for fp in ordered_fps}
+            pkg = self._distribution_file.release_packages[pkg_name]
+            repo_entry = self._distribution_file.repositories[pkg.repository_name]
+            repo = repo_entry.release_repository
+            if repo is None or repo.version is None:
+                return {fp: self._release_resources[pkg_name].get(fp) for fp in ordered_fps}
+
+            if len(self._manifest_providers) == 1 and isinstance(
+                self._manifest_providers[0], CachedManifestProvider
+            ):
+                fetched = self._manifest_providers[0].fetch_many(
+                    self._distribution_file.name, repo, pkg_name, missing
+                )
+                for fp in missing:
+                    self._release_resources[pkg_name][fp] = fetched.get(fp)
+            elif self._supports_batched_release_fetch():
+                resolved = {}
+                final_exception = None
+                for mp in self._manifest_providers:
+                    remaining = [fp for fp in missing if fp not in resolved]
+                    if not remaining:
+                        break
+                    if isinstance(mp, CachedManifestProvider):
+                        try:
+                            fetched = mp.fetch_many(
+                                self._distribution_file.name, repo, pkg_name, remaining
+                            )
+                        except Exception as e:
+                            logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', str(mp)), e))
+                            final_exception = e
+                            continue
+                        for fp in remaining:
+                            if fp in fetched:
+                                resolved[fp] = fetched[fp]
+                        continue
+                    unified = provider_for(mp)
+                    if unified is not None:
+                        try:
+                            unified.accepts(repo)
+                            query = ManifestQuery.for_release(repo, pkg_name, filepaths=tuple(remaining))
+                            res = execute_query(unified, query)
+                        except Exception as e:
+                            logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', str(mp)), e))
+                            final_exception = e
+                            continue
+                        pkg_manifest = res.packages.get(pkg_name)
+                        pkg_files = pkg_manifest.files if pkg_manifest is not None else {}
+                        for fp in remaining:
+                            if fp in res.errors:
+                                final_exception = res.errors[fp]
+                                continue
+                            resolved[fp] = pkg_files.get(fp)
+                    else:
+                        for fp in remaining:
+                            try:
+                                content = call_release_provider(
+                                    mp, self._distribution_file.name, repo, pkg_name, fp
+                                )
+                            except Exception as e:
+                                logger.debug(
+                                    'Skipped "%s()": %s' % (getattr(mp, '__name__', str(mp)), e)
+                                )
+                                final_exception = e
+                                continue
+                            if content is not None:
+                                resolved[fp] = content
+
+                if final_exception is not None and any(fp not in resolved for fp in missing):
+                    raise final_exception
+                for fp in missing:
+                    self._release_resources[pkg_name][fp] = resolved.get(fp)
+            else:
+                for fp in missing:
+                    self.get_release_resource(pkg_name, fp, require_crawled=require_crawled)
+
+        return {fp: self._release_resources.get(pkg_name, {}).get(fp) for fp in ordered_fps}
 
     def get_release_package_xml(self, pkg_name):
         return self.get_release_resource(pkg_name, 'package.xml')

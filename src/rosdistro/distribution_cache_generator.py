@@ -479,6 +479,241 @@ def _get_last_provider_fetch_info(dist, attr_name):
     return None
 
 
+def _get_last_provider_fetch_infos(dist, attr_name):
+    providers = getattr(dist, attr_name, None)
+    if not isinstance(providers, (list, tuple)):
+        return None
+    for mp in providers:
+        infos = getattr(mp, 'last_fetch_infos', None)
+        if isinstance(infos, dict):
+            return infos
+    return None
+
+
+def _resolve_fetch_status(info, content, resource_name):
+    if info is not None:
+        fetch_type = info.get('fetch_type') or 'unknown'
+        status = info.get('status') or ('ok' if content is not None else 'not_found')
+        return fetch_type, status
+    if content is not None:
+        return 'provider', 'ok'
+    if resource_name == 'package.xml':
+        return 'failed', 'failed'
+    return 'provider', 'not_found'
+
+
+def _validate_release_package_xml(
+    dist_name, pkg_name, repo, content, cache, has_release_cache_dict, errors, drop_keys=None,
+):
+    """Validate fetched package.xml; return False if missing/invalid so callers can stop."""
+    if not content:
+        errors.append('%s: missing package.xml file for package "%s"' % (dist_name, pkg_name))
+        if has_release_cache_dict and pkg_name in cache.release_resources:
+            cache.release_resources[pkg_name].pop('package.xml', None)
+            for k in (drop_keys or ()):
+                cache.release_resources[pkg_name].pop(k, None)
+            if set(cache.release_resources[pkg_name].keys()) <= {'version'}:
+                del cache.release_resources[pkg_name]
+        return False
+    try:
+        pkg = parse_package_string(content)
+    except InvalidPackage as e:
+        errors.append('%s: invalid package.xml file for package "%s": %s' % (dist_name, pkg_name, e))
+        if has_release_cache_dict and pkg_name in cache.release_resources:
+            cache.release_resources[pkg_name].pop('package.xml', None)
+            for k in (drop_keys or ()):
+                cache.release_resources[pkg_name].pop(k, None)
+            if set(cache.release_resources[pkg_name].keys()) <= {'version'}:
+                del cache.release_resources[pkg_name]
+        return False
+    if not re.match(r'^%s(-[\dA-z~\+\.]+)?$' % re.escape(pkg.version), repo.version):
+        errors.append(
+            '%s: different version in package.xml (%s) for package "%s" than for the repository (%s) '
+            '(after removing the debian increment)'
+            % (dist_name, pkg.version, pkg_name, repo.version)
+        )
+    return True
+
+
+def _fetch_release_package_resources(
+    dist, dist_name, cache, pkg_name, repo, all_release_resources,
+    cache_config, neighbor_pool, has_release_cache_dict, active_profiler,
+    rel_counts, rel_durations, errors,
+):
+    """Fetch all enabled release resources for *pkg_name*, batching provider fetches when possible."""
+    supports_batch = (
+        len(all_release_resources) > 1
+        and hasattr(dist, '_supports_batched_release_fetch')
+        and dist._supports_batched_release_fetch()
+    )
+    if not supports_batch:
+        for resource_name in all_release_resources:
+            content, fetch_type, _, dur_s = _fetch_release_resource(
+                dist, dist_name, cache, pkg_name, repo, resource_name,
+                cache_config, neighbor_pool, has_release_cache_dict, active_profiler,
+            )
+            rel_counts[fetch_type] = rel_counts.get(fetch_type, 0) + 1
+            rel_durations[fetch_type] = rel_durations.get(fetch_type, 0.0) + dur_s
+            if resource_name == 'package.xml':
+                if not _validate_release_package_xml(
+                    dist_name, pkg_name, repo, content, cache, has_release_cache_dict, errors
+                ):
+                    break
+        return
+
+    # 1. Resolve cache hits and neighbor copies first so only truly missing files hit providers.
+    pending = []
+    for resource_name in all_release_resources:
+        if resource_name == 'package.xml':
+            was_cached = bool(
+                has_release_cache_dict and cache.release_resources[pkg_name].get('package.xml')
+            )
+        else:
+            was_cached = bool(
+                has_release_cache_dict and resource_name in cache.release_resources[pkg_name]
+            )
+        if was_cached:
+            content, fetch_type, _, dur_s = _fetch_release_resource(
+                dist, dist_name, cache, pkg_name, repo, resource_name,
+                cache_config, None, has_release_cache_dict, active_profiler,
+            )
+            rel_counts[fetch_type] = rel_counts.get(fetch_type, 0) + 1
+            rel_durations[fetch_type] = rel_durations.get(fetch_type, 0.0) + dur_s
+            if resource_name == 'package.xml':
+                if not _validate_release_package_xml(
+                    dist_name, pkg_name, repo, content, cache, has_release_cache_dict, errors
+                ):
+                    return
+            continue
+
+        if neighbor_pool is not None and has_release_cache_dict:
+            found, copied_val, neighbor_dist = neighbor_pool.find_release_resource(
+                dist_name, pkg_name, repo, resource_name, cache_config
+            )
+            if found:
+                resource_type = 'release:%s' % resource_name
+                with active_profiler.span(
+                    resource_type,
+                    kind='fetch',
+                    resource_type=resource_type,
+                    fetch_type='local_neighbor',
+                    target=pkg_name,
+                    dist_name=dist_name,
+                    deferred_label=True,
+                ) as nspan:
+                    cache.release_resources[pkg_name][resource_name] = copied_val
+                    if resource_name == 'package.xml':
+                        content = dist.get_release_package_xml(pkg_name)
+                    else:
+                        content = dist.get_release_resource(pkg_name, resource_name)
+                    status = 'ok' if content is not None else 'not_found'
+                    detail_parts = ['neighbor=%s' % neighbor_dist]
+                    if resource_name == 'package.xml' and getattr(repo, 'version', None):
+                        detail_parts.append('version=%s' % repo.version)
+                    detail = ', '.join(detail_parts)
+                    nspan.status = status
+                    nspan.detail = detail
+                active_profiler.report_fetch(
+                    resource_type,
+                    pkg_name,
+                    'local_neighbor',
+                    status=status,
+                    duration_s=nspan.duration_s,
+                    dist_name=dist_name,
+                    detail=detail,
+                    level='top',
+                )
+                rel_counts['local_neighbor'] = rel_counts.get('local_neighbor', 0) + 1
+                rel_durations['local_neighbor'] = rel_durations.get('local_neighbor', 0.0) + nspan.duration_s
+                if resource_name == 'package.xml':
+                    if not _validate_release_package_xml(
+                        dist_name, pkg_name, repo, content, cache, has_release_cache_dict, errors
+                    ):
+                        return
+                continue
+
+        pending.append(resource_name)
+
+    if not pending:
+        return
+
+    if len(pending) == 1:
+        resource_name = pending[0]
+        content, fetch_type, _, dur_s = _fetch_release_resource(
+            dist, dist_name, cache, pkg_name, repo, resource_name,
+            cache_config, None, has_release_cache_dict, active_profiler,
+        )
+        rel_counts[fetch_type] = rel_counts.get(fetch_type, 0) + 1
+        rel_durations[fetch_type] = rel_durations.get(fetch_type, 0.0) + dur_s
+        if resource_name == 'package.xml':
+            _validate_release_package_xml(
+                dist_name, pkg_name, repo, content, cache, has_release_cache_dict, errors
+            )
+        return
+
+    # 2. Fetch all pending release resources in one provider query, attributed to pending[0]'s span.
+    first_res = pending[0]
+    first_type = 'release:%s' % first_res
+    with active_profiler.span(
+        first_type,
+        kind='fetch',
+        resource_type=first_type,
+        target=pkg_name,
+        dist_name=dist_name,
+        deferred_label=True,
+    ) as first_span:
+        fetched = dist.get_release_resources(pkg_name, pending)
+        infos = _get_last_provider_fetch_infos(dist, '_manifest_providers') or {}
+        first_content = fetched.get(first_res)
+        first_fetch_type, first_status = _resolve_fetch_status(
+            infos.get(first_res), first_content, first_res
+        )
+        first_detail = (
+            'version=%s' % repo.version
+            if first_res == 'package.xml' and getattr(repo, 'version', None)
+            else None
+        )
+        first_span.fetch_type = first_fetch_type
+        first_span.status = first_status
+        first_span.detail = first_detail
+
+    active_profiler.report_fetch(
+        first_type,
+        pkg_name,
+        first_fetch_type,
+        status=first_status,
+        duration_s=first_span.duration_s,
+        dist_name=dist_name,
+        detail=first_detail,
+        level='top',
+    )
+    rel_counts[first_fetch_type] = rel_counts.get(first_fetch_type, 0) + 1
+    rel_durations[first_fetch_type] = rel_durations.get(first_fetch_type, 0.0) + first_span.duration_s
+
+    if first_res == 'package.xml':
+        if not _validate_release_package_xml(
+            dist_name, pkg_name, repo, first_content, cache, has_release_cache_dict, errors,
+            drop_keys=pending[1:],
+        ):
+            return
+
+    for resource_name in pending[1:]:
+        content = fetched.get(resource_name)
+        fetch_type, status = _resolve_fetch_status(infos.get(resource_name), content, resource_name)
+        active_profiler.record_instant_fetch(
+            'release:%s' % resource_name,
+            pkg_name,
+            fetch_type,
+            status=status,
+            dist_name=dist_name,
+            detail='batched',
+            kind='fetch',
+            emit_console=True,
+        )
+        rel_counts[fetch_type] = rel_counts.get(fetch_type, 0) + 1
+        rel_durations[fetch_type] = rel_durations.get(fetch_type, 0.0)
+
+
 def _fetch_release_resource(
     dist, dist_name, cache, pkg_name, repo, resource_name,
     cache_config, neighbor_pool, has_release_cache_dict, active_profiler,
@@ -739,37 +974,11 @@ def _generate_distribution_cache_impl(
                     cache.release_resources[pkg_name] = {}
                 cache.release_resources[pkg_name]['version'] = repo.version
 
-            for resource_name in all_release_resources:
-                content, fetch_type, _, dur_s = _fetch_release_resource(
-                    dist, dist_name, cache, pkg_name, repo, resource_name,
-                    cache_config, neighbor_pool, has_release_cache_dict, active_profiler,
-                )
-                rel_counts[fetch_type] = rel_counts.get(fetch_type, 0) + 1
-                rel_durations[fetch_type] = rel_durations.get(fetch_type, 0.0) + dur_s
-
-                if resource_name == 'package.xml':
-                    if not content:
-                        errors.append('%s: missing package.xml file for package "%s"' % (dist_name, pkg_name))
-                        if has_release_cache_dict and pkg_name in cache.release_resources:
-                            cache.release_resources[pkg_name].pop('package.xml', None)
-                            if set(cache.release_resources[pkg_name].keys()) <= {'version'}:
-                                del cache.release_resources[pkg_name]
-                        break
-                    try:
-                        pkg = parse_package_string(content)
-                    except InvalidPackage as e:
-                        errors.append('%s: invalid package.xml file for package "%s": %s' % (dist_name, pkg_name, e))
-                        if has_release_cache_dict and pkg_name in cache.release_resources:
-                            cache.release_resources[pkg_name].pop('package.xml', None)
-                            if set(cache.release_resources[pkg_name].keys()) <= {'version'}:
-                                del cache.release_resources[pkg_name]
-                        break
-                    if not re.match(r'^%s(-[\dA-z~\+\.]+)?$' % re.escape(pkg.version), repo.version):
-                        errors.append(
-                            '%s: different version in package.xml (%s) for package "%s" than for the repository (%s) '
-                            '(after removing the debian increment)'
-                            % (dist_name, pkg.version, pkg_name, repo.version)
-                        )
+            _fetch_release_package_resources(
+                dist, dist_name, cache, pkg_name, repo, all_release_resources,
+                cache_config, neighbor_pool, has_release_cache_dict, active_profiler,
+                rel_counts, rel_durations, errors,
+            )
 
     rel_phase_dur = time.perf_counter() - rel_phase_start
     print(
