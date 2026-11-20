@@ -332,7 +332,9 @@ class RosdistroSpanProcessor(SpanProcessor):
     def _record_slowest_locked(self, attrs, res, ft, status, dur_s):
         if self.slowest_limit <= 0:
             return
-        if ft in ('cache', 'skipped', 'ttl_skip', 'pinned_hash', 'known_remote_ref') and dur_s < 0.005:
+        if ft in (
+            'cache', 'skipped', 'ttl_skip', 'pinned_hash', 'known_remote_ref', 'github_graphql'
+        ) and dur_s < 0.005:
             return
         self._slowest_seq += 1
         entry = (dur_s, self._slowest_seq, {

@@ -10,6 +10,7 @@ Tools to work with catkinized rosdistro files.
 - **Worker count**: Set `-j N` / `--jobs N` (or `ROSDISTRO_SOURCE_WORKERS=N`; use `-j 1` for sequential execution).
 - **Per-host pacing & concurrency**: Remote hosts are paced independently (`api.github.com`, `raw.githubusercontent.com`, `gitlab.com`, and `git` operations each have their own bucket; local/loopback targets are unthrottled). Override via `ROSDISTRO_HOST_MIN_INTERVAL` (seconds) and `ROSDISTRO_MAX_CONCURRENT_PER_HOST`.
 - **Coordinated backoff**: HTTP `429`/`403` rate-limit headers (`Retry-After`, `X-RateLimit-Remaining`/`X-RateLimit-Reset`, `RateLimit-Remaining`/`RateLimit-Reset`) and `git` HTTP 429 responses trigger shared host backoff with adaptive AIMD pacing and bounded retries (`ROSDISTRO_RETRY_MAX`, default `30` seconds). Long rate-limit windows fail fast so fallback providers (e.g. `git`) can run without poisoning `failed_source_repos`.
+- **Batched GitHub ref validation**: When `GITHUB_TOKEN` is set, warm-cache ref validation batches expired `github.com` repositories through GitHub's GraphQL API (default `50` repos/query, override via `ROSDISTRO_GITHUB_GRAPHQL_BATCH_SIZE`; disable with `ROSDISTRO_GITHUB_GRAPHQL=0`), falling back cleanly to parallel `git ls-remote` for non-GitHub hosts, ambiguous refs, or errors.
 
 ## Profiling Cache Builds
 

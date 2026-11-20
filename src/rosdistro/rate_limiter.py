@@ -31,7 +31,8 @@
 
 """Host-aware rate limiting, pacing, and coordinated backoff across threads."""
 
-from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import ExitStack, contextmanager
 import datetime
 import email.utils
 import os
@@ -43,7 +44,8 @@ from urllib.error import HTTPError
 from urllib.parse import urlparse
 
 from . import logger
-from .cache_profiler import sanitize_url_for_trace, trace_operation
+from .cache_profiler import get_active_profiler, sanitize_url_for_trace, trace_operation
+from .fetch_reporter import get_active_reporter
 from .manifest_provider import get_http_header
 
 DEFAULT_RETRY_MAX = 30.0
@@ -231,16 +233,17 @@ class RateLimiter(object):
         with self._lock:
             bucket = self._buckets.get(key)
             if bucket is None:
+                is_http = protocol == 'http' or protocol.startswith('http_')
                 if self._env_interval is not None:
                     interval = self._env_interval
-                elif protocol == 'http':
+                elif is_http:
                     interval = self._http_intervals.get(norm, self._default_http_interval)
                 else:
                     interval = self._default_git_interval
 
                 if self._env_conc is not None:
                     conc = self._env_conc
-                elif protocol == 'http':
+                elif is_http:
                     conc = self._http_concurrency.get(norm, self._default_http_concurrency)
                 else:
                     conc = None
@@ -285,7 +288,8 @@ class RateLimiter(object):
             if wait <= 0:
                 break
 
-            op_name = '%s:%s' % (protocol, 'rate_limit_sleep' if is_backoff else 'rate_limit_pace')
+            op_prefix = 'http' if protocol.startswith('http') else protocol
+            op_name = '%s:%s' % (op_prefix, 'rate_limit_sleep' if is_backoff else 'rate_limit_pace')
             with trace_operation(op_name, fetch_type=fetch_type, target=target):
                 sleeper(wait)
             if is_backoff:
@@ -422,6 +426,42 @@ def use_rate_limiter(limiter):
         _active_limiter_local.limiter = prev
 
 
+def _run_parallel(items, fn, max_workers, thread_name_prefix='rosdistro'):
+    """Run *fn(item)* sequentially or in a ThreadPoolExecutor, propagating profiler/reporter/limiter context."""
+    if max_workers <= 1 or len(items) <= 1:
+        for item in items:
+            yield fn(item)
+        return
+
+    ctx_owner = get_active_profiler() or get_active_reporter()
+    captured = (
+        ctx_owner.capture_thread_context()
+        if ctx_owner is not None and hasattr(ctx_owner, 'capture_thread_context')
+        else None
+    )
+    active_limiter = get_active_rate_limiter()
+
+    def _wrapped(item):
+        with ExitStack() as stack:
+            if active_limiter is not None:
+                stack.enter_context(use_rate_limiter(active_limiter))
+            if ctx_owner is not None and captured is not None:
+                stack.enter_context(ctx_owner.attach_thread_context(captured))
+            return fn(item)
+
+    with ThreadPoolExecutor(
+        max_workers=min(max_workers, len(items)), thread_name_prefix=thread_name_prefix
+    ) as executor:
+        futures = [executor.submit(_wrapped, item) for item in items]
+        try:
+            for future in as_completed(futures):
+                yield future.result()
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
+
+
 def open_url_with_backoff(
     req,
     *,
@@ -437,6 +477,9 @@ def open_url_with_backoff(
     rate_limit_hint=None,
     provider_label=None,
     deadline=None,
+    protocol='http',
+    operation='http:get',
+    detail=None,
 ):
     """Execute *urlopen_fn(req, timeout=timeout)* with host-aware pacing and rate-limit backoff.
 
@@ -456,7 +499,7 @@ def open_url_with_backoff(
             remaining_budget = min(remaining_budget, max(0.0, deadline - time.monotonic()))
         slot_cm = (
             limiter.request_slot(
-                'http', host, remaining_budget=remaining_budget, sleep_fn=sleep_fn,
+                protocol, host, remaining_budget=remaining_budget, sleep_fn=sleep_fn,
                 fetch_type=fetch_type, target=url_str, min_monotonic=min_monotonic,
             )
             if limiter is not None and host is not None else None
@@ -464,10 +507,10 @@ def open_url_with_backoff(
         backoff_waited = slot_cm.__enter__() if slot_cm is not None else 0.0
         try:
             remaining_budget = max(0.0, remaining_budget - backoff_waited)
-            with trace_operation('http:get', fetch_type=fetch_type, target=url_str):
+            with trace_operation(operation, fetch_type=fetch_type, target=url_str, detail=detail):
                 resp = urlopen_fn(req, timeout=timeout)
             if limiter is not None and host is not None:
-                limiter.record_response_headers('http', host, getattr(resp, 'headers', None))
+                limiter.record_response_headers(protocol, host, getattr(resp, 'headers', None))
             return resp, slot_cm
         except HTTPError as e:
             if slot_cm is not None:
@@ -495,7 +538,7 @@ def open_url_with_backoff(
                 )
             if limiter is not None and host is not None:
                 delay, should_warn, blocked_until = limiter.record_rate_limit(
-                    'http', host, retry_after=retry_after, reset_wait=reset_wait,
+                    protocol, host, retry_after=retry_after, reset_wait=reset_wait,
                     remaining_budget=remaining_budget, status_code=e.code,
                     reason=reason, backoff_base=backoff, backoff_factor=1.5,
                 )

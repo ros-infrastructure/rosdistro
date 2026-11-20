@@ -31,8 +31,6 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import ExitStack
 import copy
 import datetime
 import os
@@ -42,15 +40,15 @@ import time
 import yaml
 
 from . import logger
-from .cache_profiler import get_active_profiler, trace_operation, trace_span
+from .cache_profiler import trace_operation, trace_span
 from .distribution_file import create_distribution_file
-from .fetch_reporter import get_active_reporter, report_fetch
+from .fetch_reporter import report_fetch
 from .package import Package
 from .rate_limiter import (
     HostRateLimitError,
-    get_active_rate_limiter,
+    _run_parallel,
+    extract_host,
     run_git_with_backoff,
-    use_rate_limiter,
 )
 from .source_repository_cache import SourceRepositoryCache
 from .vcs import Git, normalize_git_url, ref_is_hash
@@ -93,42 +91,6 @@ def load_cache_yaml(yaml_str):
     """Safely parse a distribution or release cache YAML payload, tolerating
     legacy Python 2 ``!!python/str`` and ``!!python/unicode`` string tags."""
     return yaml.load(yaml_str, Loader=_LegacyCacheSafeLoader)
-
-
-def _run_parallel(items, fn, max_workers, thread_name_prefix='rosdistro'):
-    """Run *fn(item)* sequentially or in a ThreadPoolExecutor, propagating profiler/reporter/limiter context."""
-    if max_workers <= 1 or len(items) <= 1:
-        for item in items:
-            yield fn(item)
-        return
-
-    ctx_owner = get_active_profiler() or get_active_reporter()
-    captured = (
-        ctx_owner.capture_thread_context()
-        if ctx_owner is not None and hasattr(ctx_owner, 'capture_thread_context')
-        else None
-    )
-    active_limiter = get_active_rate_limiter()
-
-    def _wrapped(item):
-        with ExitStack() as stack:
-            if active_limiter is not None:
-                stack.enter_context(use_rate_limiter(active_limiter))
-            if ctx_owner is not None and captured is not None:
-                stack.enter_context(ctx_owner.attach_thread_context(captured))
-            return fn(item)
-
-    with ThreadPoolExecutor(
-        max_workers=min(max_workers, len(items)), thread_name_prefix=thread_name_prefix
-    ) as executor:
-        futures = [executor.submit(_wrapped, item) for item in items]
-        try:
-            for future in as_completed(futures):
-                yield future.result()
-        except BaseException:
-            for future in futures:
-                future.cancel()
-            raise
 
 
 def _resolve_git_remote_ref_details(url, version):
@@ -923,7 +885,8 @@ class DistributionCache(object):
         return data
 
     def _validate_source_repo_entry(
-        self, dist_file, repo, min_update_delta, known_remote_refs, ref_locks=None,
+        self, dist_file, repo, min_update_delta, known_remote_refs,
+        ref_locks=None, graphql_resolved_keys=None,
     ):
         """Validate a single cached source repo entry; return ``(fetch_type, status)``."""
         try:
@@ -963,7 +926,12 @@ class DistributionCache(object):
         if source_repository.version and ref_is_hash(source_repository.version):
             source_hash, fetch_type = source_repository.version, 'pinned_hash'
         elif known_hash is not None:
-            source_hash, fetch_type = known_hash, 'known_remote_ref'
+            fetch_type = (
+                'github_graphql'
+                if graphql_resolved_keys and ref_key in graphql_resolved_keys
+                else 'known_remote_ref'
+            )
+            source_hash = known_hash
         elif source_repository.type != 'git' or not source_repository.version:
             logger.debug(
                 'Unable to check hash for non-git or unversioned repo "%s", dropping cache entry.' % repo
@@ -1027,7 +995,7 @@ class DistributionCache(object):
             with self._lock:
                 self.source_repo_resources.pop(repo, None)
             return fetch_type, 'dropped'
-        if fetch_type in ('git_ls_remote', 'known_remote_ref'):
+        if fetch_type in ('git_ls_remote', 'known_remote_ref', 'github_graphql'):
             refreshed_at = (
                 datetime.datetime.now(last_update_time.tzinfo)
                 if last_update_time is not None and last_update_time.tzinfo is not None
@@ -1170,6 +1138,39 @@ class DistributionCache(object):
                 raise ValueError('max_workers must be >= 1, got %r' % (max_workers,))
             ref_locks = {} if effective_workers > 1 else None
             shared_refs = known_remote_refs if known_remote_refs is not None else ({} if effective_workers > 1 else None)
+            graphql_resolved_keys = None
+
+            github_ref_pairs = []
+            now_prescan = datetime.datetime.now()
+            for repo_name in repos_to_validate:
+                repo_entry = dist_file.repositories.get(repo_name)
+                if repo_entry is None:
+                    continue
+                source_repository = (
+                    repo_entry.source_repository
+                    if repo_entry.source_repository is not None or not self.config.fallback_src_to_doc
+                    else repo_entry.doc_repository
+                )
+                if (
+                    not source_repository
+                    or source_repository.type != 'git'
+                    or not source_repository.version
+                    or ref_is_hash(source_repository.version)
+                ):
+                    continue
+                ref_key = (source_repository.url, source_repository.version)
+                if shared_refs is not None and ref_key in shared_refs:
+                    continue
+                repo_cache = self.source_repo_resources.get(repo_name)
+                if repo_cache is None:
+                    continue
+                last_update_time = repo_cache.last_update_time()
+                if min_update_delta > 0 and last_update_time is not None:
+                    if _age_seconds(last_update_time, now=now_prescan) < min_update_delta:
+                        continue
+                if extract_host(source_repository.url) != 'github.com':
+                    continue
+                github_ref_pairs.append(ref_key)
 
             def _validate_one(repo_name):
                 with trace_span(
@@ -1181,7 +1182,8 @@ class DistributionCache(object):
                     deferred_label=True,
                 ) as vspan:
                     fetch_type, status = self._validate_source_repo_entry(
-                        dist_file, repo_name, min_update_delta, shared_refs, ref_locks=ref_locks,
+                        dist_file, repo_name, min_update_delta, shared_refs,
+                        ref_locks=ref_locks, graphql_resolved_keys=graphql_resolved_keys,
                     )
                     vspan.fetch_type = fetch_type
                     vspan.status = status
@@ -1197,6 +1199,26 @@ class DistributionCache(object):
                 return fetch_type, status
 
             with trace_operation('cache:validate_source', target=dist_name):
+                if github_ref_pairs:
+                    from .manifest_provider import github as github_mp
+                    with trace_operation(
+                        'cache:github_graphql_batch', fetch_type='github_graphql', target=dist_name
+                    ) as gql_span:
+                        graphql_resolved = github_mp.resolve_github_remote_refs(
+                            github_ref_pairs, max_workers=effective_workers
+                        )
+                        gql_span.detail = 'requested=%d, resolved=%d' % (
+                            len(github_ref_pairs), len(graphql_resolved)
+                        )
+                    if graphql_resolved:
+                        if shared_refs is None:
+                            shared_refs = {}
+                        with self._lock:
+                            for ref_key, sha in graphql_resolved.items():
+                                if ref_key not in shared_refs:
+                                    shared_refs[ref_key] = sha
+                        graphql_resolved_keys = set(graphql_resolved.keys())
+
                 for fetch_type, status in _run_parallel(
                     repos_to_validate, _validate_one, effective_workers, 'rosdistro-val'
                 ):
