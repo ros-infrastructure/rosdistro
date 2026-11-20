@@ -85,7 +85,7 @@ class _GitSession(ManifestSession):
         filename = os.path.join(self._repo_path, *parts)
         if not os.path.isfile(filename):
             return None
-        with open(filename, 'r') as f:
+        with open(filename, 'r', encoding='utf-8', errors='replace') as f:
             return f.read()
 
     def fetch_metadata(self, keys):

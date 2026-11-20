@@ -373,7 +373,7 @@ class CacheConfig(dict):
 
     @classmethod
     def from_file(cls, path):
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f.read()) or {}
         return cls(data)
 

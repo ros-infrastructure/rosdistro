@@ -112,7 +112,7 @@ class _TarSession(ManifestSession):
             extracted = self._tar.extractfile(member)
             if extracted is None:
                 return None
-            return extracted.read().decode('utf-8')
+            return extracted.read().decode('utf-8', errors='replace')
 
     def close(self):
         if self._tar is not None:

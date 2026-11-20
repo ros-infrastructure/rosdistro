@@ -36,6 +36,7 @@ import os.path
 import sys
 
 from rosdistro import get_distribution
+from rosdistro.common import path_to_url, url_to_path
 from rosdistro.freeze_source import CONCURRENT_DEFAULT, freeze_distribution_sources
 from rosdistro.index import Index
 from rosdistro.writer import yaml_from_distribution_file
@@ -69,7 +70,7 @@ def main():
     args = parse_args()
     index = Index(
         yaml.safe_load(args.index),
-        'file://%s' % os.path.dirname(os.path.abspath(args.index.name)))
+        os.path.dirname(path_to_url(args.index.name)))
 
     if not args.dist_names:
         args.dist_names = sorted(index.distributions.keys())
@@ -88,7 +89,7 @@ def main():
             dist, release_version=args.release_version, release_tag=args.release_tag,
             concurrent_ops=args.jobs, quiet=args.quiet)
 
-        with open(dist_url.split('://')[1], 'w') as f:
+        with open(url_to_path(dist_url), 'w', encoding='utf-8') as f:
             f.write(yaml_from_distribution_file(dist))
 
 

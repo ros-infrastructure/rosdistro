@@ -520,7 +520,7 @@ def test_legacy_python2_tagged_cache_loads_in_get_cache_and_build_cache(tmp_path
 
     assert not rc
     assert fetched_package_xml == []
-    regenerated_text = (out_dir / 'hydro-cache.yaml').read_text()
+    regenerated_text = (out_dir / 'hydro-cache.yaml').read_text(encoding='utf-8')
     regenerated = yaml.safe_load(regenerated_text)
     assert 'ar_sys' in regenerated['release_package_xmls']
     assert '!!python/' not in regenerated_text
