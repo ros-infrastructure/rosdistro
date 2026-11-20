@@ -43,6 +43,8 @@ from rosdistro.manifest_provider.cache import (
     CachedManifestProvider,
     CachedSourceManifestProvider,
 )
+
+from . import path_to_url
 from rosdistro.manifest_provider.git import (
     git_manifest_provider,
     git_source_manifest_provider,
@@ -960,7 +962,7 @@ def test_real_local_git_commands_and_update_validation_traced(tmp_path, monkeypa
         ['git', 'rev-parse', 'HEAD'], cwd=str(repo_dir), text=True
     ).strip()
 
-    repo_url = 'file://' + str(repo_dir)
+    repo_url = path_to_url(repo_dir)
     dist_data = {
         'type': 'distribution',
         'version': 2,

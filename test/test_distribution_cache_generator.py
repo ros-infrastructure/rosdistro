@@ -1186,4 +1186,58 @@ def test_cli_build_cache_min_update_delta_override(tmp_path, monkeypatch):
     mock_git.return_value.command.assert_not_called()
 
 
+def test_generate_distribution_caches_converts_local_index_to_file_uri_and_loads_utf8_cache(tmp_path):
+    from pathlib import PureWindowsPath
+    from rosdistro import distribution_cache_generator as dcg
+
+    # 1. Local index inside a directory with spaces works end-to-end
+    spaced_dir = tmp_path / 'my rosdistro'
+    spaced_dir.mkdir()
+    index_path = _write_multi_distro_index(spaced_dir, {'distro_a': 'pkg_a'})
+
+    def fake_rel(dist_name, repo, pkg_name, filepath='package.xml'):
+        if filepath == 'package.xml':
+            return (
+                '<?xml version="1.0"?><package format="2">'
+                f'<name>{pkg_name}</name><version>1.0.0</version>'
+                '<description>UTF-8 author René</description>'
+                '<maintainer email="dev@example.com">René</maintainer>'
+                '<license>BSD</license></package>'
+            )
+        return None
+
+    out_dir = tmp_path / 'out'
+    with patch('rosdistro.Distribution.default_manifest_providers', [fake_rel]):
+        caches = generate_distribution_caches(
+            index_path, dist_names=['distro_a'], preclean=True, output_dir=str(out_dir)
+        )
+    assert 'René' in caches['distro_a'].release_package_xmls['pkg_a']
+
+    # Uncompressed local cache file with UTF-8 content reloads cleanly via _load_local_cache_file
+    (out_dir / 'distro_a-cache.yaml.gz').unlink()
+    reloaded, loaded_path = dcg._load_local_cache_file('distro_a', path=str(out_dir / 'distro_a-cache.yaml'))
+    assert loaded_path.endswith('distro_a-cache.yaml')
+    assert 'René' in reloaded.release_package_xmls['pkg_a']
+
+    # 2. Simulated Windows local index path produces an RFC 8089 file:/// URI for get_index
+    win_index = r'C:\Users\runneradmin\AppData\Local\Temp\index-v4.yaml'
+    seen_urls = []
+
+    class _FakeIndex:
+        distributions = {}
+
+    def fake_get_index(url):
+        seen_urls.append(url)
+        return _FakeIndex()
+
+    with patch('rosdistro.distribution_cache_generator.os.path.isfile', return_value=True), \
+         patch('rosdistro.common.os.path.abspath', side_effect=lambda p: p), \
+         patch('rosdistro.common.Path', PureWindowsPath), \
+         patch('rosdistro.distribution_cache_generator.get_index', side_effect=fake_get_index):
+        generate_distribution_caches(win_index, dist_names=[])
+
+    assert seen_urls == ['file:///C:/Users/runneradmin/AppData/Local/Temp/index-v4.yaml']
+
+
+
 

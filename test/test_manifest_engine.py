@@ -17,6 +17,8 @@ from rosdistro.manifest_provider.engine import (
 from rosdistro.release_repository_specification import ReleaseRepositorySpecification
 from rosdistro.source_repository_specification import SourceRepositorySpecification
 
+from . import path_to_url
+
 
 def _pkg_xml(name, version='1.0.0'):
     return (
@@ -353,7 +355,7 @@ def test_single_provider_list_serves_both_release_and_source_queries(tmp_path):
         'version': 4,
         'distributions': {'rolling': {'distribution': ['rolling/distribution.yaml']}},
     }))
-    index = get_index('file://' + str(index_path))
+    index = get_index(path_to_url(index_path))
     cache = DistributionCache('rolling', distribution_file_data=dist_data, config=CacheConfig.extended())
     cached_dist = get_cached_distribution(
         index, 'rolling', cache=cache, allow_lazy_load=True, providers=[unified]

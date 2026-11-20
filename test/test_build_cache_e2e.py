@@ -1,12 +1,12 @@
 import gzip
 import json
 import os
-import shutil
 import tempfile
 import pytest
 import yaml
 from jsonschema import validate
 
+from rosdistro.common import rmtree
 from rosdistro.distribution_cache_generator import generate_distribution_caches
 
 
@@ -55,4 +55,4 @@ def test_build_cache_e2e_rolling_schema():
         
     finally:
         os.chdir(original_cwd)
-        shutil.rmtree(temp_dir)
+        rmtree(temp_dir)

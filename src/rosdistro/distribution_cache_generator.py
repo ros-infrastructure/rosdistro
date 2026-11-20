@@ -52,6 +52,7 @@ from .cache_profiler import (
     trace_span,
     use_profiler,
 )
+from .common import path_to_url
 from .distribution_cache import (
     CacheConfig,
     DistributionCache,
@@ -112,7 +113,7 @@ def _load_local_cache_file(dist_name, path=None):
             with gzip.open(candidate, 'rb') as f:
                 yaml_str = f.read()
     else:
-        with open(candidate, 'r') as f:
+        with open(candidate, 'r', encoding='utf-8') as f:
             yaml_str = f.read()
     with trace_operation('yaml:load', target=candidate):
         data = load_cache_yaml(yaml_str)
@@ -964,7 +965,7 @@ def generate_distribution_caches(
         )
         with root_ctx:
             if os.path.isfile(index):
-                index = 'file://' + os.path.abspath(index)
+                index = path_to_url(index)
             index = get_index(index)
 
             if not dist_names:

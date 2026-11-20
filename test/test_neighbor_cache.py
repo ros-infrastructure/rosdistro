@@ -18,6 +18,8 @@ from rosdistro.distribution_cache_generator import (
 from rosdistro.manifest_provider.cache import sanitize_and_truncate_docs
 from rosdistro.source_repository_cache import SourceRepositoryCache
 
+from . import path_to_url
+
 
 SCHEMA_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -272,7 +274,7 @@ def test_preclean_disables_on_disk_and_explicit_neighbor_caches(tmp_path, monkey
     }
     fake_rel, fake_src, rel_calls, src_calls = _make_fake_providers(release_map, source_map)
 
-    index = get_index('file://' + index_path)
+    index = get_index(path_to_url(index_path))
     with patch('rosdistro.Distribution.default_manifest_providers', [fake_rel]), \
          patch('rosdistro.Distribution.default_source_manifest_providers', [fake_src]):
         cache_b = generate_distribution_cache(
@@ -887,7 +889,7 @@ def test_source_config_compatibility_superset_projection_and_strict_rejections(t
         'source_repo_metadata': {'stars': True},
     })
     fake_rel, fake_src, rel_calls, src_calls = _make_fake_providers({}, {})
-    index = get_index('file://' + index_path)
+    index = get_index(path_to_url(index_path))
     with patch('rosdistro.Distribution.default_manifest_providers', [fake_rel]), \
          patch('rosdistro.Distribution.default_source_manifest_providers', [fake_src]):
         cache_b = generate_distribution_cache(
@@ -1030,7 +1032,7 @@ def test_tar_source_repo_copied_when_fresh_and_rejected_when_expired(tmp_path, m
         },
     }
     index_path = _write_index_and_distros(tmp_path, {'distro_a': repos, 'distro_b': repos})
-    index = get_index('file://' + index_path)
+    index = get_index(path_to_url(index_path))
     cfg = CacheConfig({'source_package_resources': {'package.xml': True}})
 
     # Fresh tar neighbor -> copied locally without remote fetch
@@ -1155,7 +1157,7 @@ def test_prefers_fresh_neighbor_over_expired_neighbor_without_ls_remote(tmp_path
         sha_fresh, last_update_time=datetime.datetime.now() - datetime.timedelta(minutes=5),
     )
 
-    index = get_index('file://' + index_path)
+    index = get_index(path_to_url(index_path))
     fake_rel, fake_src, rel_calls, src_calls = _make_fake_providers({}, {})
     with patch('rosdistro.Distribution.default_manifest_providers', [fake_rel]), \
          patch('rosdistro.Distribution.default_source_manifest_providers', [fake_src]), \
@@ -1198,7 +1200,7 @@ def test_min_update_delta_zero_disables_ttl_copy_and_requires_ls_remote(tmp_path
     cfg_zero_ttl = CacheConfig.extended().to_dict()
     cfg_zero_ttl['min_update_delta'] = 0
 
-    index = get_index('file://' + index_path)
+    index = get_index(path_to_url(index_path))
     fake_rel, fake_src, rel_calls, src_calls = _make_fake_providers({}, {})
     with patch('rosdistro.Distribution.default_manifest_providers', [fake_rel]), \
          patch('rosdistro.Distribution.default_source_manifest_providers', [fake_src]), \
@@ -1227,7 +1229,7 @@ def test_release_unversioned_or_corrupt_neighbor_entry_strictly_rejected(tmp_pat
         'repo_corrupt': _shared_repo_stanza(pkg_name='pkg_corrupt', source_url=None),
     }
     index_path = _write_index_and_distros(tmp_path, {'distro_a': repos, 'distro_b': repos})
-    index = get_index('file://' + index_path)
+    index = get_index(path_to_url(index_path))
 
     neighbor = DistributionCache(
         'distro_a',
@@ -1277,7 +1279,7 @@ def test_source_package_resource_max_lines_mismatch_rejected(tmp_path, monkeypat
     long_readme = '\n'.join(f'Line {i}' for i in range(1, 121))
     repos = {'shared_repo': _shared_repo_stanza()}
     index_path = _write_index_and_distros(tmp_path, {'distro_a': repos, 'distro_b': repos})
-    index = get_index('file://' + index_path)
+    index = get_index(path_to_url(index_path))
 
     for neighbor_max, target_max in ((50, 100), (100, 50), (100, None)):
         neighbor_cfg = CacheConfig({
