@@ -1,7 +1,5 @@
 import os
-from pathlib import PureWindowsPath
 import sys
-from unittest.mock import patch
 
 import pytest
 
@@ -72,7 +70,7 @@ def test_path_to_url_and_url_to_path(tmp_path):
     spaced_dir = tmp_path / 'dir with spaces'
     spaced_dir.mkdir()
     sample = spaced_dir / 'index.yaml'
-    sample.write_text('hello: world\n', encoding='utf-8')
+    sample.write_bytes(b'hello: world\n')
 
     url = common_path_to_url(str(sample))
     assert url.startswith('file:///')
@@ -80,24 +78,18 @@ def test_path_to_url_and_url_to_path(tmp_path):
     assert load_url(url) == 'hello: world\n'
     assert url_to_path(url) == os.path.abspath(str(sample))
 
-    # Verify Windows drive and UNC paths always yield RFC 8089 file:// URIs
-    with patch('rosdistro.common.os.path.abspath', side_effect=lambda p: p), \
-         patch('rosdistro.common.Path', PureWindowsPath):
-        win_path = r'C:\Users\runneradmin\AppData\Local\Temp\my dir\index.yaml'
-        assert common_path_to_url(win_path) == (
-            'file:///C:/Users/runneradmin/AppData/Local/Temp/my%20dir/index.yaml'
-        )
-        unc_path = r'\\server\share\my dir\index.yaml'
-        assert common_path_to_url(unc_path) == 'file://server/share/my%20dir/index.yaml'
-
     if sys.platform == 'win32':
-        assert url_to_path('file:///C:/Users/runneradmin/my%20dir/index.yaml') == (
-            r'C:\Users\runneradmin\my dir\index.yaml'
-        )
-        assert url_to_path('file://server/share/my%20dir/index.yaml') == (
-            r'\\server\share\my dir\index.yaml'
-        )
+        win_path = r'C:\Users\runneradmin\AppData\Local\Temp\my dir\index.yaml'
+        win_url = 'file:///C:/Users/runneradmin/AppData/Local/Temp/my%20dir/index.yaml'
+        assert common_path_to_url(win_path) == win_url
+        assert url_to_path(win_url) == win_path
+
+        unc_path = r'\\server\share\my dir\index.yaml'
+        unc_url = 'file://server/share/my%20dir/index.yaml'
+        assert common_path_to_url(unc_path) == unc_url
+        assert url_to_path(unc_url) == unc_path
     else:
+        assert common_path_to_url('/tmp/my dir/index.yaml') == 'file:///tmp/my%20dir/index.yaml'
         assert url_to_path('file://localhost/tmp/my%20dir/index.yaml') == '/tmp/my dir/index.yaml'
 
     with pytest.raises(ValueError):

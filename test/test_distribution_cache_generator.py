@@ -1187,8 +1187,8 @@ def test_cli_build_cache_min_update_delta_override(tmp_path, monkeypatch):
 
 
 def test_generate_distribution_caches_converts_local_index_to_file_uri_and_loads_utf8_cache(tmp_path):
-    from pathlib import PureWindowsPath
     from rosdistro import distribution_cache_generator as dcg
+    from rosdistro.common import path_to_url
 
     # 1. Local index inside a directory with spaces works end-to-end
     spaced_dir = tmp_path / 'my rosdistro'
@@ -1219,8 +1219,7 @@ def test_generate_distribution_caches_converts_local_index_to_file_uri_and_loads
     assert loaded_path.endswith('distro_a-cache.yaml')
     assert 'René' in reloaded.release_package_xmls['pkg_a']
 
-    # 2. Simulated Windows local index path produces an RFC 8089 file:/// URI for get_index
-    win_index = r'C:\Users\runneradmin\AppData\Local\Temp\index-v4.yaml'
+    # 2. Local index path is converted to a percent-encoded RFC 8089 file:/// URI before get_index
     seen_urls = []
 
     class _FakeIndex:
@@ -1230,13 +1229,13 @@ def test_generate_distribution_caches_converts_local_index_to_file_uri_and_loads
         seen_urls.append(url)
         return _FakeIndex()
 
-    with patch('rosdistro.distribution_cache_generator.os.path.isfile', return_value=True), \
-         patch('rosdistro.common.os.path.abspath', side_effect=lambda p: p), \
-         patch('rosdistro.common.Path', PureWindowsPath), \
-         patch('rosdistro.distribution_cache_generator.get_index', side_effect=fake_get_index):
-        generate_distribution_caches(win_index, dist_names=[])
+    with patch('rosdistro.distribution_cache_generator.get_index', side_effect=fake_get_index):
+        generate_distribution_caches(index_path, dist_names=[])
 
-    assert seen_urls == ['file:///C:/Users/runneradmin/AppData/Local/Temp/index-v4.yaml']
+    assert seen_urls == [path_to_url(index_path)]
+    assert seen_urls[0].startswith('file:///')
+    assert 'my%20rosdistro/index-v4.yaml' in seen_urls[0]
+    assert '\\' not in seen_urls[0]
 
 
 
