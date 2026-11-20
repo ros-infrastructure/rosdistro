@@ -37,6 +37,7 @@ import sys
 import yaml
 
 from . import get_distribution_file, get_distribution_files, get_doc_build_files, get_doc_file, get_index, get_release_build_files, get_release_file, get_source_build_files, get_source_file
+from .common import url_to_path
 from .loader import load_url
 
 
@@ -118,7 +119,7 @@ def _reformat_files(index, dist_name, loader_function, yaml_url, file_type):
             continue
         identical = _check_file_identical(f, yaml_url[i], file_type)
         all_identical &= identical
-        path = url[7:]
+        path = url_to_path(url)
         if identical:
             print('Skipping identical file: %s' % path)
             continue
@@ -126,7 +127,7 @@ def _reformat_files(index, dist_name, loader_function, yaml_url, file_type):
         data = f.get_data()
         dist_file_data = _to_yaml(data)
         dist_file_data = '\n'.join(_yaml_header_lines(file_type, data['version'])) + '\n' + dist_file_data
-        with open(path, 'w') as f:
+        with open(path, 'w', encoding='utf-8') as f:
             f.write(dist_file_data)
     return all_identical
 

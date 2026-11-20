@@ -1,8 +1,11 @@
 from errno import EACCES, EPERM
 import os
+from pathlib import Path
 import shutil
 import stat
 import sys
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 _quiet = False
 
@@ -53,3 +56,18 @@ def _onerror_windows(function, path, excinfo):
     if isinstance(excinfo[1], OSError) and excinfo[1].errno in (EACCES, EPERM):
         os.chmod(path, stat.S_IWRITE)
         function(path)
+
+
+def path_to_url(path):
+    return Path(os.path.abspath(path)).as_uri()
+
+
+def url_to_path(url):
+    parsed = urlparse(url)
+    if parsed.scheme.lower() != 'file':
+        raise ValueError('Not a file:// URL: %s' % url)
+    if parsed.netloc and parsed.netloc.lower() != 'localhost':
+        raw_path = '//' + parsed.netloc + parsed.path
+    else:
+        raw_path = parsed.path
+    return url2pathname(raw_path)

@@ -31,21 +31,27 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-from .manifest_provider.bitbucket import bitbucket_manifest_provider
-from .manifest_provider.git import git_manifest_provider, git_source_manifest_provider
-from .manifest_provider.github import github_manifest_provider, github_source_manifest_provider
-from .manifest_provider.gitlab import gitlab_manifest_provider, gitlab_source_manifest_provider
-from .manifest_provider.tar import tar_manifest_provider, tar_source_manifest_provider
+import threading
+from .distribution_cache import ResourceNotCrawledError
+from .manifest_provider.bitbucket import BITBUCKET, bitbucket_manifest_provider
+from .manifest_provider.cache import CachedManifestProvider
+from .manifest_provider.chain import call_release_provider, call_source_provider
+from .manifest_provider.engine import ManifestQuery, execute_query, provider_for
+from .manifest_provider.git import GIT, git_manifest_provider, git_source_manifest_provider
+from .manifest_provider.github import GITHUB, github_manifest_provider, github_source_manifest_provider
+from .manifest_provider.gitlab import GITLAB, gitlab_manifest_provider, gitlab_source_manifest_provider
+from .manifest_provider.tar import TAR, tar_manifest_provider, tar_source_manifest_provider
 from .package import Package
 from . import logger
 
 
 class Distribution(object):
 
+    default_providers = [GITHUB, GITLAB, BITBUCKET, GIT, TAR]
     default_manifest_providers = [github_manifest_provider, gitlab_manifest_provider, bitbucket_manifest_provider, git_manifest_provider, tar_manifest_provider]
     default_source_manifest_providers = [github_source_manifest_provider, gitlab_source_manifest_provider, git_source_manifest_provider, tar_source_manifest_provider]
 
-    def __init__(self, distribution_file, manifest_providers=None, source_manifest_providers=None):
+    def __init__(self, distribution_file, manifest_providers=None, source_manifest_providers=None, providers=None):
         self._distribution_file = distribution_file
 
         # Use default
@@ -53,19 +59,120 @@ class Distribution(object):
         self._source_manifest_providers = Distribution.default_source_manifest_providers
 
         # Override default if given
+        if providers is not None:
+            self._manifest_providers = providers
+            self._source_manifest_providers = providers
         if manifest_providers is not None:
             self._manifest_providers = manifest_providers
         if source_manifest_providers is not None:
             self._source_manifest_providers = source_manifest_providers
 
-        self._release_package_xmls = {}
-        self._source_repo_package_xmls = {}
+        self._release_resources = {}
+        self._source_repo_resources = {}
+        self._lock = threading.RLock()
+
+        self._cache = None
+        for mp in (self._manifest_providers or []) + (self._source_manifest_providers or []):
+            if hasattr(mp, '_distribution_cache'):
+                self._cache = mp._distribution_cache
+                break
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('_lock', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._lock = threading.RLock()
 
     def __getattr__(self, name):
         return getattr(self._distribution_file, name)
 
-    def get_release_package_xml(self, pkg_name):
-        if pkg_name not in self._release_package_xmls:
+    @property
+    def cache(self):
+        return self._cache
+
+    @property
+    def cache_config(self):
+        return getattr(self._cache, 'config', None)
+
+    def _has_lazy_release_providers(self):
+        if not self._manifest_providers:
+            return False
+        for mp in self._manifest_providers:
+            if hasattr(mp, '_manifest_providers'):
+                if mp._manifest_providers:
+                    return True
+            else:
+                return True
+        return False
+
+    def _has_lazy_source_providers(self):
+        if not self._source_manifest_providers:
+            return False
+        for mp in self._source_manifest_providers:
+            if hasattr(mp, '_source_manifest_providers'):
+                if mp._source_manifest_providers:
+                    return True
+            else:
+                return True
+        return False
+
+    def is_release_resource_crawled(self, filepath, pkg_name=None):
+        if self._cache is not None and hasattr(self._cache, 'is_release_resource_crawled'):
+            if self._cache.is_release_resource_crawled(filepath, pkg_name=pkg_name):
+                return True
+            if not self._has_lazy_release_providers():
+                return False
+        if pkg_name is not None:
+            return filepath in self._release_resources.get(pkg_name, {})
+        return any(filepath in pkg_data for pkg_data in self._release_resources.values())
+
+    def is_source_resource_crawled(self, filepath, pkg_name=None):
+        if self._cache is not None and hasattr(self._cache, 'is_source_resource_crawled'):
+            if self._cache.is_source_resource_crawled(filepath, pkg_name=pkg_name):
+                return True
+            if not self._has_lazy_source_providers():
+                return False
+        if pkg_name is not None:
+            for repo_cache in self._source_repo_resources.values():
+                if repo_cache is not None and pkg_name in repo_cache and filepath in repo_cache[pkg_name]:
+                    return True
+            return False
+        return any(
+            filepath in pkg_data
+            for repo_cache in self._source_repo_resources.values() if repo_cache is not None
+            for _, pkg_data in repo_cache.items()
+        )
+
+    def is_source_metadata_crawled(self, key, repo_name=None):
+        if self._cache is not None and hasattr(self._cache, 'is_source_metadata_crawled'):
+            if self._cache.is_source_metadata_crawled(key, repo_name=repo_name):
+                return True
+            if not self._has_lazy_source_providers():
+                return False
+        clean_key = key[1:] if key.startswith('_') else key
+        meta_key = '_' + clean_key
+        if repo_name is not None:
+            repo_cache = self._source_repo_resources.get(repo_name)
+            return bool(repo_cache is not None and meta_key in repo_cache._data)
+        return any(
+            meta_key in repo_cache._data
+            for repo_cache in self._source_repo_resources.values() if repo_cache is not None
+        )
+
+    def get_release_resource(self, pkg_name, filepath='package.xml', require_crawled=False):
+        if require_crawled and not self._has_lazy_release_providers():
+            if not self.is_release_resource_crawled(filepath, pkg_name=pkg_name):
+                raise ResourceNotCrawledError(
+                    "Release resource '%s' was not crawled in the cache for '%s'" % (filepath, self._distribution_file.name)
+                )
+        if pkg_name not in self._release_resources:
+            self._release_resources[pkg_name] = {}
+        if filepath not in self._release_resources[pkg_name]:
+            if pkg_name not in self._distribution_file.release_packages:
+                return None
             pkg = self._distribution_file.release_packages[pkg_name]
             repo_name = pkg.repository_name
             repo = self._distribution_file.repositories[repo_name]
@@ -74,58 +181,261 @@ class Distribution(object):
             repo = repo.release_repository
             if repo.version is None:
                 return None
-            package_xml = None
-
+            content = None
             final_exception = None
             for mp in self._manifest_providers:
                 try:
-                    package_xml = mp(self._distribution_file.name, repo, pkg_name)
+                    content = call_release_provider(
+                        mp, self._distribution_file.name, repo, pkg_name, filepath
+                    )
                 except Exception as e:
                     # pass and try next manifest provider
-                    logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
+                    logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', str(mp)), e))
                     final_exception = e
                     continue
-
-                if package_xml is not None:
+                if content is not None:
                     break
 
-            if final_exception is not None and package_xml is None:
+            if final_exception is not None and content is None:
                 raise final_exception
 
-            self._release_package_xmls[pkg_name] = package_xml
-        return self._release_package_xmls[pkg_name]
+            self._release_resources[pkg_name][filepath] = content
+        return self._release_resources.get(pkg_name, {}).get(filepath, None)
 
-    def get_source_package_xml(self, pkg_name):
-        repo_name = self._distribution_file.source_packages[pkg_name].repository_name
-        repo_cache = self.get_source_repo_package_xmls(repo_name)
-        if repo_cache:
-            return repo_cache[pkg_name][1]
-        else:
+    def _supports_batched_release_fetch(self):
+        if not self._manifest_providers:
+            return False
+        for mp in self._manifest_providers:
+            if isinstance(mp, CachedManifestProvider):
+                if mp._has_unified_providers():
+                    return True
+            elif provider_for(mp) is not None:
+                return True
+        return False
+
+    def get_release_resources(self, pkg_name, filepaths=('package.xml',), require_crawled=False):
+        """Fetch multiple release resources for *pkg_name* in a single provider query when possible."""
+        ordered_fps = list(dict.fromkeys(filepaths))
+        if require_crawled and not self._has_lazy_release_providers():
+            for fp in ordered_fps:
+                if not self.is_release_resource_crawled(fp, pkg_name=pkg_name):
+                    raise ResourceNotCrawledError(
+                        "Release resource '%s' was not crawled in the cache for '%s'"
+                        % (fp, self._distribution_file.name)
+                    )
+        if not ordered_fps:
+            return {}
+        if pkg_name not in self._release_resources:
+            self._release_resources[pkg_name] = {}
+
+        missing = [fp for fp in ordered_fps if fp not in self._release_resources[pkg_name]]
+        if missing:
+            if pkg_name not in self._distribution_file.release_packages:
+                return {fp: self._release_resources[pkg_name].get(fp) for fp in ordered_fps}
+            pkg = self._distribution_file.release_packages[pkg_name]
+            repo_entry = self._distribution_file.repositories[pkg.repository_name]
+            repo = repo_entry.release_repository
+            if repo is None or repo.version is None:
+                return {fp: self._release_resources[pkg_name].get(fp) for fp in ordered_fps}
+
+            if len(self._manifest_providers) == 1 and isinstance(
+                self._manifest_providers[0], CachedManifestProvider
+            ):
+                fetched = self._manifest_providers[0].fetch_many(
+                    self._distribution_file.name, repo, pkg_name, missing
+                )
+                for fp in missing:
+                    self._release_resources[pkg_name][fp] = fetched.get(fp)
+            elif self._supports_batched_release_fetch():
+                resolved = {}
+                final_exception = None
+                for mp in self._manifest_providers:
+                    remaining = [fp for fp in missing if fp not in resolved]
+                    if not remaining:
+                        break
+                    if isinstance(mp, CachedManifestProvider):
+                        try:
+                            fetched = mp.fetch_many(
+                                self._distribution_file.name, repo, pkg_name, remaining
+                            )
+                        except Exception as e:
+                            logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', str(mp)), e))
+                            final_exception = e
+                            continue
+                        for fp in remaining:
+                            if fp in fetched:
+                                resolved[fp] = fetched[fp]
+                        continue
+                    unified = provider_for(mp)
+                    if unified is not None:
+                        try:
+                            unified.accepts(repo)
+                            query = ManifestQuery.for_release(repo, pkg_name, filepaths=tuple(remaining))
+                            res = execute_query(unified, query)
+                        except Exception as e:
+                            logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', str(mp)), e))
+                            final_exception = e
+                            continue
+                        pkg_manifest = res.packages.get(pkg_name)
+                        pkg_files = pkg_manifest.files if pkg_manifest is not None else {}
+                        for fp in remaining:
+                            if fp in res.errors:
+                                final_exception = res.errors[fp]
+                                continue
+                            resolved[fp] = pkg_files.get(fp)
+                    else:
+                        for fp in remaining:
+                            try:
+                                content = call_release_provider(
+                                    mp, self._distribution_file.name, repo, pkg_name, fp
+                                )
+                            except Exception as e:
+                                logger.debug(
+                                    'Skipped "%s()": %s' % (getattr(mp, '__name__', str(mp)), e)
+                                )
+                                final_exception = e
+                                continue
+                            if content is not None:
+                                resolved[fp] = content
+
+                if final_exception is not None and any(fp not in resolved for fp in missing):
+                    raise final_exception
+                for fp in missing:
+                    self._release_resources[pkg_name][fp] = resolved.get(fp)
+            else:
+                for fp in missing:
+                    self.get_release_resource(pkg_name, fp, require_crawled=require_crawled)
+
+        return {fp: self._release_resources.get(pkg_name, {}).get(fp) for fp in ordered_fps}
+
+    def get_release_package_xml(self, pkg_name):
+        return self.get_release_resource(pkg_name, 'package.xml')
+
+    def get_release_readme(self, pkg_name, require_crawled=False):
+        return self.get_release_resource(pkg_name, 'README.md', require_crawled=require_crawled)
+
+    def get_release_changelog(self, pkg_name, require_crawled=False):
+        return self.get_release_resource(pkg_name, 'CHANGELOG.rst', require_crawled=require_crawled)
+
+    def get_source_resource(self, pkg_name, filepath='package.xml', require_crawled=False):
+        if require_crawled and not self._has_lazy_source_providers():
+            if not self.is_source_resource_crawled(filepath, pkg_name=pkg_name):
+                raise ResourceNotCrawledError(
+                    "Source resource '%s' was not crawled in the cache for '%s'" % (filepath, self._distribution_file.name)
+                )
+        if pkg_name not in self._distribution_file.source_packages and self._has_lazy_source_providers():
+            inferred_repo = None
+            if pkg_name in self._distribution_file.release_packages:
+                inferred_repo = self._distribution_file.release_packages[pkg_name].repository_name
+            elif pkg_name in self._distribution_file.repositories:
+                inferred_repo = pkg_name
+            if inferred_repo is not None:
+                self.get_source_repo_resources(inferred_repo)
+        if pkg_name not in self._distribution_file.source_packages:
             return None
+        repo_name = self._distribution_file.source_packages[pkg_name].repository_name
+        repo_cache = self.get_source_repo_resources(repo_name)
+        if repo_cache is not None and pkg_name in repo_cache:
+            return repo_cache[pkg_name].get(filepath)
+        return None
+
+    def get_source_package_xml(self, pkg_name, require_crawled=False):
+        return self.get_source_resource(pkg_name, 'package.xml', require_crawled=require_crawled)
+
+    def get_source_readme(self, pkg_name, require_crawled=False):
+        return self.get_source_resource(pkg_name, 'README.md', require_crawled=require_crawled)
+
+    def get_source_changelog(self, pkg_name, require_crawled=False):
+        return self.get_source_resource(pkg_name, 'CHANGELOG.rst', require_crawled=require_crawled)
+
+    def get_source_launch_files(self, pkg_name, require_crawled=False):
+        return self.get_source_resource(pkg_name, 'launch_files', require_crawled=require_crawled)
+
+    def get_source_msg_files(self, pkg_name, require_crawled=False):
+        return self.get_source_resource(pkg_name, 'msg_files', require_crawled=require_crawled)
+
+    def get_source_srv_files(self, pkg_name, require_crawled=False):
+        return self.get_source_resource(pkg_name, 'srv_files', require_crawled=require_crawled)
+
+    def get_source_action_files(self, pkg_name, require_crawled=False):
+        return self.get_source_resource(pkg_name, 'action_files', require_crawled=require_crawled)
 
     def get_source_repo_package_xmls(self, repo_name):
-        if repo_name in self._source_repo_package_xmls:
-            return self._source_repo_package_xmls[repo_name]
-        else:
-            final_exception = None
-            for mp in self._source_manifest_providers:
-                try:
-                    repo_cache = mp(self.repositories[repo_name].source_repository)
-                except Exception as e:
-                    # pass and try next manifest provider
-                    logger.debug('Skipped "%s()": %s' % (mp.__name__, e))
-                    final_exception = e
-                    continue
+        return self.get_source_repo_resources(repo_name)
 
-                if repo_cache is not None:
-                    # Update map of package XMLs, and also list of known package names.
-                    self._source_repo_package_xmls[repo_name] = repo_cache
+    def get_source_repo_last_commit_time(self, repo_name, require_crawled=False):
+        return self.get_source_repo_metadata(repo_name, 'last_commit_time', require_crawled=require_crawled)
+
+    def get_source_repo_contributing(self, repo_name, require_crawled=False):
+        return self.get_source_repo_metadata(repo_name, 'contributing', require_crawled=require_crawled)
+
+    def get_source_repo_readme(self, repo_name, require_crawled=False):
+        return self.get_source_repo_metadata(repo_name, 'readme', require_crawled=require_crawled)
+
+    def get_source_repo_metadata(self, repo_name, key=None, require_crawled=False):
+        if repo_name not in self._distribution_file.repositories:
+            if repo_name in self._distribution_file.source_packages:
+                repo_name = self._distribution_file.source_packages[repo_name].repository_name
+            elif repo_name in self._distribution_file.release_packages:
+                repo_name = self._distribution_file.release_packages[repo_name].repository_name
+        if require_crawled and not self._has_lazy_source_providers():
+            if key is not None:
+                if not self.is_source_metadata_crawled(key, repo_name=repo_name):
+                    raise ResourceNotCrawledError(
+                        "Source repository metadata '%s' was not crawled in the cache for '%s'" % (key, self._distribution_file.name)
+                    )
+            elif self.cache_config is not None and not self.cache_config.enabled_source_metadata():
+                raise ResourceNotCrawledError(
+                    "Source repository metadata was not crawled in the cache for '%s'" % self._distribution_file.name
+                )
+        repo_cache = self.get_source_repo_resources(repo_name)
+        if repo_cache is None:
+            return None
+        if key is None:
+            return repo_cache.get_all_metadata()
+        return repo_cache.get_metadata(key)
+
+    def get_source_repo_resources(self, repo_name):
+        with self._lock:
+            if repo_name in self._source_repo_resources:
+                return self._source_repo_resources[repo_name]
+            if repo_name not in self._distribution_file.repositories:
+                return None
+            fallback_to_doc = (
+                self.cache_config.fallback_src_to_doc
+                if self.cache_config is not None
+                else True
+            )
+            repo_entry = self._distribution_file.repositories[repo_name]
+            repo = (
+                repo_entry.source_repository
+                if repo_entry.source_repository is not None or not fallback_to_doc
+                else getattr(repo_entry, 'doc_repository', None)
+            )
+            if repo is None:
+                return None
+            providers = list(self._source_manifest_providers)
+
+        final_exception = None
+        for mp in providers:
+            try:
+                repo_cache = call_source_provider(mp, repo)
+            except Exception as e:
+                # pass and try next manifest provider
+                logger.debug('Skipped "%s()": %s' % (getattr(mp, '__name__', str(mp)), e))
+                final_exception = e
+                continue
+            if repo_cache is not None:
+                # Update map of package XMLs, and also list of known package names.
+                with self._lock:
+                    self._source_repo_resources[repo_name] = repo_cache
                     for pkg_name in repo_cache:
                         if pkg_name[0] != '_':
                             self._distribution_file.source_packages[pkg_name] = Package(pkg_name, repo_name)
-                    return self._source_repo_package_xmls[repo_name]
+                    return self._source_repo_resources[repo_name]
+        if final_exception is not None:
+            raise final_exception
 
-            if final_exception is not None:
-                raise final_exception
-
+        with self._lock:
+            self._source_repo_resources[repo_name] = None
         return None

@@ -33,10 +33,23 @@
 
 import base64
 import os
-from urllib.request import urlopen, Request
-from urllib.error import URLError
+import socket
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote as urlquote
+from urllib.request import Request, urlopen
 
-from rosdistro import logger
+from rosdistro.cache_profiler import sanitize_url_for_trace, trace_operation
+from rosdistro.manifest_provider import (
+    PermanentManifestError,
+    SkipManifestProvider,
+    get_http_timeout,
+    is_unauthenticated_http_url,
+)
+from rosdistro.manifest_provider.engine import (
+    ManifestProvider,
+    ManifestSession,
+    fetch_release_file,
+)
 
 # This Bitbucket provider can optionally send basic auth to fetch from
 # private repositories if you supply the environment variables
@@ -49,30 +62,68 @@ BITBUCKET_USER = os.getenv('BITBUCKET_USER', None)
 BITBUCKET_PASSWORD = os.getenv('BITBUCKET_PASSWORD', None)
 
 
-def bitbucket_manifest_provider(_dist_name, repo, pkg_name):
+def _auth_request(url):
+    req = Request(url)
+    if BITBUCKET_USER and BITBUCKET_PASSWORD:
+        credential_pair = '%s:%s' % (BITBUCKET_USER, BITBUCKET_PASSWORD)
+        authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
+        req.add_header('Authorization', authheader)
+    return req
+
+
+class _BitbucketSession(ManifestSession):
+
+    def __init__(self, query):
+        self._query = query
+        self._server, self._path = query.repo.get_url_parts()
+        if query.ref_is_tag and not query.repo.has_remote_tag(query.ref):
+            raise PermanentManifestError('specified tag "%s" is not a git tag' % query.ref)
+
+    def read_file(self, path):
+        quoted_ref = urlquote(str(self._query.ref), safe='/')
+        url = 'https://bitbucket.org/%s/raw/%s/%s' % (self._path, quoted_ref, path)
+        try:
+            req = _auth_request(url)
+            with trace_operation('http:get', fetch_type='bitbucket', target=sanitize_url_for_trace(url)):
+                with urlopen(req, timeout=get_http_timeout()) as resp:
+                    return resp.read().decode('utf-8')
+        except HTTPError as e:
+            if e.code == 404:
+                return None
+            if e.code in (410, 451):
+                raise
+            raise RuntimeError('Failed to fetch "%s": %s' % (url, e)) from e
+        except (URLError, TimeoutError, socket.timeout) as e:
+            raise RuntimeError('Failed to fetch "%s": %s' % (url, e)) from e
+
+
+class BitbucketProvider(ManifestProvider):
+
+    name = 'bitbucket'
+
+    def accepts(self, repo):
+        if getattr(repo, 'type', 'git') != 'git':
+            raise SkipManifestProvider('Cannot handle non-git repository.')
+        server, _ = repo.get_url_parts()
+        if not server.endswith('bitbucket.org'):
+            raise SkipManifestProvider('Cannot handle non bitbucket url.')
+
+    def open(self, query):
+        return _BitbucketSession(query)
+
+    def is_permanent_error(self, err, repo):
+        return getattr(err, 'code', None) in (404, 410, 451) and is_unauthenticated_http_url(repo.url)
+
+    def missing_is_permanent(self, repo):
+        return is_unauthenticated_http_url(repo.url)
+
+
+BITBUCKET = BitbucketProvider()
+
+
+def bitbucket_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     assert repo.version
-    server, path = repo.get_url_parts()
+    return fetch_release_file(BITBUCKET, repo, pkg_name, filepath)
 
-    if not server.endswith('bitbucket.org'):
-        logger.debug('Skip non-bitbucket url "%s"' % repo.url)
-        raise RuntimeError('Cannot handle non bitbucket url.')
 
-    release_tag = repo.get_release_tag(pkg_name)
-
-    if not repo.has_remote_tag(release_tag):
-        raise RuntimeError('specified tag "%s" is not a git tag' % release_tag)
-
-    url = 'https://bitbucket.org/%s/raw/%s/package.xml' % (path, release_tag)
-    try:
-        logger.debug('Load package.xml file from url "%s"' % url)
-        req = Request(url)
-        if BITBUCKET_USER and BITBUCKET_PASSWORD:
-            logger.debug('- using http basic auth from supplied environment variables.')
-            credential_pair = '%s:%s' % (BITBUCKET_USER, BITBUCKET_PASSWORD)
-            authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
-            req.add_header('Authorization', authheader)
-        package_xml = urlopen(req).read().decode('utf-8')
-        return package_xml
-    except URLError as e:
-        logger.debug('- failed (%s)' % e)
-        raise RuntimeError()
+bitbucket_manifest_provider._unified_provider = BITBUCKET

@@ -35,6 +35,7 @@ import argparse
 import os
 import sys
 
+from rosdistro.common import path_to_url
 from rosdistro.verify import reformat_files
 from rosdistro.verify import verify_files_identical
 
@@ -57,7 +58,7 @@ def main():
     args = parse_args()
     index = args.index
     if os.path.isfile(index):
-        index = 'file://' + os.path.abspath(index)
+        index = path_to_url(index)
     if args.dry_run:
         success = verify_files_identical(index)
     else:

@@ -38,8 +38,6 @@ except ImportError:
     from io import BytesIO as StringIO
 import sys
 
-import yaml
-
 from . import _get_dist_file_data
 from . import logger
 
@@ -52,6 +50,7 @@ from .rosdistro import walks  # noqa
 
 from .doc_build_file import DocBuildFile
 from .doc_file import DocFile
+from .distribution_cache import load_cache_yaml
 
 from .loader import load_url
 from .manifest_provider.cache import CachedManifestProvider
@@ -120,7 +119,7 @@ def get_release_cache(index, dist_name):
         f.close()
     else:
         raise NotImplementedError('The url of the cache must end with either ".yaml" or ".yaml.gz"')
-    data = yaml.safe_load(yaml_str)
+    data = load_cache_yaml(yaml_str)
     return ReleaseCache(dist_name, data)
 
 

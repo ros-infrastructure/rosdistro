@@ -38,15 +38,15 @@ import sys
 
 from catkin_pkg.package import InvalidPackage, parse_package_string
 
-import yaml
-
 from . import _get_dist_file_data, get_cached_release, get_index, get_release_cache
+from .common import path_to_url
+from .distribution_cache import load_cache_yaml
 from .release_cache import ReleaseCache
 
 
 def generate_release_caches(index, dist_names=None, preclean=False, debug=False):
     if os.path.isfile(index):
-        index = 'file://' + os.path.abspath(index)
+        index = path_to_url(index)
     index = get_index(index)
 
     if not dist_names:
@@ -119,10 +119,10 @@ def _get_cached_release(index, dist_name, preclean=False):
                     yaml_str = f.read()
             elif os.path.exists('%s-cache.yaml' % dist_name):
                 print('- use local file "%s-cache.yaml"' % dist_name)
-                with open('%s-cache.yaml' % dist_name, 'r') as f:
+                with open('%s-cache.yaml' % dist_name, 'r', encoding='utf-8') as f:
                     yaml_str = f.read()
             if yaml_str is not None:
-                data = yaml.safe_load(yaml_str)
+                data = load_cache_yaml(yaml_str)
                 cache = ReleaseCache(dist_name, data)
             if not cache:
                 print('- trying to fetch cache')

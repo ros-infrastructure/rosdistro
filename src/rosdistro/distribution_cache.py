@@ -31,64 +31,1015 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import sys
+import copy
+import datetime
+import os
+import threading
+import time
+
+import yaml
 
 from . import logger
+from .cache_profiler import trace_operation, trace_span
 from .distribution_file import create_distribution_file
+from .fetch_reporter import report_fetch
 from .package import Package
+from .rate_limiter import (
+    HostRateLimitError,
+    _run_parallel,
+    extract_host,
+    run_git_with_backoff,
+)
 from .source_repository_cache import SourceRepositoryCache
-from .vcs import Git, ref_is_hash
+from .vcs import Git, normalize_git_url, ref_is_hash
+
+
+# Backwards compatibility for legacy ROS 1 distribution caches (notably
+# http://repositories.ros.org/rosdistro_cache/hydro-cache.yaml.gz) generated
+# with Python 2 and older PyYAML, which emitted explicit ``!!python/str`` and
+# ``!!python/unicode`` tags on some ``package.xml`` strings. Plain
+# ``yaml.safe_load()`` rejects those tags, causing cache loading to fall back
+# to a from-scratch build that cannot recover manifests for deleted or moved
+# EOL release repositories.
+#
+# Only those two string scalar tags are mapped to ``construct_yaml_str`` on a
+# dedicated SafeLoader subclass, so all other Python object tags remain
+# rejected and PyYAML's global SafeLoader is left unmodified.
+#
+# Removal criteria: this backwards compatibility can be removed once all
+# hosted/archived EOL ROS 1 cache files (such as hydro-cache.yaml.gz) have been
+# regenerated with Python 3 / yaml.SafeDumper, or are no longer referenced or
+# supported in rosdistro indexes.
+_BaseSafeLoader = getattr(yaml, 'CSafeLoader', yaml.SafeLoader)
+
+
+class _LegacyCacheSafeLoader(_BaseSafeLoader):
+    pass
+
+
+_LegacyCacheSafeLoader.add_constructor(
+    'tag:yaml.org,2002:python/str',
+    _LegacyCacheSafeLoader.construct_yaml_str,
+)
+_LegacyCacheSafeLoader.add_constructor(
+    'tag:yaml.org,2002:python/unicode',
+    _LegacyCacheSafeLoader.construct_yaml_str,
+)
+
+
+def load_cache_yaml(yaml_str):
+    """Safely parse a distribution or release cache YAML payload, tolerating
+    legacy Python 2 ``!!python/str`` and ``!!python/unicode`` string tags."""
+    return yaml.load(yaml_str, Loader=_LegacyCacheSafeLoader)
+
+
+def _resolve_git_remote_ref_details(url, version):
+    clone_url = normalize_git_url(url)
+    try:
+        result = run_git_with_backoff(
+            lambda: Git().command('ls-remote', clone_url, version),
+            url,
+            sleep_fn=time.sleep,
+        )
+    except HostRateLimitError as e:
+        return None, str(e), {'returncode': 1, 'output': '', 'error': str(e), 'rate_limited': True}
+    output = result.get('output') or ''
+    if result['returncode'] != 0 or not output.strip():
+        error_msg = result.get('error') if result['returncode'] != 0 else None
+        return None, error_msg, result
+    # Split by line first and take the last line, to squelch any preamble output, for example
+    # a known host key validation notice.
+    return output.rstrip().split('\n')[-1].split('\t')[0], None, result
+
+
+def resolve_git_remote_ref(url, version):
+    """Resolve a git remote branch or tag reference to its commit hash via ``git ls-remote``.
+
+    Returns ``(remote_hash, error_msg)`` where ``remote_hash`` is a non-empty string on success,
+    or ``None`` on failure.
+    """
+    remote_hash, error_msg, _ = _resolve_git_remote_ref_details(url, version)
+    return remote_hash, error_msg
+
+
+def _age_seconds(timestamp, now=None):
+    """Return elapsed seconds since *timestamp*, handling naive and timezone-aware datetimes."""
+    if now is None:
+        current = (
+            datetime.datetime.now(timestamp.tzinfo)
+            if timestamp.tzinfo is not None
+            else datetime.datetime.now()
+        )
+    elif (now.tzinfo is None) == (timestamp.tzinfo is None):
+        current = now
+    elif timestamp.tzinfo is not None:
+        current = now.astimezone(timestamp.tzinfo)
+    else:
+        current = now.astimezone().replace(tzinfo=None)
+    return (current - timestamp).total_seconds()
+
+
+class ResourceNotCrawledError(KeyError):
+    """Raised when a caller requests a resource or metadata key with require_crawled=True
+    that was not enabled/crawled in the cache configuration.
+    """
+
+
+NO_MAX_LINES_RESOURCES = ('package.xml', 'launch_files', 'msg_files', 'srv_files', 'action_files')
+
+
+def _normalize_resource_entry(name, raw_value, default_max_lines=100):
+    if isinstance(raw_value, bool):
+        entry = {'enabled': raw_value}
+        if name not in NO_MAX_LINES_RESOURCES and default_max_lines is not None:
+            entry['max_lines'] = default_max_lines
+        return entry
+    if isinstance(raw_value, int):
+        entry = {'enabled': True}
+        if name not in NO_MAX_LINES_RESOURCES:
+            entry['max_lines'] = raw_value
+        return entry
+    if isinstance(raw_value, dict):
+        entry = {'enabled': bool(raw_value.get('enabled', True))}
+        if 'max_lines' in raw_value:
+            entry['max_lines'] = int(raw_value['max_lines']) if raw_value['max_lines'] is not None else None
+        elif name not in NO_MAX_LINES_RESOURCES and default_max_lines is not None:
+            entry['max_lines'] = default_max_lines
+        return entry
+    raise ValueError("Invalid resource configuration for '%s': %r" % (name, raw_value))
+
+
+def _normalize_metadata_entry(name, raw_value):
+    if isinstance(raw_value, bool):
+        return {'enabled': raw_value}
+    if isinstance(raw_value, int):
+        return {'enabled': True, 'max_lines': raw_value}
+    if isinstance(raw_value, dict):
+        entry = {'enabled': bool(raw_value.get('enabled', True))}
+        if 'max_lines' in raw_value:
+            entry['max_lines'] = int(raw_value['max_lines']) if raw_value['max_lines'] is not None else None
+        return entry
+    raise ValueError("Invalid metadata configuration for '%s': %r" % (name, raw_value))
+
+
+class CacheConfig(dict):
+    """Configuration for rosdistro cache generation and self-documenting Cache Format 3."""
+
+    DEFAULT_DOC_MAX_LINES = 100
+    DEFAULT_FALLBACK_SRC_TO_DOC = True
+    DEFAULT_MIN_UPDATE_DELTA = 3600
+    DEFAULT_YAML_ALIAS_MIN_LENGTH = 300
+    DEFAULT_PACKAGE_RESOURCES = ('package.xml', 'README.md', 'CHANGELOG.rst')
+    DEFAULT_SOURCE_PACKAGE_RESOURCES = (
+        'package.xml',
+        'README.md',
+        'CHANGELOG.rst',
+        'launch_files',
+        'msg_files',
+        'srv_files',
+        'action_files',
+    )
+    DEFAULT_REPO_METADATA = (
+        'stars',
+        'description',
+        'tags',
+        'last_commit_time',
+        'contributing',
+        'readme',
+    )
+    VALID_CONFIG_KEYS = {
+        'release_package_resources',
+        'source_package_resources',
+        'source_repo_metadata',
+        'fallback_src_to_doc',
+        'min_update_delta',
+        'failure_retry_delta',
+        'yaml_alias_min_length',
+        'limit',
+    }
+
+    @classmethod
+    def _build_resource_map(cls, raw_map, force_package_xml=False, default_resources=None):
+        defaults = default_resources if default_resources is not None else cls.DEFAULT_PACKAGE_RESOURCES
+        res = {
+            name: _normalize_resource_entry(name, False, cls.DEFAULT_DOC_MAX_LINES)
+            for name in defaults
+        }
+        if isinstance(raw_map, (list, tuple, set)):
+            raw_map = {k: True for k in raw_map}
+        for k, v in (raw_map or {}).items():
+            res[k] = _normalize_resource_entry(k, v, cls.DEFAULT_DOC_MAX_LINES)
+        if force_package_xml or (any(v.get('enabled') for v in res.values()) and 'package.xml' not in (raw_map or {})):
+            res['package.xml'] = {'enabled': True}
+        return res
+
+    def __init__(self, data=None, strict=True):
+        super(CacheConfig, self).__init__()
+        raw = copy.deepcopy(data) if data else {}
+        if strict:
+            unknown_keys = set(raw.keys()) - self.VALID_CONFIG_KEYS
+            if unknown_keys:
+                raise ValueError("Unknown cache configuration keys: %s" % ', '.join(sorted(unknown_keys)))
+
+        rel_res = self._build_resource_map(
+            raw.get('release_package_resources'),
+            force_package_xml=True,
+            default_resources=self.DEFAULT_PACKAGE_RESOURCES,
+        )
+        src_res = self._build_resource_map(
+            raw.get('source_package_resources'),
+            force_package_xml=False,
+            default_resources=self.DEFAULT_SOURCE_PACKAGE_RESOURCES,
+        )
+
+        src_meta = {k: {'enabled': False} for k in self.DEFAULT_REPO_METADATA}
+        raw_meta = raw.get('source_repo_metadata', {})
+        if isinstance(raw_meta, (list, tuple, set)):
+            raw_meta = {k: True for k in raw_meta}
+        for k, v in (raw_meta or {}).items():
+            clean_key = k[1:] if k.startswith('_') else k
+            src_meta[clean_key] = _normalize_metadata_entry(clean_key, v)
+
+        self['release_package_resources'] = rel_res
+        self['source_package_resources'] = src_res
+        self['source_repo_metadata'] = src_meta
+        self['fallback_src_to_doc'] = bool(
+            raw.get('fallback_src_to_doc', self.DEFAULT_FALLBACK_SRC_TO_DOC)
+        )
+        min_update_delta_val = int(raw.get('min_update_delta', self.DEFAULT_MIN_UPDATE_DELTA))
+        if strict and min_update_delta_val < 0:
+            raise ValueError('min_update_delta must be >= 0, got %r' % (min_update_delta_val,))
+        self['min_update_delta'] = min_update_delta_val
+        failure_delta_val = raw.get('failure_retry_delta', None)
+        self['failure_retry_delta'] = (
+            int(failure_delta_val) if failure_delta_val is not None else None
+        )
+        self['yaml_alias_min_length'] = int(
+            raw.get('yaml_alias_min_length', self.DEFAULT_YAML_ALIAS_MIN_LENGTH)
+        )
+        limit_val = raw.get('limit', None)
+        self['limit'] = int(limit_val) if limit_val is not None else None
+
+    @property
+    def release_package_resources(self):
+        return self['release_package_resources']
+
+    @property
+    def source_package_resources(self):
+        return self['source_package_resources']
+
+    @property
+    def source_repo_metadata(self):
+        return self['source_repo_metadata']
+
+    @property
+    def fallback_src_to_doc(self):
+        return self['fallback_src_to_doc']
+
+    @property
+    def min_update_delta(self):
+        return self['min_update_delta']
+
+    @property
+    def failure_retry_delta(self):
+        if self['failure_retry_delta'] is not None:
+            return self['failure_retry_delta']
+        return self['min_update_delta']
+
+    @property
+    def yaml_alias_min_length(self):
+        return self['yaml_alias_min_length']
+
+    @property
+    def limit(self):
+        return self['limit']
+
+    def to_dict(self):
+        return copy.deepcopy(dict(self))
+
+    def is_release_resource_enabled(self, filepath):
+        return bool(self['release_package_resources'].get(filepath, {}).get('enabled', False))
+
+    def get_release_resource_max_lines(self, filepath, default=DEFAULT_DOC_MAX_LINES):
+        entry = self['release_package_resources'].get(filepath, {})
+        return entry.get('max_lines', default if filepath not in NO_MAX_LINES_RESOURCES else None)
+
+    def enabled_release_resources(self):
+        enabled = [k for k, v in self['release_package_resources'].items() if v.get('enabled')]
+        if 'package.xml' in enabled:
+            enabled.remove('package.xml')
+        return ['package.xml'] + enabled
+
+    def is_source_resource_enabled(self, filepath):
+        return bool(self['source_package_resources'].get(filepath, {}).get('enabled', False))
+
+    def get_source_resource_max_lines(self, filepath, default=DEFAULT_DOC_MAX_LINES):
+        entry = self['source_package_resources'].get(filepath, {})
+        return entry.get('max_lines', default if filepath not in NO_MAX_LINES_RESOURCES else None)
+
+    def enabled_source_resources(self):
+        enabled = [k for k, v in self['source_package_resources'].items() if v.get('enabled')]
+        if 'package.xml' in enabled:
+            enabled.remove('package.xml')
+            return ['package.xml'] + enabled
+        return enabled
+
+    def is_source_metadata_enabled(self, key):
+        clean_key = key[1:] if key.startswith('_') else key
+        return bool(self['source_repo_metadata'].get(clean_key, {}).get('enabled', False))
+
+    def get_source_metadata_max_lines(self, key, default=DEFAULT_DOC_MAX_LINES):
+        clean_key = key[1:] if key.startswith('_') else key
+        entry = self['source_repo_metadata'].get(clean_key, {})
+        return entry.get('max_lines', default)
+
+    def enabled_source_metadata(self):
+        return [k for k, v in self['source_repo_metadata'].items() if v.get('enabled')]
+
+    def has_any_source_enabled(self):
+        return bool(self.enabled_source_resources() or self.enabled_source_metadata())
+
+    @classmethod
+    def minimal(cls):
+        return cls()
+
+    @classmethod
+    def extended(cls):
+        return cls({
+            'release_package_resources': {k: True for k in cls.DEFAULT_PACKAGE_RESOURCES},
+            'source_package_resources': {k: True for k in cls.DEFAULT_SOURCE_PACKAGE_RESOURCES},
+            'source_repo_metadata': {k: True for k in cls.DEFAULT_REPO_METADATA},
+        })
+
+    @classmethod
+    def from_file(cls, path):
+        with open(path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f.read()) or {}
+        return cls(data)
+
+    @classmethod
+    def from_input(cls, config=None, include_source=False, limit=None, min_update_delta=None):
+        if config is None:
+            cfg = cls.extended() if include_source else cls.minimal()
+        elif isinstance(config, cls):
+            cfg = cls(config.to_dict())
+        elif isinstance(config, dict):
+            cfg = cls(config)
+        elif isinstance(config, str):
+            if config == 'minimal':
+                cfg = cls.minimal()
+            elif config == 'extended':
+                cfg = cls.extended()
+            else:
+                cfg = cls.from_file(config)
+        else:
+            raise TypeError("Unsupported cache config type: %r" % (type(config),))
+
+        if include_source and not cfg.is_source_resource_enabled('package.xml'):
+            cfg['source_package_resources']['package.xml'] = {'enabled': True}
+        if limit is not None:
+            cfg['limit'] = int(limit)
+        if min_update_delta is not None:
+            min_update_delta_val = int(min_update_delta)
+            if min_update_delta_val < 0:
+                raise ValueError('min_update_delta must be >= 0, got %r' % (min_update_delta,))
+            cfg['min_update_delta'] = min_update_delta_val
+        return cfg
+
+    @classmethod
+    def from_cache_data(cls, data, inbound_version=3):
+        if data and 'config' in data and isinstance(data['config'], dict):
+            return cls(data['config'], strict=False)
+        cfg = cls.minimal()
+        if not data:
+            return cfg
+        if inbound_version == 2:
+            if data.get('source_repo_package_xmls'):
+                cfg['source_package_resources']['package.xml'] = {'enabled': True}
+            return cfg
+        # Infer crawled resources from Format 3 data when 'config' was omitted
+        for pkg_data in (data.get('release_resources') or {}).values():
+            if isinstance(pkg_data, dict):
+                for res_key in pkg_data:
+                    if res_key != 'version':
+                        cfg['release_package_resources'][res_key] = _normalize_resource_entry(
+                            res_key, True, cls.DEFAULT_DOC_MAX_LINES
+                        )
+        for repo_data in (data.get('source_repo_resources') or {}).values():
+            raw_repo = repo_data._data if isinstance(repo_data, SourceRepositoryCache) else repo_data
+            if isinstance(raw_repo, dict):
+                for k, v in raw_repo.items():
+                    if k.startswith('_'):
+                        if k not in ('_ref', '_last_update_time'):
+                            cfg['source_repo_metadata'][k[1:]] = {'enabled': True}
+                    elif isinstance(v, dict):
+                        for res_key in v:
+                            if res_key != 'package_path':
+                                cfg['source_package_resources'][res_key] = _normalize_resource_entry(
+                                    res_key, True, cls.DEFAULT_DOC_MAX_LINES
+                                )
+                    elif isinstance(v, (list, tuple)):
+                        cfg['source_package_resources']['package.xml'] = {'enabled': True}
+        return cfg
+
+
+yaml.SafeDumper.add_representer(CacheConfig, yaml.SafeDumper.represent_dict)
+
+MINIMAL_CACHE_CONFIG = CacheConfig.minimal()
+DEFAULT_EXTENDED_CONFIG = CacheConfig.extended()
+
+
+class _ReleasePackageXmlsView(dict):
+    """Live dict view over DistributionCache.release_resources[pkg]['package.xml']
+    preserving backwards compatibility for callers accessing cache.release_package_xmls.
+    """
+
+    def __init__(self, release_resources):
+        self._release_resources = release_resources
+        super(_ReleasePackageXmlsView, self).__init__(
+            (pkg_name, pkg_data['package.xml'])
+            for pkg_name, pkg_data in release_resources.items()
+            if isinstance(pkg_data, dict) and pkg_data.get('package.xml') is not None
+        )
+
+    def __setitem__(self, pkg_name, xml_str):
+        super(_ReleasePackageXmlsView, self).__setitem__(pkg_name, xml_str)
+        if pkg_name not in self._release_resources or not isinstance(self._release_resources[pkg_name], dict):
+            self._release_resources[pkg_name] = {}
+        self._release_resources[pkg_name]['package.xml'] = xml_str
+
+    def __delitem__(self, pkg_name):
+        super(_ReleasePackageXmlsView, self).__delitem__(pkg_name)
+        if pkg_name in self._release_resources and 'package.xml' in self._release_resources[pkg_name]:
+            del self._release_resources[pkg_name]['package.xml']
+            if not self._release_resources[pkg_name]:
+                del self._release_resources[pkg_name]
+
+    def update(self, *args, **kwargs):
+        for k, v in dict(*args, **kwargs).items():
+            self[k] = v
+
+    def setdefault(self, key, default=None):
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    def pop(self, key, *args):
+        if key in self:
+            val = self[key]
+            del self[key]
+            return val
+        if args:
+            return args[0]
+        raise KeyError(key)
+
+    def popitem(self):
+        key, val = super(_ReleasePackageXmlsView, self).popitem()
+        if key in self._release_resources and 'package.xml' in self._release_resources[key]:
+            del self._release_resources[key]['package.xml']
+            if not self._release_resources[key]:
+                del self._release_resources[key]
+        return key, val
+
+    def clear(self):
+        for key in list(self.keys()):
+            del self[key]
+
+
+yaml.SafeDumper.add_representer(_ReleasePackageXmlsView, yaml.SafeDumper.represent_dict)
 
 
 class DistributionCache(object):
 
     _type = 'cache'
 
-    def __init__(self, name, data=None, distribution_file_data=None):
+    def __init__(self, name, data=None, distribution_file_data=None, config=None):
         assert data or distribution_file_data
+
+        inbound_version = 0
         if data:
             assert 'type' in data, "Expected file type is '%s'" % DistributionCache._type
             assert data['type'] == DistributionCache._type, "Expected file type is '%s', not '%s'" % (DistributionCache._type, data['type'])
 
             assert 'version' in data, "Distribution cache file for '%s' lacks required version information" % name
-            self.version = int(data['version'])
-            assert self.version > 1, "Unable to handle '%s' format version '%d' anymore, please update your '%s' file to version '2'" % (DistributionCache._type, self.version, DistributionCache._type)
-            if self.version != 2:
+            inbound_version = int(data['version'])
+            assert inbound_version > 1, "Unable to handle '%s' format version '%d' anymore, please update your '%s' file to version '2'" % (DistributionCache._type, inbound_version, DistributionCache._type)
+            if inbound_version not in [2, 3]:
                 from . import FormatVersionError
-                raise FormatVersionError(DistributionCache._type, self.version, [2], name)
+                raise FormatVersionError(DistributionCache._type, inbound_version, [2, 3], name)
 
             assert 'name' in data, "Distribution cache file for '%s' lacks required name information" % name
             assert data['name'] == name, "Distribution cache file for '%s' does not match the name '%s'" % (name, data['name'])
-        else:
-            self.version = 2
+
+        # All data will be migrated forward on import, any re-export defaults to version 3
+        self.version = 3
 
         self._distribution_file_data = data['distribution_file'] if data else distribution_file_data
         self.distribution_file = create_distribution_file(name, self._distribution_file_data)
-        self.release_package_xmls = data['release_package_xmls'] if data else {}
-        self.source_repo_package_xmls = {}
-        if data and 'source_repo_package_xmls' in data:
-            for repo_name, repo_data in data['source_repo_package_xmls'].items():
-                self.source_repo_package_xmls[repo_name] = SourceRepositoryCache(repo_data)
+
+        self.release_resources = (
+            copy.deepcopy(data['release_resources'])
+            if data and 'release_resources' in data else {}
+        )
+        raw_source_repos = (
+            copy.deepcopy(data['source_repo_resources'])
+            if data and 'source_repo_resources' in data else {}
+        )
+
+        # Format 2 backwards compatibility without mutating caller's input data dict
+        if inbound_version == 2 and data:
+            for pkg_name, pkg_xml in (data.get('release_package_xmls') or {}).items():
+                if pkg_name not in self.release_resources:
+                    self.release_resources[pkg_name] = {}
+                self.release_resources[pkg_name]['package.xml'] = pkg_xml
+                if 'version' not in self.release_resources[pkg_name] and pkg_name in self.distribution_file.release_packages:
+                    pkg = self.distribution_file.release_packages[pkg_name]
+                    rel_repo = self.distribution_file.repositories[pkg.repository_name].release_repository
+                    if rel_repo and rel_repo.version:
+                        self.release_resources[pkg_name]['version'] = rel_repo.version
+            for repo_name, repo_data in (data.get('source_repo_package_xmls') or {}).items():
+                if repo_name not in raw_source_repos:
+                    raw_source_repos[repo_name] = copy.deepcopy(repo_data)
+
+        self.source_repo_resources = {}
+        for repo_name, repo_data in raw_source_repos.items():
+            self.source_repo_resources[repo_name] = (
+                repo_data if isinstance(repo_data, SourceRepositoryCache)
+                else SourceRepositoryCache(repo_data)
+            )
+        self.failed_source_repos = (
+            copy.deepcopy(data['failed_source_repos'])
+            if data and isinstance(data.get('failed_source_repos'), dict) else {}
+        )
+        self._session_failed_source_repos = set()
+        self._lock = threading.RLock()
         self.distribution_file.source_packages = self.get_source_packages()
 
-    def get_data(self):
+        if config is not None:
+            self.config = CacheConfig.from_input(config)
+        elif data is not None:
+            self.config = CacheConfig.from_cache_data(data, inbound_version=inbound_version)
+        else:
+            self.config = CacheConfig.minimal()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('_lock', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._lock = threading.RLock()
+
+    @staticmethod
+    def _parse_timestamp(value):
+        if value is None:
+            return None
+        if isinstance(value, datetime.datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.datetime.fromisoformat(value)
+            except ValueError:
+                return None
+        return None
+
+    def record_source_repo_failure(
+        self, repo_name, url, version=None, error=None, permanent=False, failed_at=None
+    ):
+        """Record a failed source repository fetch for within-run and cross-run negative caching."""
+        ts = failed_at if failed_at is not None else datetime.datetime.now()
+        if isinstance(ts, datetime.datetime):
+            ts = ts.isoformat()
+        entry = {
+            'url': str(url),
+            'version': version,
+            'failed_at': ts,
+            'permanent': bool(permanent),
+        }
+        if error is not None:
+            error_str = str(error)
+            if len(error_str) > 500:
+                error_str = error_str[:497] + '...'
+            entry['error'] = error_str
+        with self._lock:
+            self._session_failed_source_repos.add((url, version))
+            self.failed_source_repos[repo_name] = entry
+
+    def clear_source_repo_failure(self, repo_name, url=None, version=None):
+        """Clear any cached failure record for *repo_name*."""
+        with self._lock:
+            self.failed_source_repos.pop(repo_name, None)
+            if url is not None:
+                self._session_failed_source_repos.discard((url, version))
+
+    def is_source_repo_failed(self, repo_name, url, version=None, now=None):
+        """Return True if *(repo_name, url, version)* failed earlier in this run or within TTL."""
+        with self._lock:
+            if (url, version) in self._session_failed_source_repos:
+                return True
+            entry = self.failed_source_repos.get(repo_name)
+        if not isinstance(entry, dict):
+            return False
+        if entry.get('url') != url or entry.get('version') != version:
+            return False
+        retry_delta = self.config.failure_retry_delta
+        if retry_delta <= 0:
+            return False
+        failed_at = self._parse_timestamp(entry.get('failed_at'))
+        if failed_at is None:
+            return False
+        return _age_seconds(failed_at, now=now) < retry_delta
+
+    @staticmethod
+    def _should_record_ls_remote_failure(source_repository, result):
+        """Return True when a failed git ls-remote should suppress retrying in the same run."""
+        if result.get('rate_limited'):
+            return False
+        if result.get('timed_out'):
+            return True
+        if result.get('returncode', 0) == 0 and not result.get('output'):
+            return True
+        try:
+            server, _ = source_repository.get_url_parts()
+        except RuntimeError:
+            return True
+        if server.endswith('github.com') and (
+            os.getenv('GITHUB_TOKEN') or (os.getenv('GITHUB_USER') and os.getenv('GITHUB_PASSWORD'))
+        ):
+            return False
+        gitlab_server = os.getenv('ROSDISTRO_GITLAB_SERVER')
+        if (
+            (server.endswith('gitlab.com') or (gitlab_server and server == gitlab_server))
+            and os.getenv('GITLAB_PRIVATE_TOKEN')
+        ):
+            return False
+        return True
+
+    def apply_config(self, new_config):
+        """Apply a new CacheConfig to an existing (warm) cache, invalidating or stripping
+        entries whose configuration changed so subsequent generation fetches newly enabled
+        or resized resources cleanly.
+        """
+        new_cfg = CacheConfig.from_input(new_config)
+        old_cfg = self.config
+
+        # Reconcile release_resources
+        enabled_rel = set(new_cfg.enabled_release_resources())
+        resized_rel = {
+            r for r in enabled_rel
+            if r not in NO_MAX_LINES_RESOURCES and (
+                not old_cfg.is_release_resource_enabled(r) or
+                old_cfg.get_release_resource_max_lines(r) != new_cfg.get_release_resource_max_lines(r)
+            )
+        }
+        for pkg_data in self.release_resources.values():
+            if not isinstance(pkg_data, dict):
+                continue
+            for key in list(pkg_data.keys()):
+                if key == 'version':
+                    continue
+                if key not in enabled_rel or key in resized_rel:
+                    del pkg_data[key]
+
+        # Reconcile source_repo_resources
+        if not new_cfg.has_any_source_enabled():
+            self.source_repo_resources = {}
+            self.failed_source_repos = {}
+        else:
+            enabled_src_res = set(new_cfg.enabled_source_resources())
+            enabled_src_meta = set(new_cfg.enabled_source_metadata())
+            need_recrawl = any(
+                not old_cfg.is_source_resource_enabled(r) or (
+                    r not in NO_MAX_LINES_RESOURCES and
+                    old_cfg.get_source_resource_max_lines(r) != new_cfg.get_source_resource_max_lines(r)
+                )
+                for r in enabled_src_res
+            ) or any(
+                not old_cfg.is_source_metadata_enabled(m)
+                or old_cfg.get_source_metadata_max_lines(m) != new_cfg.get_source_metadata_max_lines(m)
+                for m in enabled_src_meta
+            )
+            if not new_cfg.fallback_src_to_doc:
+                for repo_name in list(self.failed_source_repos.keys()):
+                    repo_entry = self.distribution_file.repositories.get(repo_name)
+                    if repo_entry is None or repo_entry.source_repository is None:
+                        del self.failed_source_repos[repo_name]
+            if need_recrawl:
+                self.source_repo_resources = {}
+            else:
+                if not new_cfg.fallback_src_to_doc:
+                    for repo_name in list(self.source_repo_resources.keys()):
+                        repo_entry = self.distribution_file.repositories.get(repo_name)
+                        if repo_entry is None or repo_entry.source_repository is None:
+                            del self.source_repo_resources[repo_name]
+                for repo_cache in self.source_repo_resources.values():
+                    for key in list(repo_cache._data.keys()):
+                        if key.startswith('_'):
+                            if key not in ('_ref', '_last_update_time') and key[1:] not in enabled_src_meta:
+                                del repo_cache._data[key]
+                        elif isinstance(repo_cache._data[key], dict):
+                            pkg_entry = repo_cache._data[key]
+                            for res_key in list(pkg_entry.keys()):
+                                if res_key != 'package_path' and res_key not in enabled_src_res:
+                                    del pkg_entry[res_key]
+
+        self.distribution_file.source_packages = self.get_source_packages()
+        self.config = new_cfg
+
+    @property
+    def release_package_xmls(self):
+        return _ReleasePackageXmlsView(self.release_resources)
+
+    @release_package_xmls.setter
+    def release_package_xmls(self, mapping):
+        for pkg_name in list(self.release_resources.keys()):
+            if 'package.xml' in self.release_resources[pkg_name]:
+                del self.release_resources[pkg_name]['package.xml']
+                if not self.release_resources[pkg_name]:
+                    del self.release_resources[pkg_name]
+        for pkg_name, xml_str in (mapping or {}).items():
+            if pkg_name not in self.release_resources:
+                self.release_resources[pkg_name] = {}
+            self.release_resources[pkg_name]['package.xml'] = xml_str
+
+    @property
+    def source_repo_package_xmls(self):
+        return self.source_repo_resources
+
+    @source_repo_package_xmls.setter
+    def source_repo_package_xmls(self, value):
+        converted = {}
+        for repo_name, repo_data in (value or {}).items():
+            converted[repo_name] = (
+                repo_data if isinstance(repo_data, SourceRepositoryCache)
+                else SourceRepositoryCache(repo_data)
+            )
+        self.source_repo_resources = converted
+        self.distribution_file.source_packages = self.get_source_packages()
+
+    def is_release_resource_crawled(self, filepath, pkg_name=None):
+        if pkg_name is not None:
+            pkg_data = self.release_resources.get(pkg_name)
+            if isinstance(pkg_data, dict):
+                return filepath in pkg_data
+            if pkg_name in self.distribution_file.release_packages:
+                pkg = self.distribution_file.release_packages[pkg_name]
+                rel_repo = self.distribution_file.repositories[pkg.repository_name].release_repository
+                if rel_repo is not None and rel_repo.version is not None:
+                    return False
+        if self.config.is_release_resource_enabled(filepath):
+            return True
+        return any(
+            isinstance(pkg_data, dict) and filepath in pkg_data
+            for pkg_data in self.release_resources.values()
+        )
+
+    def is_source_resource_crawled(self, filepath, pkg_name=None):
+        if pkg_name is not None:
+            for repo_cache in self.source_repo_resources.values():
+                if pkg_name in repo_cache:
+                    return filepath in repo_cache[pkg_name] or self.config.is_source_resource_enabled(filepath)
+            repo_name = None
+            if pkg_name in self.distribution_file.source_packages:
+                repo_name = self.distribution_file.source_packages[pkg_name].repository_name
+            elif pkg_name in self.distribution_file.release_packages:
+                repo_name = self.distribution_file.release_packages[pkg_name].repository_name
+            elif pkg_name in self.distribution_file.repositories:
+                repo_name = pkg_name
+            if repo_name is not None:
+                if repo_name in self.source_repo_resources:
+                    return self.config.is_source_resource_enabled(filepath)
+                repo = self.distribution_file.repositories.get(repo_name)
+                if repo is not None and (
+                    repo.source_repository is not None or
+                    (self.config.fallback_src_to_doc and repo.doc_repository is not None)
+                ):
+                    return False
+        if self.config.is_source_resource_enabled(filepath):
+            return True
+        for repo_cache in self.source_repo_resources.values():
+            for _, pkg_data in repo_cache.items():
+                if filepath in pkg_data:
+                    return True
+        return False
+
+    def is_source_metadata_crawled(self, key, repo_name=None):
+        clean_key = key[1:] if key.startswith('_') else key
+        meta_key = '_' + clean_key
+        if repo_name is not None:
+            if repo_name not in self.distribution_file.repositories:
+                if repo_name in self.distribution_file.source_packages:
+                    repo_name = self.distribution_file.source_packages[repo_name].repository_name
+                elif repo_name in self.distribution_file.release_packages:
+                    repo_name = self.distribution_file.release_packages[repo_name].repository_name
+            repo_cache = self.source_repo_resources.get(repo_name)
+            if repo_cache is not None:
+                return meta_key in repo_cache._data or self.config.is_source_metadata_enabled(clean_key)
+            repo = self.distribution_file.repositories.get(repo_name)
+            if repo is not None and (
+                repo.source_repository is not None or
+                (self.config.fallback_src_to_doc and repo.doc_repository is not None)
+            ):
+                return False
+        if self.config.is_source_metadata_enabled(clean_key):
+            return True
+        return any(meta_key in repo_cache._data for repo_cache in self.source_repo_resources.values())
+
+    def get_legacy_data(self, include_source=False):
         data = {}
         data['type'] = 'cache'
         data['version'] = 2
         data['name'] = self.distribution_file.name
         data['distribution_file'] = self._distribution_file_data
-        data['release_package_xmls'] = self.release_package_xmls
-        data['source_repo_package_xmls'] = dict([(repo_name, repo_cache.get_data())
-            for repo_name, repo_cache in self.source_repo_package_xmls.items()])
+        data['release_package_xmls'] = dict([
+            (pkg_name, pkg_data['package.xml'])
+            for pkg_name, pkg_data in self.release_resources.items()
+            if isinstance(pkg_data, dict) and pkg_data.get('package.xml') is not None
+        ])
+        if include_source:
+            data['source_repo_package_xmls'] = dict([
+                (repo_name, repo_cache.get_data(version=2))
+                for repo_name, repo_cache in self.source_repo_resources.items()
+            ])
+        else:
+            data['source_repo_package_xmls'] = {}
         return data
 
-    def update_distribution(self, distribution_file_data):
+    def get_data(self, version=3, include_source=False):
+        if version == 2:
+            return self.get_legacy_data(include_source=include_source)
+        data = {}
+        data['type'] = 'cache'
+        data['version'] = 3
+        data['name'] = self.distribution_file.name
+        data['config'] = self.config.to_dict()
+        data['distribution_file'] = self._distribution_file_data
+        data['release_resources'] = self.release_resources
+        data['source_repo_resources'] = dict([
+            (repo_name, repo_cache.get_data(version=3))
+            for repo_name, repo_cache in self.source_repo_resources.items()
+        ])
+        if self.failed_source_repos:
+            data['failed_source_repos'] = self.failed_source_repos
+        return data
+
+    def _validate_source_repo_entry(
+        self, dist_file, repo, min_update_delta, known_remote_refs,
+        ref_locks=None, graphql_resolved_keys=None,
+    ):
+        """Validate a single cached source repo entry; return ``(fetch_type, status)``."""
+        try:
+            repo_entry = dist_file.repositories[repo]
+            source_repository = (
+                repo_entry.source_repository
+                if repo_entry.source_repository is not None or not self.config.fallback_src_to_doc
+                else repo_entry.doc_repository
+            )
+            if not source_repository:
+                raise AttributeError()
+        except (KeyError, AttributeError):
+            logger.debug('Unable to find source repository info for repo "%s".' % repo)
+            with self._lock:
+                self.source_repo_resources.pop(repo, None)
+            return 'obsolete', 'dropped'
+
+        ref_key = (source_repository.url, source_repository.version)
+        with self._lock:
+            repo_cache = self.source_repo_resources.get(repo)
+            if repo_cache is None:
+                return 'obsolete', 'dropped'
+            can_use_known = (
+                known_remote_refs is not None
+                and source_repository.type == 'git'
+                and source_repository.version is not None
+            )
+            has_known_key = can_use_known and ref_key in known_remote_refs
+            known_hash = known_remote_refs.get(ref_key) if can_use_known else None
+            last_update_time = repo_cache.last_update_time()
+            cached_hash = repo_cache.ref()
+
+        if known_hash is None and min_update_delta > 0 and last_update_time is not None:
+            if _age_seconds(last_update_time) < min_update_delta:
+                return 'ttl_skip', 'kept'
+
+        if source_repository.version and ref_is_hash(source_repository.version):
+            source_hash, fetch_type = source_repository.version, 'pinned_hash'
+        elif known_hash is not None:
+            fetch_type = (
+                'github_graphql'
+                if graphql_resolved_keys and ref_key in graphql_resolved_keys
+                else 'known_remote_ref'
+            )
+            source_hash = known_hash
+        elif source_repository.type != 'git' or not source_repository.version:
+            logger.debug(
+                'Unable to check hash for non-git or unversioned repo "%s", dropping cache entry.' % repo
+            )
+            with self._lock:
+                self.source_repo_resources.pop(repo, None)
+            return 'non_git_or_unversioned', 'dropped'
+        elif has_known_key:
+            logger.warning(
+                "Unable to check hash for branch %s of %s, dropping cache entry." %
+                (source_repository.version, source_repository.url))
+            with self._lock:
+                self.source_repo_resources.pop(repo, None)
+            if self._should_record_ls_remote_failure(source_repository, {'returncode': 1}):
+                self.record_source_repo_failure(
+                    repo,
+                    source_repository.url,
+                    source_repository.version,
+                    error='Remote reference "%s" unavailable in %s' % (
+                        source_repository.version, source_repository.url
+                    ),
+                    permanent=False,
+                )
+            return 'known_remote_ref_failed', 'failed'
+        else:
+            ref_lock = None
+            if ref_locks is not None:
+                with self._lock:
+                    ref_lock = ref_locks.setdefault(ref_key, threading.Lock())
+            fetch_type, source_hash, error_msg, result = self._resolve_source_ref(
+                source_repository, ref_key, known_remote_refs, ref_lock,
+            )
+            if source_hash is None:
+                if error_msg:
+                    logger.warning(
+                        "Unable to check hash for branch %s of %s (%s), dropping cache entry." %
+                        (source_repository.version, source_repository.url, error_msg))
+                else:
+                    logger.warning(
+                        "Unable to check hash for branch %s of %s, dropping cache entry." %
+                        (source_repository.version, source_repository.url))
+                with self._lock:
+                    self.source_repo_resources.pop(repo, None)
+                if result is not None and self._should_record_ls_remote_failure(source_repository, result):
+                    is_missing_ref = (
+                        result.get('returncode') == 0 and not (result.get('output') or '').strip()
+                    )
+                    failure_err = error_msg or (
+                        'Remote reference "%s" not found in %s' % (
+                            source_repository.version, source_repository.url
+                        )
+                    )
+                    self.record_source_repo_failure(
+                        repo, source_repository.url, source_repository.version,
+                        error=failure_err, permanent=is_missing_ref,
+                    )
+                return fetch_type, 'failed'
+
+        if source_hash != cached_hash:
+            logger.debug('Repo "%s" has moved from %s to %s, dropping cache.' % (repo, cached_hash, source_hash))
+            with self._lock:
+                self.source_repo_resources.pop(repo, None)
+            return fetch_type, 'dropped'
+        if fetch_type in ('git_ls_remote', 'known_remote_ref', 'github_graphql'):
+            refreshed_at = (
+                datetime.datetime.now(last_update_time.tzinfo)
+                if last_update_time is not None and last_update_time.tzinfo is not None
+                else datetime.datetime.now()
+            )
+            with self._lock:
+                cached_entry = self.source_repo_resources.get(repo)
+                if cached_entry is not None:
+                    cached_entry.set_last_update_time(refreshed_at)
+        return fetch_type, 'kept'
+
+    def _resolve_source_ref(self, source_repository, ref_key, known_remote_refs, ref_lock):
+        """Resolve *ref_key* via git ls-remote, deduplicating concurrent checks on the same ref."""
+        def _do():
+            if known_remote_refs is not None:
+                with self._lock:
+                    if ref_key in known_remote_refs:
+                        existing = known_remote_refs[ref_key]
+                        if existing is not None:
+                            return 'known_remote_ref', existing, None, None
+                        return 'known_remote_ref_failed', None, None, {'returncode': 1}
+            resolved_hash, err_msg, res = _resolve_git_remote_ref_details(
+                source_repository.url, source_repository.version
+            )
+            if known_remote_refs is not None and not (res and res.get('rate_limited')):
+                with self._lock:
+                    known_remote_refs[ref_key] = resolved_hash
+            return 'git_ls_remote', resolved_hash, err_msg, res
+
+        if ref_lock is not None:
+            with ref_lock:
+                return _do()
+        return _do()
+
+    def update_distribution(self, distribution_file_data, known_remote_refs=None, max_workers=None):
+        dist_name = self.distribution_file.name
         # remove packages which are not in the old distribution file
         self._remove_obsolete_entries()
 
         # determine differences in doc and source entries
-        if len(distribution_file_data) == len(self._distribution_file_data):
-            for old_data, new_data in zip(self._distribution_file_data, distribution_file_data):
+        old_dist_file_data = self._distribution_file_data if isinstance(self._distribution_file_data, list) else [self._distribution_file_data]
+        new_dist_file_data = distribution_file_data if isinstance(distribution_file_data, list) else [distribution_file_data]
+        if len(new_dist_file_data) == len(old_dist_file_data):
+            for old_data, new_data in zip(old_dist_file_data, new_dist_file_data):
                 if not new_data['repositories']:
                     continue
                 for repo_name in sorted(new_data['repositories'].keys()):
@@ -100,55 +1051,195 @@ class DistributionCache(object):
                                 section in old_data['repositories'][repo_name] and \
                                 old_data['repositories'][repo_name][section] == repo[section]:
                             continue
-                        # section is either different or does't exist before
-                        print("  - updated '%s' entry for repository '%s'" % (section, repo_name))
+                        # section is either different or doesn't exist before
+                        logger.debug("Updated '%s' entry for repository '%s'" % (section, repo_name))
 
         self._distribution_file_data = distribution_file_data
-        dist_file = create_distribution_file(self.distribution_file.name, self._distribution_file_data)
+        dist_file = create_distribution_file(dist_name, self._distribution_file_data)
 
         # remove all release package xmls where the package version has changed.
-        print("- removing invalid release package cache entries.")
-        for pkg_name in sorted(dist_file.release_packages.keys()):
-            if pkg_name not in self.distribution_file.release_packages:
-                continue
-            if pkg_name in self.release_package_xmls and self._get_repo_info(dist_file, pkg_name) != self._get_repo_info(self.distribution_file, pkg_name):
-                logger.debug("Dropping release package XML cache for %s" % pkg_name)
-                del self.release_package_xmls[pkg_name]
+        rel_start = time.perf_counter()
+        total_release_pkgs = len(dist_file.release_packages.keys())
+        dropped_count = 0
+        new_count = 0
+        kept_count = 0
+        with trace_operation('cache:validate_release', target=dist_name):
+            for pkg_name in sorted(dist_file.release_packages.keys()):
+                if pkg_name not in self.distribution_file.release_packages:
+                    logger.debug("Skipping %s because not in the distro." % pkg_name)
+                    new_count += 1
+                    continue
+                if pkg_name in self.release_resources and self._get_repo_info(dist_file, pkg_name) != self._get_repo_info(self.distribution_file, pkg_name):
+                    logger.debug("Dropping release resources package cache for %s" % pkg_name)
+                    dropped_count += 1
+                    del self.release_resources[pkg_name]
+                elif pkg_name in self.release_resources:
+                    kept_count += 1
+        rel_dur = time.perf_counter() - rel_start
+        print(
+            '- validated %d release package cache entries (kept=%d, dropped=%d, new=%d, %.2fs)'
+            % (total_release_pkgs, kept_count, dropped_count, new_count, rel_dur),
+            flush=True,
+        )
+
+        # Prune obsolete, changed, or TTL-expired negative-cache entries before running ls-remote
+        if self.failed_source_repos:
+            with trace_operation('cache:prune_failed_source', target=dist_name):
+                now = datetime.datetime.now()
+                failure_retry_delta = self.config.failure_retry_delta
+                for repo in list(self.failed_source_repos.keys()):
+                    entry = self.failed_source_repos[repo]
+                    if not isinstance(entry, dict) or repo in self.source_repo_resources:
+                        del self.failed_source_repos[repo]
+                        continue
+                    try:
+                        repo_entry = dist_file.repositories[repo]
+                        source_repository = (
+                            repo_entry.source_repository
+                            if repo_entry.source_repository is not None or not self.config.fallback_src_to_doc
+                            else repo_entry.doc_repository
+                        )
+                        if not source_repository:
+                            raise AttributeError()
+                    except (KeyError, AttributeError):
+                        del self.failed_source_repos[repo]
+                        continue
+                    if (
+                        entry.get('url') != source_repository.url or
+                        entry.get('version') != source_repository.version
+                    ):
+                        logger.debug(
+                            'Clearing cached failure for repo "%s" because url/version changed.' % repo
+                        )
+                        del self.failed_source_repos[repo]
+                        continue
+                    if failure_retry_delta <= 0:
+                        del self.failed_source_repos[repo]
+                        continue
+                    failed_at = self._parse_timestamp(entry.get('failed_at'))
+                    if failed_at is None or _age_seconds(failed_at, now=now) >= failure_retry_delta:
+                        logger.debug(
+                            'Cached failure TTL expired for repo "%s", will retry.' % repo
+                        )
+                        del self.failed_source_repos[repo]
 
         # Remove all source package xmls where the devel branch is pointing to a different commit than
         # the one we have associated with our cache. This requires calling git ls-remote on all affected repos.
-        if self.source_repo_package_xmls:
-            print("- checking invalid source repo cache entries.")
-            for repo in sorted(self.source_repo_package_xmls.keys()):
-                sys.stdout.write('.')
-                sys.stdout.flush()
-                try:
-                    source_repository = dist_file.repositories[repo].source_repository
-                except (KeyError, AttributeError):
-                    # The repo entry has been dropped, or the source stanza from it has been dropped,
-                    # either way, remove the cache entries associated with this repository.
-                    logger.debug('Unable to find source repository info for repo "%s".' % repo)
-                    del self.source_repo_package_xmls[repo]
+        if self.source_repo_resources:
+            start_time = time.perf_counter()
+            repos_to_validate = sorted(self.source_repo_resources.keys())
+            total_source_repos = len(repos_to_validate)
+            dropped_count = 0
+            kept_count = 0
+            method_counts = {}
+            min_update_delta = self.config.min_update_delta
+            effective_workers = int(max_workers) if max_workers is not None else 1
+            if effective_workers < 1:
+                raise ValueError('max_workers must be >= 1, got %r' % (max_workers,))
+            ref_locks = {} if effective_workers > 1 else None
+            shared_refs = known_remote_refs if known_remote_refs is not None else ({} if effective_workers > 1 else None)
+            graphql_resolved_keys = None
+
+            github_ref_pairs = []
+            now_prescan = datetime.datetime.now()
+            for repo_name in repos_to_validate:
+                repo_entry = dist_file.repositories.get(repo_name)
+                if repo_entry is None:
                     continue
-
-                if ref_is_hash(source_repository.version):
-                    source_hash = source_repository.version
-                else:
-                    result = Git().command('ls-remote', source_repository.url, source_repository.version)
-                    if result['returncode'] != 0 or not result['output']:
-                        # Error checking remote, or unable to find remote reference. Drop the cache entry.
-                        logger.debug("Unable to check hash for branch %s of %s, dropping cache entry." % (source_repository.version, source_repository.url))
-                        del self.source_repo_package_xmls[repo]
+                source_repository = (
+                    repo_entry.source_repository
+                    if repo_entry.source_repository is not None or not self.config.fallback_src_to_doc
+                    else repo_entry.doc_repository
+                )
+                if (
+                    not source_repository
+                    or source_repository.type != 'git'
+                    or not source_repository.version
+                    or ref_is_hash(source_repository.version)
+                ):
+                    continue
+                ref_key = (source_repository.url, source_repository.version)
+                if shared_refs is not None and ref_key in shared_refs:
+                    continue
+                repo_cache = self.source_repo_resources.get(repo_name)
+                if repo_cache is None:
+                    continue
+                last_update_time = repo_cache.last_update_time()
+                if min_update_delta > 0 and last_update_time is not None:
+                    if _age_seconds(last_update_time, now=now_prescan) < min_update_delta:
                         continue
-                    # Split by line first and take the last line, to squelch any preamble output, for example
-                    # a known host key validation notice.
-                    source_hash = result['output'].split('\n')[-1].split('\t')[0]
+                if extract_host(source_repository.url) != 'github.com':
+                    continue
+                github_ref_pairs.append(ref_key)
 
-                cached_hash = self.source_repo_package_xmls[repo].ref()
-                if source_hash != cached_hash:
-                    logger.debug('Repo "%s" has moved from %s to %s, dropping cache.' % (repo, cached_hash, source_hash))
-                    del self.source_repo_package_xmls[repo]
-            sys.stdout.write('\n')
+            def _validate_one(repo_name):
+                with trace_span(
+                    'cache:validate_source_ref',
+                    kind='fetch',
+                    resource_type='cache:validate_source_ref',
+                    target=repo_name,
+                    dist_name=dist_name,
+                    deferred_label=True,
+                ) as vspan:
+                    fetch_type, status = self._validate_source_repo_entry(
+                        dist_file, repo_name, min_update_delta, shared_refs,
+                        ref_locks=ref_locks, graphql_resolved_keys=graphql_resolved_keys,
+                    )
+                    vspan.fetch_type = fetch_type
+                    vspan.status = status
+                report_fetch(
+                    'cache:validate_source_ref',
+                    repo_name,
+                    fetch_type,
+                    status=status,
+                    duration_s=vspan.duration_s,
+                    dist_name=dist_name,
+                    level='top',
+                )
+                return fetch_type, status
+
+            with trace_operation('cache:validate_source', target=dist_name):
+                if github_ref_pairs:
+                    from .manifest_provider import github as github_mp
+                    with trace_operation(
+                        'cache:github_graphql_batch', fetch_type='github_graphql', target=dist_name
+                    ) as gql_span:
+                        graphql_resolved = github_mp.resolve_github_remote_refs(
+                            github_ref_pairs, max_workers=effective_workers
+                        )
+                        gql_span.detail = 'requested=%d, resolved=%d' % (
+                            len(github_ref_pairs), len(graphql_resolved)
+                        )
+                    if graphql_resolved:
+                        if shared_refs is None:
+                            shared_refs = {}
+                        with self._lock:
+                            for ref_key, sha in graphql_resolved.items():
+                                if ref_key not in shared_refs:
+                                    shared_refs[ref_key] = sha
+                        graphql_resolved_keys = set(graphql_resolved.keys())
+
+                for fetch_type, status in _run_parallel(
+                    repos_to_validate, _validate_one, effective_workers, 'rosdistro-val'
+                ):
+                    method_counts[fetch_type] = method_counts.get(fetch_type, 0) + 1
+                    if status == 'kept':
+                        kept_count += 1
+                    else:
+                        dropped_count += 1
+            end_time = time.perf_counter()
+            method_summary = ', '.join('%s=%d' % (k, v) for k, v in sorted(method_counts.items()))
+            print(
+                '- validated %d source repository cache entries (kept=%d, dropped=%d%s, %.2fs)'
+                % (
+                    total_source_repos,
+                    kept_count,
+                    dropped_count,
+                    (', ' + method_summary) if method_summary else '',
+                    end_time - start_time,
+                ),
+                flush=True,
+            )
 
         self.distribution_file = dist_file
         self.distribution_file.source_packages = self.get_source_packages()
@@ -159,7 +1250,7 @@ class DistributionCache(object):
     def get_source_packages(self):
         """ Returns dictionary mapping source package names to Package() objects. """
         package_dict = {}
-        for source_repo_name, source_repo in self.source_repo_package_xmls.items():
+        for source_repo_name, source_repo in self.source_repo_resources.items():
             for pkg_name in source_repo:
                 package_dict[pkg_name] = Package(pkg_name, source_repo_name)
         return package_dict
@@ -170,7 +1261,7 @@ class DistributionCache(object):
         return (repo.version, repo.url)
 
     def _remove_obsolete_entries(self):
-        for pkg_name in list(self.release_package_xmls.keys()):
+        for pkg_name in list(self.release_resources.keys()):
             if pkg_name not in self.distribution_file.release_packages:
-                print('- REMOVE', pkg_name)
-                del self.release_package_xmls[pkg_name]
+                logger.debug('Removing obsolete release resources for "%s"' % pkg_name)
+                del self.release_resources[pkg_name]

@@ -13,9 +13,9 @@
 #    copyright notice, this list of conditions and the following
 #    disclaimer in the documentation and/or other materials provided
 #    with the distribution.
-#  * Neither the name of Canonical Ltd. nor the names of its
-#    contributors may be used to endorse or promote products derived
-#    from this software without specific prior written permission.
+#  * Neither the name of Canonical Ltd. nor the names of its contributors
+#    may be used to endorse or promote products derived from this software
+#    without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -34,82 +34,123 @@ import base64
 import io
 import os
 import tarfile
-import tempfile
-import urllib
-from urllib.request import urlopen, Request
+from urllib.request import Request, urlopen
 
-from catkin_pkg.package import InvalidPackage, parse_package_string
-from catkin_pkg.packages import find_package_paths
-
-from rosdistro.common import rmtree
-from rosdistro.source_repository_cache import SourceRepositoryCache
-from rosdistro import logger
+from rosdistro.cache_profiler import sanitize_url_for_trace, trace_operation
+from rosdistro.manifest_provider import (
+    PermanentManifestError,
+    SkipManifestProvider,
+    get_http_timeout,
+)
+from rosdistro.manifest_provider.engine import (
+    ManifestProvider,
+    ManifestSession,
+    fetch_release_file,
+    fetch_source_cache,
+)
+from rosdistro.manifest_provider.tree import DEFAULT_SOURCE_FILEPATHS
 
 _TAR_USER = os.getenv('TAR_USER', None)
 _TAR_PASSWORD = os.getenv('TAR_PASSWORD', None)
 
-def tar_manifest_provider(_dist_name, repo, pkg_name):
-    assert repo.type == 'tar'
 
-    subdir = repo.get_release_tag(pkg_name)
+def _normalize_tar_path(name):
+    path = name.replace('\\', '/')
+    while path.startswith('./'):
+        path = path[2:]
+    return path.lstrip('/')
 
-    request = Request(repo.url)
+
+def _build_tar_request(url):
+    request = Request(url)
     if _TAR_USER and _TAR_PASSWORD:
-        logger.debug('- using http basic auth from supplied environment variables.')
         credential_pair = '%s:%s' % (_TAR_USER, _TAR_PASSWORD)
         authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
         request.add_header('Authorization', authheader)
     elif _TAR_PASSWORD:
-        logger.debug('- using private token auth from supplied environment variables.')
         request.add_header('Private-Token', _TAR_PASSWORD)
-
-    response = urlopen(request)
-    with tarfile.open(fileobj=io.BytesIO(response.read())) as tar:
-        package_xml = tar.extractfile(subdir + '/package.xml').read()
-        return package_xml.decode('utf-8')
+    return request
 
 
-def tar_source_manifest_provider(repo):
-    assert repo.type == 'tar'
+class _TarSession(ManifestSession):
 
+    def __init__(self, query):
+        self._query = query
+        self._tar = None
+        self._members = None
+        self.ref = None
+
+    def _ensure_open(self):
+        if self._tar is not None:
+            return
+        repo = self._query.repo
+        request = _build_tar_request(repo.url)
+        with trace_operation('http:get', fetch_type='tar', target=sanitize_url_for_trace(repo.url)):
+            with urlopen(request, timeout=get_http_timeout()) as response:
+                tar_bytes = response.read()
+        self._tar = tarfile.open(fileobj=io.BytesIO(tar_bytes))
+        members = {}
+        for member in self._tar.getmembers():
+            if not member.isfile():
+                continue
+            norm = _normalize_tar_path(member.name)
+            if norm:
+                members[norm] = member
+        self._members = members
+
+    def list_files(self):
+        self._ensure_open()
+        return list(self._members.keys())
+
+    def read_file(self, path):
+        self._ensure_open()
+        norm = _normalize_tar_path(path)
+        member = self._members.get(norm)
+        if member is None:
+            return None
+        with trace_operation('tar:extract', fetch_type='tar', target=norm):
+            extracted = self._tar.extractfile(member)
+            if extracted is None:
+                return None
+            return extracted.read().decode('utf-8', errors='replace')
+
+    def close(self):
+        if self._tar is not None:
+            self._tar.close()
+            self._tar = None
+            self._members = None
+
+
+class TarProvider(ManifestProvider):
+
+    name = 'tar'
+
+    def accepts(self, repo):
+        if getattr(repo, 'type', 'git') != 'tar':
+            raise SkipManifestProvider('Cannot handle non-tar repository.')
+
+    def open(self, query):
+        return _TarSession(query)
+
+
+TAR = TarProvider()
+
+
+def tar_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
+    return fetch_release_file(TAR, repo, pkg_name, filepath)
+
+
+tar_manifest_provider._unified_provider = TAR
+
+
+def tar_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metadata=None):
+    TAR.accepts(repo)
     try:
-        request = Request(repo.url)
-        if _TAR_USER and _TAR_PASSWORD:
-            logger.debug('- using http basic auth from supplied environment variables.')
-            credential_pair = '%s:%s' % (_TAR_USER, _TAR_PASSWORD)
-            authheader = 'Basic %s' % base64.b64encode(credential_pair.encode()).decode()
-            request.add_header('Authorization', authheader)
-        elif _TAR_PASSWORD:
-            logger.debug('- using private token auth from supplied environment variables.')
-            request.add_header('Private-Token', _TAR_PASSWORD)
-
-        response = urlopen(request)
-        with tarfile.open(fileobj=io.BytesIO(response.read())) as tar:
-            tmpdir = tempfile.mkdtemp()
-            try:
-                # Extract just the package.xmls
-                tar.extractall(path=tmpdir, members=_package_xml_members(tar))
-                cache = SourceRepositoryCache.from_ref(None)
-
-                for package_path in find_package_paths(tmpdir):
-                    if package_path == '.':
-                        package_path = ''
-                    with open(os.path.join(tmpdir, package_path, 'package.xml'), 'r') as f:
-                        package_xml = f.read()
-                    try:
-                        name = parse_package_string(package_xml).name
-                    except InvalidPackage:
-                        raise RuntimeError('Unable to parse package.xml file found in %s' % repo.url)
-                    cache.add(name, package_path, package_xml)
-
-                return cache
-            finally:
-                rmtree(tmpdir)
+        return fetch_source_cache(TAR, repo, filepaths=filepaths, metadata=metadata)
+    except (SkipManifestProvider, PermanentManifestError):
+        raise
     except Exception as e:
-        raise RuntimeError('Unable to fetch source package.xml files: %s' % e)
+        raise RuntimeError('Unable to fetch source package.xml files: %s' % e) from e
 
 
-def _package_xml_members(tar):
-    for tarinfo in tar:
-        if os.path.basename(tarinfo.name) == "package.xml":
-            yield tarinfo
+tar_source_manifest_provider._unified_provider = TAR

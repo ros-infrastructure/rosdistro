@@ -41,6 +41,8 @@ try:
 except ImportError:
     import Queue as queue
 
+from .vcs import get_git_timeout, non_interactive_git_env
+
 CONCURRENT_DEFAULT = 16
 
 
@@ -79,18 +81,22 @@ def freeze_distribution_sources(dist, release_version=False, release_tag=False,
 
 
 # Get the repo commit information
-def _get_repo_info(url, retry=2, retry_period=1):
+def _get_repo_info(url, retry=2, retry_period=1, timeout=None):
     cmd = ['git', 'ls-remote', url]
+    effective_timeout = get_git_timeout('ls-remote') if timeout is None else (timeout if timeout > 0 else None)
     try:
-        return subprocess.check_output(cmd).decode().splitlines()
-    except subprocess.CalledProcessError as err:
+        return subprocess.check_output(
+            cmd, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            env=non_interactive_git_env(), timeout=effective_timeout).decode().splitlines()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as err:
         if not retry:
             raise
-        print('  Non-zero return code for: %s, retrying in %f seconds' %
-              (' '.join(cmd), retry_period), file=sys.stderr)
+        reason = 'Timed out' if isinstance(err, subprocess.TimeoutExpired) else 'Non-zero return code'
+        print('  %s for: %s, retrying in %f seconds' %
+              (reason, ' '.join(cmd), retry_period), file=sys.stderr)
         # brief delay incase its an intermittent issue with infrastructure
         time.sleep(retry_period)
-        return _get_repo_info(url, retry=retry - 1, retry_period=retry_period * 2)
+        return _get_repo_info(url, retry=retry - 1, retry_period=retry_period * 2, timeout=timeout)
 
 
 def _worker(work_queue):
@@ -109,9 +115,11 @@ def _worker(work_queue):
 
             work_queue.task_done()
 
-        except subprocess.CalledProcessError as e:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            stderr = e.stderr.decode('utf-8', errors='replace').rstrip() if getattr(e, 'stderr', None) else ''
+            error_msg = '%s: %s' % (e, stderr) if stderr else str(e)
             print("No information could be retrieved for repo %s with error: %s" %
-                  (source_repo.url, e), file=sys.stderr)
+                  (source_repo.url, error_msg), file=sys.stderr)
             work_queue.task_done()
 
         except queue.Empty:
