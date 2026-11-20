@@ -130,6 +130,15 @@ def test_cache_config_normalization_and_presets():
     forward_cfg = CacheConfig.from_cache_data({'config': {'future_key': 123, 'limit': 10}})
     assert forward_cfg.limit == 10
 
+    # min_update_delta override and validation
+    assert CacheConfig.from_input('extended', min_update_delta=86400).min_update_delta == 86400
+    assert CacheConfig.from_input({'min_update_delta': 1800}, min_update_delta=0).min_update_delta == 0
+    assert CacheConfig.from_input({'min_update_delta': 1800}, min_update_delta=0).failure_retry_delta == 0
+    with pytest.raises(ValueError, match='min_update_delta must be >= 0'):
+        CacheConfig({'min_update_delta': -1})
+    with pytest.raises(ValueError, match='min_update_delta must be >= 0'):
+        CacheConfig.from_input('extended', min_update_delta=-5)
+
 
 def test_distribution_cache_dual_v2_and_v3_export():
     dist_data = _load_foo_distribution_data()

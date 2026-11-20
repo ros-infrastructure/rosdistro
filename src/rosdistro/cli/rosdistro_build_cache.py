@@ -38,9 +38,20 @@ import sys
 
 from rosdistro import logger
 from rosdistro.cache_profiler import CacheProfiler, use_profiler
+from rosdistro.distribution_cache import CacheConfig
 from rosdistro.distribution_cache_generator import generate_distribution_caches
 
 logging.basicConfig(level=logging.INFO)
+
+
+def _non_negative_int(value):
+    try:
+        parsed = int(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
+    if parsed < 0:
+        raise argparse.ArgumentTypeError('must be >= 0 (got %d)' % parsed)
+    return parsed
 
 
 def parse_args(args=None):
@@ -77,6 +88,11 @@ def parse_args(args=None):
     add(
         '--limit', type=int, default=None,
         help='Limit the number of packages/repositories to scan (useful for testing)')
+    add(
+        '--min-update-delta', type=_non_negative_int, default=None, metavar='SECONDS',
+        help='Minimum age in seconds before cached source repositories are revalidated '
+             '(0 forces revalidation; overrides config value, default: %d)'
+             % CacheConfig.DEFAULT_MIN_UPDATE_DELTA)
     add(
         '--strict', action='store_true', default=False,
         help='Fail and skip writing a distribution cache if any release package.xml is missing, invalid, or has a version mismatch')
@@ -133,7 +149,8 @@ def main(args=None):
                         args.index, dist_names=args.dist_names, preclean=args.preclean,
                         ignore_local=args.ignore_local, include_source=args.include_source,
                         debug=args.debug, limit=args.limit, config=config,
-                        output_dir='.', strict=args.strict)
+                        output_dir='.', strict=args.strict,
+                        min_update_delta=args.min_update_delta)
                 except RuntimeError as e:
                     print(str(e), file=sys.stderr)
                     rc = 1

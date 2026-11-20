@@ -55,6 +55,7 @@ from .distribution_cache import (
     CacheConfig,
     DistributionCache,
     NO_MAX_LINES_RESOURCES,
+    _age_seconds,
     load_cache_yaml,
     resolve_git_remote_ref,
 )
@@ -436,13 +437,7 @@ class _NeighborCachePool(object):
                         continue
                     last_update_time = repo_cache.last_update_time()
                     if min_update_delta > 0 and last_update_time is not None:
-                        if last_update_time.tzinfo is not None:
-                            entry_age = (
-                                datetime.datetime.now(last_update_time.tzinfo) - last_update_time
-                            ).total_seconds()
-                        else:
-                            entry_age = (now - last_update_time).total_seconds()
-                        if entry_age < min_update_delta:
+                        if _age_seconds(last_update_time, now=now) < min_update_delta:
                             copied = _project_source_repo_cache(
                                 repo_cache, neighbor_cache.config, target_config, verified_now=False
                             )
@@ -806,7 +801,7 @@ def _noop_context():
 def generate_distribution_caches(
     index, dist_names=None, preclean=False,
     ignore_local=False, include_source=False, debug=False, limit=None, config=None,
-    output_dir=None, profiler=None, strict=False,
+    output_dir=None, profiler=None, strict=False, min_update_delta=None,
 ):
     active_profiler = profiler
     if active_profiler is None:
@@ -845,7 +840,8 @@ def generate_distribution_caches(
                             ignore_local=ignore_local, include_source=include_source,
                             debug=debug, limit=limit, config=config,
                             neighbor_caches=neighbor_pool, cache_dir=output_dir,
-                            profiler=active_profiler, strict=strict)
+                            profiler=active_profiler, strict=strict,
+                            min_update_delta=min_update_delta)
                     except RuntimeError as e:
                         errors.append(str(e))
                         continue
@@ -869,6 +865,7 @@ def generate_distribution_cache(
     index, dist_name, preclean=False, ignore_local=False,
     include_source=False, debug=False, limit=None, config=None,
     neighbor_caches=None, cache_dir=None, profiler=None, strict=False,
+    min_update_delta=None,
 ):
     active_profiler = profiler
     if active_profiler is None:
@@ -889,7 +886,7 @@ def generate_distribution_cache(
                 index, dist_name, preclean=preclean, ignore_local=ignore_local,
                 include_source=include_source, debug=debug, limit=limit, config=config,
                 neighbor_caches=neighbor_caches, cache_dir=cache_dir, active_profiler=active_profiler,
-                strict=strict,
+                strict=strict, min_update_delta=min_update_delta,
             )
 
 
@@ -897,8 +894,11 @@ def _generate_distribution_cache_impl(
     index, dist_name, preclean=False, ignore_local=False,
     include_source=False, debug=False, limit=None, config=None,
     neighbor_caches=None, cache_dir=None, active_profiler=None, strict=False,
+    min_update_delta=None,
 ):
-    cache_config = CacheConfig.from_input(config, include_source=include_source, limit=limit)
+    cache_config = CacheConfig.from_input(
+        config, include_source=include_source, limit=limit, min_update_delta=min_update_delta
+    )
     if preclean:
         neighbor_pool = None
     elif isinstance(neighbor_caches, _NeighborCachePool):

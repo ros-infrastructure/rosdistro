@@ -107,6 +107,23 @@ def resolve_git_remote_ref(url, version):
     return remote_hash, error_msg
 
 
+def _age_seconds(timestamp, now=None):
+    """Return elapsed seconds since *timestamp*, handling naive and timezone-aware datetimes."""
+    if now is None:
+        current = (
+            datetime.datetime.now(timestamp.tzinfo)
+            if timestamp.tzinfo is not None
+            else datetime.datetime.now()
+        )
+    elif (now.tzinfo is None) == (timestamp.tzinfo is None):
+        current = now
+    elif timestamp.tzinfo is not None:
+        current = now.astimezone(timestamp.tzinfo)
+    else:
+        current = now.astimezone().replace(tzinfo=None)
+    return (current - timestamp).total_seconds()
+
+
 class ResourceNotCrawledError(KeyError):
     """Raised when a caller requests a resource or metadata key with require_crawled=True
     that was not enabled/crawled in the cache configuration.
@@ -234,7 +251,10 @@ class CacheConfig(dict):
         self['fallback_src_to_doc'] = bool(
             raw.get('fallback_src_to_doc', self.DEFAULT_FALLBACK_SRC_TO_DOC)
         )
-        self['min_update_delta'] = int(raw.get('min_update_delta', self.DEFAULT_MIN_UPDATE_DELTA))
+        min_update_delta_val = int(raw.get('min_update_delta', self.DEFAULT_MIN_UPDATE_DELTA))
+        if strict and min_update_delta_val < 0:
+            raise ValueError('min_update_delta must be >= 0, got %r' % (min_update_delta_val,))
+        self['min_update_delta'] = min_update_delta_val
         failure_delta_val = raw.get('failure_retry_delta', None)
         self['failure_retry_delta'] = (
             int(failure_delta_val) if failure_delta_val is not None else None
@@ -343,7 +363,7 @@ class CacheConfig(dict):
         return cls(data)
 
     @classmethod
-    def from_input(cls, config=None, include_source=False, limit=None):
+    def from_input(cls, config=None, include_source=False, limit=None, min_update_delta=None):
         if config is None:
             cfg = cls.extended() if include_source else cls.minimal()
         elif isinstance(config, cls):
@@ -364,6 +384,11 @@ class CacheConfig(dict):
             cfg['source_package_resources']['package.xml'] = {'enabled': True}
         if limit is not None:
             cfg['limit'] = int(limit)
+        if min_update_delta is not None:
+            min_update_delta_val = int(min_update_delta)
+            if min_update_delta_val < 0:
+                raise ValueError('min_update_delta must be >= 0, got %r' % (min_update_delta,))
+            cfg['min_update_delta'] = min_update_delta_val
         return cfg
 
     @classmethod
@@ -596,8 +621,7 @@ class DistributionCache(object):
         failed_at = self._parse_timestamp(entry.get('failed_at'))
         if failed_at is None:
             return False
-        current_time = now if now is not None else datetime.datetime.now()
-        return (current_time - failed_at).total_seconds() < retry_delta
+        return _age_seconds(failed_at, now=now) < retry_delta
 
     @staticmethod
     def _should_record_ls_remote_failure(source_repository, result):
@@ -856,10 +880,8 @@ class DistributionCache(object):
         )
 
         last_update_time = self.source_repo_resources[repo].last_update_time()
-        if known_hash is None and last_update_time is not None:
-            now = datetime.datetime.now()
-            entry_age = (now - last_update_time).total_seconds()
-            if entry_age < min_update_delta:
+        if known_hash is None and min_update_delta > 0 and last_update_time is not None:
+            if _age_seconds(last_update_time) < min_update_delta:
                 return 'ttl_skip', 'kept'
 
         if source_repository.version and ref_is_hash(source_repository.version):
@@ -934,6 +956,13 @@ class DistributionCache(object):
             logger.debug('Repo "%s" has moved from %s to %s, dropping cache.' % (repo, cached_hash, source_hash))
             del self.source_repo_resources[repo]
             return fetch_type, 'dropped'
+        if fetch_type in ('git_ls_remote', 'known_remote_ref'):
+            refreshed_at = (
+                datetime.datetime.now(last_update_time.tzinfo)
+                if last_update_time is not None and last_update_time.tzinfo is not None
+                else datetime.datetime.now()
+            )
+            self.source_repo_resources[repo].set_last_update_time(refreshed_at)
         return fetch_type, 'kept'
 
     def update_distribution(self, distribution_file_data, known_remote_refs=None):
@@ -1023,7 +1052,7 @@ class DistributionCache(object):
                         del self.failed_source_repos[repo]
                         continue
                     failed_at = self._parse_timestamp(entry.get('failed_at'))
-                    if failed_at is None or (now - failed_at).total_seconds() >= failure_retry_delta:
+                    if failed_at is None or _age_seconds(failed_at, now=now) >= failure_retry_delta:
                         logger.debug(
                             'Cached failure TTL expired for repo "%s", will retry.' % repo
                         )
