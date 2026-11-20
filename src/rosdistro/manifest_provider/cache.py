@@ -47,6 +47,7 @@ from rosdistro.manifest_provider.chain import (
     format_attempts,
     provider_display_name,
     run_provider_chain,
+    select_relevant_attempts,
 )
 from rosdistro.manifest_provider.engine import (
     ManifestQuery,
@@ -66,6 +67,7 @@ from rosdistro.manifest_provider.tree import (  # noqa: F401
     list_local_repo_files,
     partition_repo_tree,
 )
+from rosdistro.rate_limiter import HostRateLimitError
 
 
 class _CachedProviderBase(object):
@@ -649,17 +651,24 @@ class CachedSourceManifestProvider(_CachedProviderBase):
                     logger.error(
                         'Failed to fetch source package.xml files for repo "%s" from "%s"' %
                         (repo.name, repo.url))
-                with self._lock:
-                    self._failed_source_keys.add(source_key)
-                if hasattr(self._distribution_cache, 'record_source_repo_failure'):
-                    summary = format_attempts(outcome.attempts, multiline=False) or None
-                    self._distribution_cache.record_source_repo_failure(
-                        repo.name,
-                        repo.url,
-                        repo.version,
-                        error=summary,
-                        permanent=outcome.permanent,
-                    )
+                relevant = select_relevant_attempts(outcome.attempts)
+                rate_limited = (
+                    not outcome.permanent
+                    and bool(relevant)
+                    and isinstance(relevant[-1][1], HostRateLimitError)
+                )
+                if not rate_limited:
+                    with self._lock:
+                        self._failed_source_keys.add(source_key)
+                    if hasattr(self._distribution_cache, 'record_source_repo_failure'):
+                        summary = format_attempts(outcome.attempts, multiline=False) or None
+                        self._distribution_cache.record_source_repo_failure(
+                            repo.name,
+                            repo.url,
+                            repo.version,
+                            error=summary,
+                            permanent=outcome.permanent,
+                        )
                 self._record_and_report('source:repo', repo.name, 'failed', 'failed', start_s)
                 return None
 

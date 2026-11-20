@@ -36,6 +36,7 @@ import json
 import os
 import re
 import socket
+import threading
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote as urlquote
@@ -43,7 +44,6 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from rosdistro import logger
-from rosdistro.cache_profiler import sanitize_url_for_trace, trace_operation
 from rosdistro.fetch_reporter import report_sub_fetch
 from rosdistro.manifest_provider import (
     PermanentManifestError,
@@ -60,10 +60,19 @@ from rosdistro.manifest_provider.engine import (
     fetch_source_cache,
 )
 from rosdistro.manifest_provider.tree import DEFAULT_SOURCE_FILEPATHS
+from rosdistro.rate_limiter import (
+    HostRateLimitError,
+    get_retry_max,
+    open_url_with_backoff,
+)
 
 GITLAB_PRIVATE_TOKEN = os.getenv('GITLAB_PRIVATE_TOKEN', None)
 ROSDISTRO_GITLAB_SERVER = os.getenv('ROSDISTRO_GITLAB_SERVER', None)
+ROSDISTRO_RETRY_MAX = None
 DEFAULT_GITLAB_PAGINATION_TIMEOUT = 120.0
+
+_rate_limit_warn_lock = threading.Lock()
+_rate_limit_warned = False
 
 GITLAB_REPO_METADATA_FIELDS = {
     'stars': 'star_count',
@@ -81,15 +90,59 @@ def _get_pagination_timeout():
     return timeout if timeout > 0 else None
 
 
+def _warn_rate_limit_once(msg):
+    global _rate_limit_warned
+    with _rate_limit_warn_lock:
+        if not _rate_limit_warned:
+            _rate_limit_warned = True
+            logger.warning(msg)
+            return
+    logger.debug(msg)
+
+
+def _is_gitlab_retryable(err, retry_after):
+    code = getattr(err, 'code', None)
+    if code == 429:
+        return True
+    if code == 503 and retry_after is not None:
+        return True
+    if code == 403:
+        if retry_after is not None:
+            return True
+        if get_http_header(getattr(err, 'headers', None), 'RateLimit-Remaining') == '0':
+            return True
+        lower_body = read_http_error_body(err).lower()
+        return 'rate limit' in lower_body or 'too many' in lower_body or 'abuse' in lower_body
+    return False
+
+
 @contextmanager
-def _gitlab_urlopen(url):
+def _gitlab_urlopen(url, deadline=None):
     req = Request(url)
     if GITLAB_PRIVATE_TOKEN:
         req.add_header('Private-Token', GITLAB_PRIVATE_TOKEN)
     logger.debug('Performing GitLab API query "%s"' % (url,))
-    with trace_operation('http:get', fetch_type='gitlab', target=sanitize_url_for_trace(url)):
-        with urlopen(req, timeout=get_http_timeout()) as res:
+    resp, slot_cm = open_url_with_backoff(
+        req,
+        urlopen_fn=urlopen,
+        fetch_type='gitlab',
+        timeout=get_http_timeout(),
+        retry_max=get_retry_max(ROSDISTRO_RETRY_MAX),
+        is_retryable_fn=_is_gitlab_retryable,
+        sleep_fn=time.sleep,
+        remaining_header='RateLimit-Remaining',
+        reset_header='RateLimit-Reset',
+        warn_fn=_warn_rate_limit_once,
+        rate_limit_hint='Set GITLAB_PRIVATE_TOKEN to increase the rate limit.',
+        provider_label='GitLab API',
+        deadline=deadline,
+    )
+    try:
+        with resp as res:
             yield res
+    finally:
+        if slot_cm is not None:
+            slot_cm.__exit__(None, None, None)
 
 
 def _gitlab_api_query(server, path, resource, attrs):
@@ -125,7 +178,7 @@ def _gitlab_paged_api_query(server, path, resource, attrs):
             logger.debug('Detected circular GitLab pagination link "%s", stopping.' % (url,))
             break
         seen_urls.add(url)
-        with _gitlab_urlopen(url) as res:
+        with _gitlab_urlopen(url, deadline=deadline) as res:
             for result in json.loads(res.read().decode('utf-8')):
                 yield result
 
@@ -241,7 +294,7 @@ class _GitLabSession(ManifestSession):
                                 continue
                             if (keys is None or meta_key in keys) and api_field in project_json:
                                 result[meta_key] = project_json[api_field]
-                except (URLError, TimeoutError, socket.timeout):
+                except (URLError, TimeoutError, socket.timeout, HostRateLimitError):
                     ctx.status = 'failed'
         return result
 

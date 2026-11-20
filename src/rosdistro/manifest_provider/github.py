@@ -32,18 +32,16 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import base64
-import datetime
-import email.utils
 import json
 import os
 import socket
+import threading
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote as urlquote
 from urllib.request import Request, urlopen
 
 from rosdistro import logger
-from rosdistro.cache_profiler import sanitize_url_for_trace, trace_operation
 from rosdistro.fetch_reporter import report_sub_fetch
 from rosdistro.manifest_provider import (
     PermanentManifestError,
@@ -60,6 +58,11 @@ from rosdistro.manifest_provider.engine import (
     fetch_source_cache,
 )
 from rosdistro.manifest_provider.tree import DEFAULT_SOURCE_FILEPATHS
+from rosdistro.rate_limiter import (
+    HostRateLimitError,
+    open_url_with_backoff,
+    parse_retry_after,
+)
 from rosdistro.vcs import ref_is_hash
 
 GITHUB_USER = os.getenv('GITHUB_USER', None)
@@ -68,6 +71,7 @@ GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', None)
 
 ROSDISTRO_RETRY_MAX = int(os.getenv('ROSDISTRO_RETRY_MAX', '30'))
 
+_rate_limit_warn_lock = threading.Lock()
 _rate_limit_warned = False
 
 GITHUB_REPO_METADATA_FIELDS = {
@@ -114,97 +118,44 @@ def _is_definitive_github_failure(err, repo_url):
 
 
 def _parse_retry_after(value):
-    if value is None:
-        return None
-    try:
-        return max(0.0, float(value))
-    except (TypeError, ValueError):
-        pass
-    try:
-        dt = email.utils.parsedate_to_datetime(value)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=datetime.timezone.utc)
-        return max(0.0, dt.timestamp() - time.time())
-    except (TypeError, ValueError, OverflowError):
-        return None
+    return parse_retry_after(value)
 
 
-def _compute_retry_delay(err, remaining_budget, backoff, url_str):
+def _warn_rate_limit_once(msg):
     global _rate_limit_warned
-    headers = getattr(err, 'headers', None)
+    with _rate_limit_warn_lock:
+        if not _rate_limit_warned:
+            _rate_limit_warned = True
+            logger.warning(msg)
+            return
+    logger.debug(msg)
 
-    retry_after = _parse_retry_after(_get_header(headers, 'Retry-After'))
-    if retry_after is not None:
-        if retry_after > remaining_budget:
-            logger.debug(
-                'Fetch of %s failed with %d (Retry-After=%.0fs exceeds remaining retry budget %.0fs); failing fast.'
-                % (url_str, err.code, retry_after, remaining_budget)
-            )
-            return None
-        return retry_after if retry_after > 0 else min(backoff, remaining_budget)
 
-    remaining = _get_header(headers, 'X-RateLimit-Remaining')
-    reset = _get_header(headers, 'X-RateLimit-Reset')
-    if remaining == '0':
-        if reset is not None:
-            try:
-                wait_until_reset = float(reset) - time.time()
-            except (TypeError, ValueError):
-                wait_until_reset = None
-            if wait_until_reset is not None:
-                if wait_until_reset > remaining_budget:
-                    msg = (
-                        'GitHub API rate limit exceeded for %s (resets in %.0f seconds, '
-                        'exceeds retry budget %.0f seconds); failing fast so fallback providers can run. '
-                        'Set GITHUB_TOKEN to increase the rate limit.'
-                        % (url_str, wait_until_reset, remaining_budget)
-                    )
-                    if not _rate_limit_warned:
-                        _rate_limit_warned = True
-                        logger.warning(msg)
-                    else:
-                        logger.debug(msg)
-                    return None
-                if wait_until_reset > 0:
-                    return min(wait_until_reset + 0.5, remaining_budget)
-        return min(backoff, remaining_budget)
-
+def _is_github_retryable(err, retry_after):
     if _is_permanent_403(err):
-        logger.debug(
-            'Fetch of %s failed with non-rate-limit 403 (X-RateLimit-Remaining=%s); failing fast.'
-            % (url_str, remaining)
-        )
-        return None
-
-    return min(backoff, remaining_budget)
+        return False
+    return err.code in (403, 429) or (err.code == 503 and retry_after is not None)
 
 
 def _get_url_contents(url):
-    timeout = get_http_timeout()
-    remaining_budget = max(0.0, float(ROSDISTRO_RETRY_MAX))
-    backoff = 1.0
-    url_str = sanitize_url_for_trace(getattr(url, 'full_url', url))
-    while True:
-        try:
-            with trace_operation('http:get', fetch_type='github', target=url_str):
-                with urlopen(url, timeout=timeout) as resp:
-                    return resp.read().decode('utf-8')
-        except HTTPError as e:
-            if e.code not in (403, 429):
-                raise
-            if remaining_budget <= 0:
-                raise
-            delay = _compute_retry_delay(e, remaining_budget, backoff, url_str)
-            if delay is None or delay <= 0:
-                raise
-            logger.debug(
-                'Fetch of %s failed with %d, assuming rate limit, retrying after period %.1f seconds.'
-                % (url_str, e.code, delay)
-            )
-            with trace_operation('http:rate_limit_sleep', fetch_type='github', target=url_str):
-                time.sleep(delay)
-            remaining_budget -= delay
-            backoff *= 1.5
+    resp, slot_cm = open_url_with_backoff(
+        url,
+        urlopen_fn=urlopen,
+        fetch_type='github',
+        timeout=get_http_timeout(),
+        retry_max=ROSDISTRO_RETRY_MAX,
+        is_retryable_fn=_is_github_retryable,
+        sleep_fn=time.sleep,
+        warn_fn=_warn_rate_limit_once,
+        rate_limit_hint='Set GITHUB_TOKEN to increase the rate limit.',
+        provider_label='GitHub API',
+    )
+    try:
+        with resp:
+            return resp.read().decode('utf-8')
+    finally:
+        if slot_cm is not None:
+            slot_cm.__exit__(None, None, None)
 
 
 def _build_github_api_request(url):
@@ -310,7 +261,7 @@ class _GitHubSession(ManifestSession):
                     for meta_key, api_field in GITHUB_REPO_METADATA_FIELDS.items():
                         if (keys is None or meta_key in keys) and api_field in repo_json:
                             result[meta_key] = repo_json[api_field]
-                except (URLError, TimeoutError, socket.timeout):
+                except (URLError, TimeoutError, socket.timeout, HostRateLimitError):
                     ctx.status = 'failed'
         return result
 

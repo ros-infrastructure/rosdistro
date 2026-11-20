@@ -32,6 +32,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import ExitStack
 import copy
 import datetime
 import os
@@ -45,6 +46,12 @@ from .cache_profiler import get_active_profiler, trace_operation, trace_span
 from .distribution_file import create_distribution_file
 from .fetch_reporter import get_active_reporter, report_fetch
 from .package import Package
+from .rate_limiter import (
+    HostRateLimitError,
+    get_active_rate_limiter,
+    run_git_with_backoff,
+    use_rate_limiter,
+)
 from .source_repository_cache import SourceRepositoryCache
 from .vcs import Git, normalize_git_url, ref_is_hash
 
@@ -89,7 +96,7 @@ def load_cache_yaml(yaml_str):
 
 
 def _run_parallel(items, fn, max_workers, thread_name_prefix='rosdistro'):
-    """Run *fn(item)* sequentially or in a ThreadPoolExecutor, propagating profiler/reporter context."""
+    """Run *fn(item)* sequentially or in a ThreadPoolExecutor, propagating profiler/reporter/limiter context."""
     if max_workers <= 1 or len(items) <= 1:
         for item in items:
             yield fn(item)
@@ -101,12 +108,15 @@ def _run_parallel(items, fn, max_workers, thread_name_prefix='rosdistro'):
         if ctx_owner is not None and hasattr(ctx_owner, 'capture_thread_context')
         else None
     )
+    active_limiter = get_active_rate_limiter()
 
     def _wrapped(item):
-        if ctx_owner is not None and captured is not None:
-            with ctx_owner.attach_thread_context(captured):
-                return fn(item)
-        return fn(item)
+        with ExitStack() as stack:
+            if active_limiter is not None:
+                stack.enter_context(use_rate_limiter(active_limiter))
+            if ctx_owner is not None and captured is not None:
+                stack.enter_context(ctx_owner.attach_thread_context(captured))
+            return fn(item)
 
     with ThreadPoolExecutor(
         max_workers=min(max_workers, len(items)), thread_name_prefix=thread_name_prefix
@@ -122,7 +132,15 @@ def _run_parallel(items, fn, max_workers, thread_name_prefix='rosdistro'):
 
 
 def _resolve_git_remote_ref_details(url, version):
-    result = Git().command('ls-remote', normalize_git_url(url), version)
+    clone_url = normalize_git_url(url)
+    try:
+        result = run_git_with_backoff(
+            lambda: Git().command('ls-remote', clone_url, version),
+            url,
+            sleep_fn=time.sleep,
+        )
+    except HostRateLimitError as e:
+        return None, str(e), {'returncode': 1, 'output': '', 'error': str(e), 'rate_limited': True}
     output = result.get('output') or ''
     if result['returncode'] != 0 or not output.strip():
         error_msg = result.get('error') if result['returncode'] != 0 else None
@@ -674,6 +692,8 @@ class DistributionCache(object):
     @staticmethod
     def _should_record_ls_remote_failure(source_repository, result):
         """Return True when a failed git ls-remote should suppress retrying in the same run."""
+        if result.get('rate_limited'):
+            return False
         if result.get('timed_out'):
             return True
         if result.get('returncode', 0) == 0 and not result.get('output'):

@@ -63,6 +63,7 @@ from .distribution_cache import (
 )
 from .fetch_reporter import format_phase_summary, report_fetch
 from .manifest_provider.cache import PACKAGE_ASSET_LIST_RESOURCES, sanitize_and_truncate_docs
+from .rate_limiter import RateLimiter, get_active_rate_limiter, use_rate_limiter
 from .source_repository_cache import SourceRepositoryCache
 from .vcs import ref_is_hash
 
@@ -940,7 +941,8 @@ def _fetch_source_repo(
 def generate_distribution_caches(
     index, dist_names=None, preclean=False,
     ignore_local=False, include_source=False, debug=False, limit=None, config=None,
-    output_dir=None, profiler=None, strict=False, min_update_delta=None, max_workers=None,
+    output_dir=None, profiler=None, strict=False, min_update_delta=None,
+    max_workers=None, rate_limiter=None,
 ):
     effective_workers = _resolve_max_workers(max_workers)
     active_profiler = profiler
@@ -950,8 +952,11 @@ def generate_distribution_caches(
         active_profiler = CacheProfiler(enabled=True, record_spans=False, debug=debug)
     elif debug:
         active_profiler.debug = True
+    active_limiter = rate_limiter if rate_limiter is not None else get_active_rate_limiter()
+    if active_limiter is None:
+        active_limiter = RateLimiter()
 
-    with use_profiler(active_profiler):
+    with use_profiler(active_profiler), use_rate_limiter(active_limiter):
         needs_root = not active_profiler.has_active_span()
         root_ctx = (
             active_profiler.span('build_cache', kind='root')
@@ -981,7 +986,8 @@ def generate_distribution_caches(
                             debug=debug, limit=limit, config=config,
                             neighbor_caches=neighbor_pool, cache_dir=output_dir,
                             profiler=active_profiler, strict=strict,
-                            min_update_delta=min_update_delta, max_workers=effective_workers)
+                            min_update_delta=min_update_delta, max_workers=effective_workers,
+                            rate_limiter=active_limiter)
                     except RuntimeError as e:
                         errors.append(str(e))
                         continue
@@ -1005,7 +1011,7 @@ def generate_distribution_cache(
     index, dist_name, preclean=False, ignore_local=False,
     include_source=False, debug=False, limit=None, config=None,
     neighbor_caches=None, cache_dir=None, profiler=None, strict=False,
-    min_update_delta=None, max_workers=None,
+    min_update_delta=None, max_workers=None, rate_limiter=None,
 ):
     effective_workers = _resolve_max_workers(max_workers)
     active_profiler = profiler
@@ -1015,8 +1021,11 @@ def generate_distribution_cache(
         active_profiler = CacheProfiler(enabled=True, record_spans=False, debug=debug)
     elif debug:
         active_profiler.debug = True
+    active_limiter = rate_limiter if rate_limiter is not None else get_active_rate_limiter()
+    if active_limiter is None:
+        active_limiter = RateLimiter()
 
-    with use_profiler(active_profiler):
+    with use_profiler(active_profiler), use_rate_limiter(active_limiter):
         needs_distro = active_profiler.current_dist_name() != dist_name
         distro_ctx = (
             active_profiler.span('distro:%s' % dist_name, kind='distro', dist_name=dist_name)

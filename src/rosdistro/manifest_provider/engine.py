@@ -46,6 +46,7 @@ from rosdistro.manifest_provider.tree import (
     ROOT_DOC_CANDIDATES,
     partition_repo_tree,
 )
+from rosdistro.rate_limiter import HostRateLimitError
 from rosdistro.source_repository_cache import SourceRepositoryCache
 
 
@@ -302,6 +303,9 @@ def _execute_tree_query(provider, session, query):
         with report_sub_fetch('%s:package.xml' % label, pkg_target, provider.name) as ctx:
             try:
                 package_xml = session.read_file(xml_rel)
+            except HostRateLimitError:
+                ctx.status = 'failed'
+                raise
             except Exception as e:
                 ctx.status = 'failed'
                 raise RuntimeError('Unable to fetch package.xml from %s: %s' % (repo.url, e)) from e
@@ -346,6 +350,9 @@ def _execute_tree_query(provider, session, query):
             with report_sub_fetch('%s:%s' % (label, filepath), pkg_label, provider.name) as ctx:
                 try:
                     contents = session.read_file(rel_target)
+                except HostRateLimitError:
+                    ctx.status = 'failed'
+                    raise
                 except Exception as e:
                     ctx.status = 'failed'
                     raise RuntimeError(

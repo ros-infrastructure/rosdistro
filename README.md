@@ -3,6 +3,14 @@ rosdistro
 
 Tools to work with catkinized rosdistro files.
 
+## Parallel Source Queries & Rate Limiting
+
+`rosdistro_build_cache` runs source repository queries and warm-cache `git ls-remote` ref validation concurrently across a thread pool (default `4` workers) while coordinating per-host pacing and rate-limit backoff across all worker threads:
+
+- **Worker count**: Set `-j N` / `--jobs N` (or `ROSDISTRO_SOURCE_WORKERS=N`; use `-j 1` for sequential execution).
+- **Per-host pacing & concurrency**: Remote hosts are paced independently (`api.github.com`, `raw.githubusercontent.com`, `gitlab.com`, and `git` operations each have their own bucket; local/loopback targets are unthrottled). Override via `ROSDISTRO_HOST_MIN_INTERVAL` (seconds) and `ROSDISTRO_MAX_CONCURRENT_PER_HOST`.
+- **Coordinated backoff**: HTTP `429`/`403` rate-limit headers (`Retry-After`, `X-RateLimit-Remaining`/`X-RateLimit-Reset`, `RateLimit-Remaining`/`RateLimit-Reset`) and `git` HTTP 429 responses trigger shared host backoff with adaptive AIMD pacing and bounded retries (`ROSDISTRO_RETRY_MAX`, default `30` seconds). Long rate-limit windows fail fast so fallback providers (e.g. `git`) can run without poisoning `failed_source_repos`.
+
 ## Profiling Cache Builds
 
 `rosdistro_build_cache` includes optional OpenTelemetry-backed profiling and tracing to break down where time is spent across phases, distributions, resource types, fetch mechanisms (including cache hits and `local_neighbor` reuse), provider sub-resources, and underlying I/O operations (`http:get`, `http:rate_limit_sleep`, `git:*`, `tar:extract`, `sanitize:*`, `yaml:*`, `gzip:*`).

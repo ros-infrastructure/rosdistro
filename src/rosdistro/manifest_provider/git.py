@@ -34,6 +34,7 @@
 from contextlib import contextmanager
 import os
 import tempfile
+import time
 
 from rosdistro import logger
 from rosdistro.cache_profiler import trace_operation
@@ -50,6 +51,7 @@ from rosdistro.manifest_provider.tree import (
     DEFAULT_SOURCE_FILEPATHS,
     list_local_repo_files,
 )
+from rosdistro.rate_limiter import HostRateLimitError, extract_host, run_git_with_backoff
 from rosdistro.vcs import Git, normalize_git_url, ref_is_hash
 
 
@@ -131,7 +133,7 @@ def git_manifest_provider(_dist_name, repo, pkg_name, filepath='package.xml'):
     GIT.accepts(repo)
     try:
         return fetch_release_file(GIT, repo, pkg_name, filepath)
-    except (SkipManifestProvider, PermanentManifestError):
+    except (SkipManifestProvider, PermanentManifestError, HostRateLimitError):
         raise
     except Exception as e:
         raise RuntimeError('Unable to fetch %s: %s' % (filepath, e)) from e
@@ -144,7 +146,7 @@ def git_source_manifest_provider(repo, filepaths=DEFAULT_SOURCE_FILEPATHS, metad
     GIT.accepts(repo)
     try:
         return fetch_source_cache(GIT, repo, filepaths=filepaths, metadata=metadata)
-    except (SkipManifestProvider, PermanentManifestError):
+    except (SkipManifestProvider, PermanentManifestError, HostRateLimitError):
         raise
     except Exception as e:
         raise RuntimeError('Unable to fetch source files: %s' % e) from e
@@ -158,6 +160,15 @@ def _temp_git_clone(url, ref):
     base = tempfile.mkdtemp('rosdistro')
     git = Git(cwd=base)
     clone_url = normalize_git_url(url)
+
+    def _reset_dir():
+        nonlocal base, git
+        if base and os.path.exists(base):
+            rmtree(base)
+        base = None
+        base = tempfile.mkdtemp('rosdistro')
+        git = Git(cwd=base)
+
     try:
         cloned = False
         if git.version_gte('1.8.0') and not ref_is_hash(ref):
@@ -167,25 +178,34 @@ def _temp_git_clone(url, ref):
             clone_args = ('clone', clone_url, '.', '--depth', '1')
             if ref:
                 clone_args += ('--branch', ref)
-            result = git.command(*clone_args)
+            result = run_git_with_backoff(
+                lambda: git.command(*clone_args), url, sleep_fn=time.sleep, on_retry=_reset_dir,
+            )
             cloned = result['returncode'] == 0
             if not cloned:
+                if result.get('rate_limited'):
+                    raise HostRateLimitError(
+                        extract_host(url) or url,
+                        0.0,
+                        reason='Could not clone repository "%s": %s' % (url, result.get('error') or 'rate limited'),
+                    )
                 logger.debug(
                     'Shallow clone of "%s" at reference "%s" failed, '
                     'falling back to full clone.' % (url, ref))
-                rmtree(base)
-                base = None
-                base = tempfile.mkdtemp('rosdistro')
-                git = Git(cwd=base)
+                _reset_dir()
 
         if not cloned:
             # Old git doesn't support cloning a tag/branch directly, or shallow clone failed,
             # so full clone and checkout.
-            result = git.command('clone', clone_url, '.')
+            result = run_git_with_backoff(
+                lambda: git.command('clone', clone_url, '.'), url, sleep_fn=time.sleep, on_retry=_reset_dir,
+            )
             if result['returncode'] != 0:
                 error_msg = 'Could not clone repository "%s"' % url
                 if result.get('error'):
                     error_msg += ': %s' % result['error']
+                if result.get('rate_limited'):
+                    raise HostRateLimitError(extract_host(url) or url, 0.0, reason=error_msg)
                 raise RuntimeError(error_msg)
 
             if ref:

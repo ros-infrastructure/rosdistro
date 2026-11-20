@@ -88,6 +88,12 @@ from .index import Index, _derive_extended_cache_url  # noqa
 from .loader import load_url  # noqa
 from .manifest_provider.cache import CachedManifestProvider, CachedSourceManifestProvider  # noqa
 from .manifest_provider.engine import ManifestProvider, ManifestQuery  # noqa
+from .rate_limiter import (  # noqa
+    HostRateLimitError,
+    RateLimiter,
+    get_active_rate_limiter,
+    use_rate_limiter,
+)
 
 
 # same version as in:

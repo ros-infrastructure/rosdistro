@@ -762,7 +762,8 @@ def test_gitlab_source_permanent_vs_transient_fallback():
             url = req.get_full_url() if hasattr(req, 'get_full_url') else str(req)
             raise _make_err(url)
 
-        with patch('rosdistro.manifest_provider.gitlab.urlopen', side_effect=fail_urlopen):
+        with patch.object(gitlab_mp, 'ROSDISTRO_RETRY_MAX', 0), \
+                patch('rosdistro.manifest_provider.gitlab.urlopen', side_effect=fail_urlopen):
             assert provider(repo) is expected_cache
         assert git_fallback.call_count == 1
 
